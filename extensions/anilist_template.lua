@@ -18,7 +18,11 @@ function fetchDiscoverFeed(page)
   local responseStr, err = MajikaHttp("POST", EXTENSION_CONFIG.baseURL, nil, "")
   
   if err ~= nil and err ~= "" then
-    return '{"error": "' .. err .. '"}'
+    -- Escape quotes and newlines from HTML error pages before sending as JSON string
+    local safeErr = string.gsub(err, '"', '\\"')
+    safeErr = string.gsub(safeErr, '\n', ' ')
+    safeErr = string.gsub(safeErr, '\r', ' ')
+    return '{"error": "' .. safeErr .. '"}'
   end
 
   -- For this template execution, Dart returns the exact exact MediaItem formatted JSON string directly

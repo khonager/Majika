@@ -51,7 +51,8 @@ class ExtensionRunner {
 
         if (res.statusCode != 200) {
           ls.pushString(""); // Empty response
-          ls.pushString("HTTP \${res.statusCode}: $responseBody");
+          final safeErr = jsonEncode("HTTP \${res.statusCode}: $responseBody");
+          ls.pushString(safeErr);
           return 2;
         }
 
