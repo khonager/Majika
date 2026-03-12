@@ -22,10 +22,10 @@
           cmdLineToolsVersion = "8.0";
           toolsVersion = "26.1.1";
           platformToolsVersion = "36.0.2";
-          buildToolsVersions = [ "30.0.3" "33.0.1" "34.0.0" ];
+          buildToolsVersions = [ "28.0.3" "30.0.3" "33.0.1" "34.0.0" ];
           includeEmulator = true;
           emulatorVersion = "36.4.2";
-          platformVersions = [ "28" "33" "34" ];
+          platformVersions = [ "28" "33" "34" "36" ];
           includeSources = false;
           includeSystemImages = false;
           systemImageTypes = [ "google_apis_playstore" ];
@@ -47,7 +47,6 @@
           buildInputs = with pkgs; [
             flutter
             jdk17
-            android-studio
             androidSdk
             
             # Additional tools often needed for Flutter/Linux compilation
