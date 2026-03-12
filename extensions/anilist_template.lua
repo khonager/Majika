@@ -10,7 +10,6 @@ local EXTENSION_CONFIG = {
   baseURL = "https://graphql.anilist.co"
 }
 
--- 1. FETCH DISCOVER FEED
 function fetchDiscoverFeed(page)
   page = page or 1
   
@@ -29,13 +28,9 @@ function fetchDiscoverFeed(page)
     }
   ]]
 
-  local queryEscaped = string.gsub(query, '\n', ' ')
-  queryEscaped = string.gsub(queryEscaped, '"', '\\"')
-  
-  local payload = '{"query": "' .. queryEscaped .. '", "variables": {"page": ' .. tostring(page) .. ', "perPage": 20}}'
-  
-  -- Call the Dart-injected MajikaHttp global function
-  local responseStr, err = MajikaHttp("POST", EXTENSION_CONFIG.baseURL, nil, payload)
+  -- Since we lack cjson in Lua, we will let Dart build the JSON body for GraphQL!
+  -- We pass the query as arg 4 (body), and the 'page' variable as arg 5.
+  local responseStr, err = MajikaHttp("POST", EXTENSION_CONFIG.baseURL, nil, query, tostring(page))
   
   if err ~= nil and err ~= "" then
     -- Escape quotes and newlines from HTML error pages before sending as JSON string

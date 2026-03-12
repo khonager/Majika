@@ -51,7 +51,7 @@ class ExtensionRunner {
 
         if (res.statusCode != 200) {
           ls.pushString(""); // Empty response
-          final safeErr = jsonEncode("HTTP \${res.statusCode}: $responseBody");
+          final safeErr = jsonEncode("HTTP ${res.statusCode}: $responseBody");
           ls.pushString(safeErr.substring(1, safeErr.length - 1)); // Strip the quotes added by jsonEncode so Lua can build its own json string
           return 2;
         }
