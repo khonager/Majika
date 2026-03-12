@@ -36,7 +36,7 @@ class MilkyGlassNav extends StatelessWidget {
               IconButton(
                 icon: const Icon(Icons.menu_rounded, color: Colors.white, size: 28),
                 onPressed: () {
-                  // Open Drawer/Menu logic
+                  Scaffold.of(context).openDrawer();
                 },
               ),
               const SizedBox(width: 8),

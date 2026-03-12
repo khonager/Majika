@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
+import 'package:majika/ui/reader/reader_screen.dart';
 
 class DiscoverFeed extends StatelessWidget {
   final ScrollController scrollController;
@@ -33,7 +34,16 @@ class DiscoverFeed extends StatelessWidget {
         itemBuilder: (context, index) {
           return ClipRRect(
             borderRadius: BorderRadius.circular(20),
-            child: Stack(
+            child: InkWell(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ReaderScreen(imageUrl: dummyImages[index]),
+                  ),
+                );
+              },
+              child: Stack(
               children: [
                 Image.network(
                   dummyImages[index],
@@ -79,6 +89,7 @@ class DiscoverFeed extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
             ),
           );
         },

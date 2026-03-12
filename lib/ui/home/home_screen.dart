@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:majika/ui/home/widgets/discover_feed.dart';
 import 'package:majika/ui/home/widgets/milky_glass_nav.dart';
 import 'package:majika/ui/home/widgets/profile_avatar.dart';
+import 'package:majika/ui/home/widgets/side_drawer.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -42,6 +43,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: const SideDrawer(),
       body: Stack(
         children: [
           // Background content
