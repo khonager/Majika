@@ -28,11 +28,11 @@ class _DiscoverFeedState extends State<DiscoverFeed> {
 
   Future<void> _loadAndRunExtension() async {
     try {
-      // Load the Javascript text from the asset file
-      final String extensionCode = await rootBundle.loadString('extensions/anilist_template.js');
+      // Load the Lua text from the asset file
+      final String extensionCode = await rootBundle.loadString('extensions/anilist_template.lua');
       
-      // Load it into the QuickJS engine
-      await _runner.loadExtension(extensionCode);
+      // Load it into the Lua engine
+      _runner.loadExtension(extensionCode);
       
       // Execute the fetchDiscoverFeed function!
       final items = await _runner.runFetchDiscoverFeed();
