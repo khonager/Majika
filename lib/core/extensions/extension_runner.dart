@@ -29,21 +29,38 @@ class ExtensionRunner {
     _ls.pushDartFunction((LuaState ls) {
       final String method = ls.checkString(1) ?? 'GET';
       final String url = ls.checkString(2) ?? '';
-      final String? body = ls.isString(4) ? ls.toStr(4) : null;
+      
+      // We accept the raw graphql query as argument 4, and the page variable as argument 5
+      final String? queryText = ls.isString(4) ? ls.toStr(4) : null;
+      final String? pageVar = ls.isString(5) ? ls.toStr(5) : null;
+      
+      String? bodyStr;
+      
+      if (queryText != null && queryText.isNotEmpty) {
+        // Build the GraphQL JSON body natively in Dart so it's guaranteed perfectly formatted
+        final Map<String, dynamic> graphqlBody = {
+          "query": queryText,
+        };
+        
+        if (pageVar != null) {
+          graphqlBody["variables"] = {
+            "page": int.tryParse(pageVar) ?? 1,
+            "perPage": 20
+          };
+        }
+        bodyStr = jsonEncode(graphqlBody);
+      }
 
       try {
         final uri = Uri.parse(url);
         
-        // Execute the HTTP Request synchronously using sync_http.
-        // This blocks the Dart isolate momentarily, but it's required because Dart C_Callback 
-        // to Lua cannot be an async Future natively without bridging isolates.
         final req = SyncHttpClient.postUrl(uri);
         req.headers.set('Content-Type', 'application/json');
         req.headers.set('Accept', 'application/json');
         req.headers.set('User-Agent', 'MajikaApp/1.0 (Linux; Desktop)');
         
-        if (body != null) {
-          req.write(body);
+        if (bodyStr != null) {
+          req.write(bodyStr);
         }
 
         final res = req.close();
