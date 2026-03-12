@@ -57,7 +57,7 @@ class ExtensionRunner {
         final req = SyncHttpClient.postUrl(uri);
         req.headers.set('Content-Type', 'application/json');
         req.headers.set('Accept', 'application/json');
-        req.headers.set('User-Agent', 'MajikaApp/1.0 (Linux; Desktop)');
+        req.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
         if (bodyStr != null) {
           final bodyBytes = utf8.encode(bodyStr);
