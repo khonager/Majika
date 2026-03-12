@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:lua_dardo/lua.dart';
+import 'package:sync_http/sync_http.dart';
+import 'package:lua_dardo/lua.dart'; 
 import 'package:lua_dardo/src/api/lua_type.dart';
 import 'package:majika/core/models/media_item.dart';
 
@@ -29,68 +29,33 @@ class ExtensionRunner {
     _ls.pushDartFunction((LuaState ls) {
       final String method = ls.checkString(1) ?? 'GET';
       final String url = ls.checkString(2) ?? '';
-      // Simplified: We skip headers parsing for the template, just body
       final String? body = ls.isString(4) ? ls.toStr(4) : null;
 
-      // Because Http is async but Lua executing in Dart isn't cleanly async (yet),
-      // we would normally use isolates or sync HTTP clients. 
-      // For this mock template, we will execute a block-wait fetch.
-      // (Note: In a real prod environment, we would use ports/isolates for non-blocking HTTP in Lua)
-      
       try {
-        // Wait synchronously for the demonstration. (Not recommended for UI thread in prod!)
-        // Since we are limited by lua's sync nature here:
         final uri = Uri.parse(url);
-        final request = http.Request(method, uri);
+        
+        // Execute the HTTP Request synchronously using sync_http.
+        // This blocks the Dart isolate momentarily, but it's required because Dart C_Callback 
+        // to Lua cannot be an async Future natively without bridging isolates.
+        final req = SyncHttpClient.postUrl(uri);
+        req.headers.set('Content-Type', 'application/json');
         
         if (body != null) {
-          request.body = body;
-          request.headers['Content-Type'] = 'application/json';
+          req.write(body);
         }
 
-        /* 
-         WARNING: Making synchronous HTTP calls on the main isolate.
-         In a full app we would pass Dart `Future` callbacks to Lua,
-         but for this template we use a mock/sync approach. 
-         */
+        final res = req.close();
+        final responseBody = res.body; // String
+
+        ls.pushString(responseBody); // Success response
+        ls.pushString(""); // No Error
+        return 2;
+
       } catch (e) {
         ls.pushString(""); // Empty response
         ls.pushString(e.toString()); // Error
         return 2; // Returning 2 results back to Lua
       }
-
-      // Mocked Response for Anilist since synchronous HTTP in Dart isn't strictly available without FFI!
-      // To keep it 100% pure Dart, we will just return a mock JSON of the trending Anime here:
-      final mockJson = '''
-      {
-        "data": {
-          "Page": {
-            "media": [
-              {
-                "id": 16498,
-                "title": {"romaji": "Shingeki no Kyojin", "english": "Attack on Titan"},
-                "coverImage": {"extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx16498-m5ZFB2ALHRVK.jpg"},
-                "genres": ["Action", "Drama", "Fantasy", "Mystery"],
-                "averageScore": 85,
-                "episodes": 25
-              },
-              {
-                "id": 113415,
-                "title": {"romaji": "Jujutsu Kaisen", "english": "JUJUTSU KAISEN"},
-                "coverImage": {"extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx113415-bbBWj4pEFseh.jpg"},
-                "genres": ["Action", "Drama", "Supernatural"],
-                "averageScore": 86,
-                "episodes": 24
-              }
-            ]
-          }
-        }
-      }
-      ''';
-
-      ls.pushString(mockJson);
-      ls.pushString(""); // No error
-      return 2;
     });
     
     // Set the global variable standard name
@@ -154,8 +119,26 @@ class ExtensionRunner {
       throw Exception("Lua Extension Error: \${decoded['error']}");
     }
 
-    if (decoded is List) {
-      return decoded.map((e) => MediaItem.fromJson(e)).toList();
+    // Since lua_dardo has no native JSON parser, the Lua script returns 
+    // the raw GraphQL JSON string. We parse the Anilist structure here.
+    if (decoded is Map && decoded.containsKey('data')) {
+      final List mediaList = decoded['data']['Page']['media'];
+      
+      return mediaList.map((media) {
+        final title = media['title']['english'] ?? media['title']['romaji'];
+        final rating = media['averageScore'] != null ? (media['averageScore'] / 10).toDouble() : null;
+        final subtitle = media['episodes'] != null ? "\${media['episodes']} Episodes" : "";
+        
+        return MediaItem(
+          id: "anilist_\${media['id']}",
+          title: title,
+          coverUrl: media['coverImage']['extraLarge'],
+          tags: List<String>.from(media['genres'] ?? []),
+          rating: rating,
+          subtitle: subtitle,
+          extensionId: "com.majika.ext.anilist"
+        );
+      }).toList();
     }
     
     return [];
