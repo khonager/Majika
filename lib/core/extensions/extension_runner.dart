@@ -125,7 +125,7 @@ class ExtensionRunner {
     final dynamic decoded = jsonDecode(resultString);
 
     if (decoded is Map && decoded.containsKey('error')) {
-      throw Exception("Lua Extension Error: \${decoded['error']}");
+      throw Exception("Lua Extension Error: ${decoded['error']}");
     }
 
     // Since lua_dardo has no native JSON parser, the Lua script returns 
