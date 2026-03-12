@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:lua_dardo/lua.dart';
+import 'package:lua_dardo/src/api/lua_type.dart';
 import 'package:majika/core/models/media_item.dart';
 
 class ExtensionRunner {
@@ -101,10 +102,20 @@ class ExtensionRunner {
   void loadExtension(String extensionCode) {
     if (!_isReady) _initEngine();
 
-    // Execute the loaded string
-    final result = _ls.doString(extensionCode);
-    if (result != 0) {
-      throw Exception("Lua Compilation Error: \${_ls.toStr(-1)}");
+    // Load the script text
+    final ThreadStatus loadStatus = _ls.loadString(extensionCode);
+    if (loadStatus != ThreadStatus.luaOk) {
+      final errorMsg = _ls.toStr(-1);
+      _ls.pop(1);
+      throw Exception("Lua Syntax Error: \$errorMsg");
+    }
+
+    // Execute the loaded script (pcall with 0 args, 1 return value expected: the table)
+    final ThreadStatus runStatus = _ls.pCall(0, 1, 0);
+    if (runStatus != ThreadStatus.luaOk) {
+      final errorMsg = _ls.toStr(-1);
+      _ls.pop(1);
+      throw Exception("Lua Runtime Error: \$errorMsg");
     }
     
     // The script `returns` a table at the end with its functions.
