@@ -60,6 +60,8 @@ class ExtensionRunner {
         req.headers.set('User-Agent', 'MajikaApp/1.0 (Linux; Desktop)');
         
         if (bodyStr != null) {
+          final bodyBytes = utf8.encode(bodyStr);
+          req.headers.set('Content-Length', bodyBytes.length.toString());
           req.write(bodyStr);
         }
 
