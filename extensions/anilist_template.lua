@@ -14,8 +14,28 @@ local EXTENSION_CONFIG = {
 function fetchDiscoverFeed(page)
   page = page or 1
   
+  local query = [[
+    query ($page: Int, $perPage: Int) {
+      Page (page: $page, perPage: $perPage) {
+        media (sort: TRENDING_DESC, type: ANIME, isAdult: false) {
+          id
+          title { romaji english }
+          coverImage { extraLarge }
+          genres
+          averageScore
+          episodes
+        }
+      }
+    }
+  ]]
+
+  local queryEscaped = string.gsub(query, '\n', ' ')
+  queryEscaped = string.gsub(queryEscaped, '"', '\\"')
+  
+  local payload = '{"query": "' .. queryEscaped .. '", "variables": {"page": ' .. tostring(page) .. ', "perPage": 20}}'
+  
   -- Call the Dart-injected MajikaHttp global function
-  local responseStr, err = MajikaHttp("POST", EXTENSION_CONFIG.baseURL, nil, "")
+  local responseStr, err = MajikaHttp("POST", EXTENSION_CONFIG.baseURL, nil, payload)
   
   if err ~= nil and err ~= "" then
     -- Escape quotes and newlines from HTML error pages before sending as JSON string
