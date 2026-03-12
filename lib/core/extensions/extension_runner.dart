@@ -39,13 +39,21 @@ class ExtensionRunner {
         // to Lua cannot be an async Future natively without bridging isolates.
         final req = SyncHttpClient.postUrl(uri);
         req.headers.set('Content-Type', 'application/json');
+        req.headers.set('Accept', 'application/json');
+        req.headers.set('User-Agent', 'MajikaApp/1.0 (Linux; Desktop)');
         
         if (body != null) {
           req.write(body);
         }
 
         final res = req.close();
-        final responseBody = res.body; // String
+        final responseBody = res.body ?? "";
+
+        if (res.statusCode != 200) {
+          ls.pushString(""); // Empty response
+          ls.pushString("HTTP \${res.statusCode}: $responseBody");
+          return 2;
+        }
 
         ls.pushString(responseBody); // Success response
         ls.pushString(""); // No Error
