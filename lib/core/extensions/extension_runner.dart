@@ -1,7 +1,7 @@
 import 'dart:convert';
-import 'package:sync_http/sync_http.dart';
 import 'package:lua_dardo/lua.dart'; 
 import 'package:lua_dardo/src/api/lua_type.dart';
+import 'package:http/http.dart' as http;
 import 'package:majika/core/models/media_item.dart';
 
 class ExtensionRunner {
@@ -25,7 +25,8 @@ class ExtensionRunner {
 
   /// Injects the `MajikaHttp` function into the global Lua instance so it can make network calls
   void _injectCoreApi() {
-    // Register the Dart closure into the Lua C-function format
+    // Return a request descriptor to Lua. The actual HTTPS request runs later
+    // in async Dart code so we can use a proper TLS-capable client.
     _ls.pushDartFunction((LuaState ls) {
       final String method = ls.checkString(1) ?? 'GET';
       final String url = ls.checkString(2) ?? '';
@@ -34,55 +35,27 @@ class ExtensionRunner {
       final String? queryText = ls.isString(4) ? ls.toStr(4) : null;
       final String? pageVar = ls.isString(5) ? ls.toStr(5) : null;
       
-      String? bodyStr;
-      
-      if (queryText != null && queryText.isNotEmpty) {
-        // Build the GraphQL JSON body natively in Dart so it's guaranteed perfectly formatted
-        final Map<String, dynamic> graphqlBody = {
-          "query": queryText,
-        };
-        
-        if (pageVar != null) {
-          graphqlBody["variables"] = {
-            "page": int.tryParse(pageVar) ?? 1,
-            "perPage": 20
-          };
-        }
-        bodyStr = jsonEncode(graphqlBody);
-      }
-
       try {
-        final uri = Uri.parse(url);
-        
-        final req = SyncHttpClient.postUrl(uri);
-        req.headers.set('Content-Type', 'application/json');
-        req.headers.set('Accept', 'application/json');
-        req.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        
-        if (bodyStr != null) {
-          final bodyBytes = utf8.encode(bodyStr);
-          req.headers.set('Content-Length', bodyBytes.length.toString());
-          req.write(bodyStr);
-        }
+        final Map<String, dynamic> requestSpec = {
+          'request': {
+            'method': method,
+            'url': url,
+            if (queryText != null && queryText.isNotEmpty) 'query': queryText,
+            if (pageVar != null)
+              'variables': {
+                'page': int.tryParse(pageVar) ?? 1,
+                'perPage': 20,
+              },
+          },
+        };
 
-        final res = req.close();
-        final responseBody = res.body ?? "";
-
-        if (res.statusCode != 200) {
-          ls.pushString(""); // Empty response
-          final safeErr = jsonEncode("HTTP ${res.statusCode}: $responseBody");
-          ls.pushString(safeErr.substring(1, safeErr.length - 1)); // Strip the quotes added by jsonEncode so Lua can build its own json string
-          return 2;
-        }
-
-        ls.pushString(responseBody); // Success response
-        ls.pushString(""); // No Error
+        ls.pushString(jsonEncode(requestSpec));
+        ls.pushString("");
         return 2;
-
       } catch (e) {
-        ls.pushString(""); // Empty response
-        ls.pushString(e.toString()); // Error
-        return 2; // Returning 2 results back to Lua
+        ls.pushString("");
+        ls.pushString(e.toString());
+        return 2;
       }
     });
     
@@ -147,10 +120,12 @@ class ExtensionRunner {
       throw Exception("Lua Extension Error: ${decoded['error']}");
     }
 
-    // Since lua_dardo has no native JSON parser, the Lua script returns 
-    // the raw GraphQL JSON string. We parse the Anilist structure here.
-    if (decoded is Map && decoded.containsKey('data')) {
-      final List mediaList = decoded['data']['Page']['media'];
+    final resolved = await _resolveExtensionResponse(decoded);
+
+    // Since lua_dardo has no native JSON parser, the Lua script returns either
+    // a request descriptor or the raw GraphQL JSON string.
+    if (resolved is Map && resolved.containsKey('data')) {
+      final List mediaList = resolved['data']['Page']['media'];
       
       return mediaList.map((media) {
         final title = media['title']['english'] ?? media['title']['romaji'];
@@ -170,6 +145,52 @@ class ExtensionRunner {
     }
     
     return [];
+  }
+
+  Future<dynamic> _resolveExtensionResponse(dynamic decoded) async {
+    if (decoded is! Map || !decoded.containsKey('request')) {
+      return decoded;
+    }
+
+    final dynamic rawRequest = decoded['request'];
+    if (rawRequest is! Map) {
+      throw Exception('Lua Extension Error: Invalid request descriptor');
+    }
+
+    final String method = (rawRequest['method'] as String? ?? 'GET').toUpperCase();
+    final String? url = rawRequest['url'] as String?;
+    if (url == null || url.isEmpty) {
+      throw Exception('Lua Extension Error: Missing request URL');
+    }
+
+    final Uri uri = Uri.parse(url);
+    final Map<String, dynamic> body = {
+      if (rawRequest['query'] != null) 'query': rawRequest['query'],
+      if (rawRequest['variables'] != null) 'variables': rawRequest['variables'],
+    };
+
+    late final http.Response response;
+    switch (method) {
+      case 'POST':
+        response = await http.post(
+          uri,
+          headers: const {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'User-Agent': 'Majika/1.0',
+          },
+          body: jsonEncode(body),
+        );
+        break;
+      default:
+        throw Exception('Lua Extension Error: Unsupported HTTP method $method');
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Lua Extension Error: HTTP ${response.statusCode}: ${response.body}');
+    }
+
+    return jsonDecode(response.body);
   }
 
   void dispose() {
