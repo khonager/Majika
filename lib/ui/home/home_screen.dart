@@ -3,6 +3,7 @@ import 'package:majika/ui/home/widgets/discover_feed.dart';
 import 'package:majika/ui/home/widgets/milky_glass_nav.dart';
 import 'package:majika/ui/home/widgets/profile_avatar.dart';
 import 'package:majika/ui/home/widgets/side_drawer.dart';
+import 'package:majika/ui/shared/app_feedback.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -12,6 +13,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final ScrollController _scrollController = ScrollController();
   bool _isNavVisible = true;
   double _lastScrollOffset = 0;
@@ -43,12 +45,13 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: _scaffoldKey,
       drawer: const SideDrawer(),
       body: Stack(
         children: [
           // Background content
           DiscoverFeed(scrollController: _scrollController),
-          
+
           // Floating Milky Nav
           AnimatedPositioned(
             duration: const Duration(milliseconds: 300),
@@ -56,16 +59,22 @@ class _HomeScreenState extends State<HomeScreen> {
             top: _isNavVisible ? 50 : -100, // Hide upwards
             left: 20,
             right: 80, // Leave room for avatar
-            child: const MilkyGlassNav(),
+            child: MilkyGlassNav(
+              onMenuTap: () => _scaffoldKey.currentState?.openDrawer(),
+              onSearchTap: () => showFeatureComingSoon(context, 'Search'),
+              onFilterTap: () => showFeatureComingSoon(context, 'Feed filters'),
+            ),
           ),
-          
+
           // Floating Profile Avatar (Always visible or animate similarly)
           AnimatedPositioned(
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeInOut,
             top: _isNavVisible ? 50 : -100,
             right: 20,
-            child: const ProfileAvatar(),
+            child: ProfileAvatar(
+              onTap: () => showFeatureComingSoon(context, 'Account'),
+            ),
           ),
         ],
       ),
