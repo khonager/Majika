@@ -37,6 +37,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   TasteProfile? _profile;
   List<MediaItem> _candidates = [];
+  List<String> _serviceTags = [];
   List<Recommendation> _recommendations = [];
   RecommendationQuery _recommendationQuery = const RecommendationQuery();
   String? _error;
@@ -71,8 +72,12 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      final library = await _mediaService.fetchUserLibrary(userName);
-      final candidates = await _mediaService.fetchRecommendationCandidates();
+      final libraryFuture = _mediaService.fetchUserLibrary(userName);
+      final candidatesFuture = _mediaService.fetchRecommendationCandidates();
+      final serviceTagsFuture = _mediaService.fetchAvailableTags();
+      final library = await libraryFuture;
+      final candidates = await candidatesFuture;
+      final serviceTags = await serviceTagsFuture;
       final profile = _tasteEngine.buildProfile(userName, library);
       final recommendations = _tasteEngine.rankCandidates(profile, candidates);
 
@@ -80,6 +85,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _profile = profile;
         _candidates = candidates;
+        _serviceTags = serviceTags;
         _recommendations = recommendations;
         _recommendationQuery = const RecommendationQuery();
         _adultCandidatesLoaded = false;
@@ -94,20 +100,51 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _updateRecommendationQuery(RecommendationQuery query) async {
+  void _signOut() {
+    setState(() {
+      _profile = null;
+      _candidates = [];
+      _serviceTags = [];
+      _recommendations = [];
+      _recommendationQuery = const RecommendationQuery();
+      _error = null;
+      _isLoading = false;
+      _isRefreshingRecommendations = false;
+      _adultCandidatesLoaded = false;
+      _userNameController.clear();
+    });
+  }
+
+  void _switchUser() {
+    final previousUser = _profile?.userName ?? _userNameController.text.trim();
+    _signOut();
+    _userNameController.text = previousUser;
+  }
+
+  Future<void> _updateRecommendationQuery(RecommendationQuery rawQuery) async {
     final profile = _profile;
     if (profile == null) return;
 
     setState(() {
-      _recommendationQuery = query;
+      _recommendationQuery = rawQuery;
       _isRefreshingRecommendations = true;
     });
 
-    var candidates = _candidates;
-    final needsAdultCandidates =
-        (query.includeAdult || query.infersAdult) && !_adultCandidatesLoaded;
-
     try {
+      final query = await _aiService.interpretRecommendationRequest(
+        rawQuery,
+        availableTags: _availableTags,
+      );
+      var candidates = _candidates;
+      final needsAdultCandidates =
+          (query.includeAdult || query.infersAdult) && !_adultCandidatesLoaded;
+
+      if (query.isActive) {
+        final searchedCandidates = await _mediaService
+            .searchRecommendationCandidates(query);
+        candidates = _dedupeCandidates([...searchedCandidates, ...candidates]);
+      }
+
       if (needsAdultCandidates) {
         final adultCandidates = await _mediaService
             .fetchRecommendationCandidates(includeAdult: true);
@@ -122,6 +159,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (!mounted) return;
       setState(() {
+        _recommendationQuery = query;
         _candidates = candidates;
         _recommendations = recommendations;
         _adultCandidatesLoaded = _adultCandidatesLoaded || needsAdultCandidates;
@@ -167,6 +205,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 aiService: _aiService,
                 userNameController: _userNameController,
                 onImport: _importAniListProfile,
+                onSignOut: _signOut,
+                onSwitchUser: _switchUser,
                 query: _recommendationQuery,
                 isRefreshingRecommendations: _isRefreshingRecommendations,
                 availableTags: _availableTags,
@@ -230,7 +270,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final entries = counts.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
-    return entries.map((entry) => entry.key).take(18).toList();
+    return {
+      ...RecommendationQuery.browsableTags,
+      ..._serviceTags,
+      ...entries.map((entry) => entry.key),
+    }.toList();
   }
 
   List<MediaItem> _dedupeCandidates(List<MediaItem> candidates) {
@@ -250,6 +294,8 @@ class _ContentShell extends StatelessWidget {
   final LocalAiService aiService;
   final TextEditingController userNameController;
   final VoidCallback onImport;
+  final VoidCallback onSignOut;
+  final VoidCallback onSwitchUser;
   final RecommendationQuery query;
   final bool isRefreshingRecommendations;
   final List<String> availableTags;
@@ -263,6 +309,8 @@ class _ContentShell extends StatelessWidget {
     required this.aiService,
     required this.userNameController,
     required this.onImport,
+    required this.onSignOut,
+    required this.onSwitchUser,
     required this.query,
     required this.isRefreshingRecommendations,
     required this.availableTags,
@@ -302,7 +350,12 @@ class _ContentShell extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _ShellHeader(profile: profile, aiService: aiService),
+                    _ShellHeader(
+                      profile: profile,
+                      aiService: aiService,
+                      onSignOut: onSignOut,
+                      onSwitchUser: onSwitchUser,
+                    ),
                     const SizedBox(height: 14),
                     Expanded(
                       child: AnimatedSwitcher(
@@ -340,45 +393,83 @@ class _ContentShell extends StatelessWidget {
 class _ShellHeader extends StatelessWidget {
   final TasteProfile? profile;
   final LocalAiService aiService;
+  final VoidCallback onSignOut;
+  final VoidCallback onSwitchUser;
 
-  const _ShellHeader({required this.profile, required this.aiService});
+  const _ShellHeader({
+    required this.profile,
+    required this.aiService,
+    required this.onSignOut,
+    required this.onSwitchUser,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Majika',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final title = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Majika',
+              style: theme.textTheme.headlineSmall?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
               ),
-              const SizedBox(height: 2),
-              Text(
-                profile == null
-                    ? 'Build a local taste profile from AniList.'
-                    : '@${profile!.userName} · ${profile!.primaryTaste}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.64),
-                ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              profile == null
+                  ? 'Build a local taste profile from AniList.'
+                  : '@${profile!.userName} · ${profile!.primaryTaste}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: Colors.white.withValues(alpha: 0.64),
+              ),
+            ),
+          ],
+        );
+        final actions = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _StatusPill(
+              icon: Icons.auto_awesome_rounded,
+              label: aiService.isConfigured ? 'Local AI' : 'Local rules',
+            ),
+            if (profile != null) ...[
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: 'Switch user',
+                onPressed: onSwitchUser,
+                icon: const Icon(Icons.switch_account_rounded),
+              ),
+              IconButton(
+                tooltip: 'Sign out',
+                onPressed: onSignOut,
+                icon: const Icon(Icons.logout_rounded),
               ),
             ],
-          ),
-        ),
-        _StatusPill(
-          icon: Icons.auto_awesome_rounded,
-          label: aiService.isConfigured ? 'Local AI' : 'Local rules',
-        ),
-      ],
+          ],
+        );
+
+        if (constraints.maxWidth < 360 && profile != null) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [title, const SizedBox(height: 8), actions],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(child: title),
+            const SizedBox(width: 8),
+            actions,
+          ],
+        );
+      },
     );
   }
 }
@@ -719,28 +810,20 @@ class _RecommendationSearchPanelState
           const SizedBox(height: 10),
           _FilterSection(
             label: 'Format',
-            children:
-                const [
-                  _FormatChip(format: 'TV', label: 'TV'),
-                  _FormatChip(format: 'MOVIE', label: 'Movie'),
-                  _FormatChip(format: 'OVA', label: 'OVA'),
-                  _FormatChip(format: 'ONA', label: 'ONA'),
-                  _FormatChip(format: 'MANGA', label: 'Manga'),
-                  _FormatChip(format: 'NOVEL', label: 'Novel'),
-                ].map((chip) {
-                  return _FilterChipButton(
-                    key: ValueKey('filter-format-${chip.format.toLowerCase()}'),
-                    label: chip.label,
-                    selected: widget.query.formats.contains(chip.format),
-                    onSelected: () => _toggleFormat(chip.format),
-                  );
-                }).toList(),
+            children: RecommendationQuery.allFormats.map((format) {
+              return _FilterChipButton(
+                key: ValueKey('filter-format-${format.toLowerCase()}'),
+                label: _formatLabel(format),
+                selected: widget.query.formats.contains(format),
+                onSelected: () => _toggleFormat(format),
+              );
+            }).toList(),
           ),
           if (widget.availableTags.isNotEmpty) ...[
             const SizedBox(height: 10),
             _FilterSection(
               label: 'Tags',
-              children: widget.availableTags.take(14).map((tag) {
+              children: widget.availableTags.map((tag) {
                 return _FilterChipButton(
                   key: ValueKey('filter-tag-${tag.toLowerCase()}'),
                   label: tag,
@@ -769,6 +852,22 @@ class _RecommendationSearchPanelState
     );
   }
 
+  String _formatLabel(String format) {
+    return switch (format) {
+      'TV' => 'TV',
+      'TV_SHORT' => 'TV Short',
+      'MOVIE' => 'Movie',
+      'OVA' => 'OVA',
+      'ONA' => 'ONA',
+      'MUSIC' => 'Music',
+      'MANGA' => 'Manga',
+      'NOVEL' => 'Novel',
+      'SPECIAL' => 'Special',
+      'ONE_SHOT' => 'One-shot',
+      _ => format[0] + format.substring(1).toLowerCase(),
+    };
+  }
+
   void _toggleTag(String tag) {
     final tags = {...widget.query.selectedTags};
     tags.contains(tag) ? tags.remove(tag) : tags.add(tag);
@@ -777,9 +876,13 @@ class _RecommendationSearchPanelState
 
   void _toggleMediaType(String mediaType) {
     final mediaTypes = {...widget.query.mediaTypes};
-    mediaTypes.contains(mediaType)
-        ? mediaTypes.remove(mediaType)
-        : mediaTypes.add(mediaType);
+    if (mediaTypes.contains(mediaType)) {
+      mediaTypes.remove(mediaType);
+    } else {
+      mediaTypes
+        ..clear()
+        ..add(mediaType);
+    }
     widget.onQueryChanged(widget.query.copyWith(mediaTypes: mediaTypes));
   }
 
@@ -794,13 +897,6 @@ class _RecommendationSearchPanelState
       widget.query.copyWith(includeAdult: !widget.query.includeAdult),
     );
   }
-}
-
-class _FormatChip {
-  final String format;
-  final String label;
-
-  const _FormatChip({required this.format, required this.label});
 }
 
 class _FilterSection extends StatelessWidget {
@@ -873,66 +969,108 @@ class _TopRecommendationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final item = recommendation.item;
-    final theme = Theme.of(context);
 
     return _GlassCard(
       padding: EdgeInsets.zero,
-      child: SizedBox(
-        height: 282,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SizedBox(
-              width: 132,
-              child: _CoverImage(item: item, borderRadius: 24),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const _StatusPill(
-                      icon: Icons.star_rounded,
-                      label: 'Top recommendation',
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      item.title,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      recommendation.reason,
-                      maxLines: 4,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: Colors.white.withValues(alpha: 0.72),
-                        height: 1.38,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: recommendation.signals
-                          .take(4)
-                          .map((signal) => _TextChip(label: signal))
-                          .toList(),
-                    ),
-                  ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isNarrow = constraints.maxWidth < 560;
+          if (isNarrow) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  height: 190,
+                  child: _CoverImage(item: item, borderRadius: 24),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: _TopRecommendationDetails(
+                    recommendation: recommendation,
+                    compact: true,
+                  ),
+                ),
+              ],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 132,
+                height: 282,
+                child: _CoverImage(item: item, borderRadius: 24),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: _TopRecommendationDetails(
+                    recommendation: recommendation,
+                  ),
                 ),
               ),
-            ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
+    );
+  }
+}
+
+class _TopRecommendationDetails extends StatelessWidget {
+  final Recommendation recommendation;
+  final bool compact;
+
+  const _TopRecommendationDetails({
+    required this.recommendation,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final item = recommendation.item;
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const _StatusPill(
+          icon: Icons.star_rounded,
+          label: 'Top recommendation',
+        ),
+        const SizedBox(height: 12),
+        Text(
+          item.title,
+          maxLines: compact ? 2 : 3,
+          overflow: TextOverflow.ellipsis,
+          style:
+              (compact
+                      ? theme.textTheme.titleLarge
+                      : theme.textTheme.headlineSmall)
+                  ?.copyWith(color: Colors.white, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          recommendation.reason,
+          maxLines: compact ? 3 : 4,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: Colors.white.withValues(alpha: 0.72),
+            height: 1.38,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: recommendation.signals
+              .take(compact ? 3 : 4)
+              .map((signal) => _TextChip(label: signal))
+              .toList(),
+        ),
+      ],
     );
   }
 }
@@ -1280,6 +1418,7 @@ class _StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      constraints: const BoxConstraints(maxWidth: 190),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
         color: const Color(0xFF89D6B3).withValues(alpha: 0.14),
@@ -1293,12 +1432,16 @@ class _StatusPill extends StatelessWidget {
         children: [
           Icon(icon, size: 15, color: const Color(0xFFBDEECD)),
           const SizedBox(width: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Color(0xFFEAF5ED),
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFFEAF5ED),
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
         ],

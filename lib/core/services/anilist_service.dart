@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:majika/core/models/media_item.dart';
+import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/services/media_service.dart';
 
 class AniListService implements MediaService {
@@ -34,6 +35,44 @@ class AniListService implements MediaService {
     return [...anime, ...manga];
   }
 
+  @override
+  Future<List<MediaItem>> searchRecommendationCandidates(
+    RecommendationQuery query,
+  ) async {
+    final mediaTypes = query.effectiveMediaTypes();
+    final typesToSearch = mediaTypes.isEmpty
+        ? RecommendationQuery.allMediaTypes
+        : mediaTypes.toList();
+    final results = <MediaItem>[];
+
+    for (final type in typesToSearch) {
+      results.addAll(await _searchCandidates(type, query));
+    }
+
+    return _dedupe(results);
+  }
+
+  @override
+  Future<List<String>> fetchAvailableTags() async {
+    final response = await _postGraphQl(_tagsQuery, const {});
+    final decoded = jsonDecode(response.body);
+    final tags = <String>[
+      ...List<String>.from(decoded['data']?['GenreCollection'] ?? const []),
+    ];
+    final mediaTags = decoded['data']?['MediaTagCollection'];
+    if (mediaTags is List) {
+      for (final tag in mediaTags) {
+        final name = tag is Map ? tag['name']?.toString() : null;
+        if (name != null && name.trim().isNotEmpty) {
+          tags.add(name);
+        }
+      }
+    }
+
+    tags.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return tags.toSet().toList();
+  }
+
   Future<List<MediaItem>> _fetchUserCollection(
     String userName,
     String mediaType,
@@ -55,6 +94,34 @@ class AniListService implements MediaService {
       'perPage': mediaType == 'ANIME' ? 24 : 16,
       'isAdult': includeAdult,
     });
+    return parseCandidates(jsonDecode(response.body));
+  }
+
+  Future<List<MediaItem>> _searchCandidates(
+    String mediaType,
+    RecommendationQuery query,
+  ) async {
+    final formats = query.effectiveFormats();
+    final tags = query.effectiveTags(RecommendationQuery.browsableTags);
+    final searchText = tags.isEmpty && formats.isEmpty
+        ? query.aniListSearchText
+        : '';
+    final variables = {
+      'type': mediaType,
+      'page': 1,
+      'perPage': 30,
+      'isAdult': query.includeAdult || query.infersAdult,
+      if (searchText.isNotEmpty) 'search': searchText,
+      if (formats.isNotEmpty) 'formatIn': formats.toList(),
+      if (tags.isNotEmpty)
+        'genreIn': tags.where(_knownAniListGenres.contains).toList(),
+      if (tags.isNotEmpty)
+        'tagIn': tags
+            .where((tag) => !_knownAniListGenres.contains(tag))
+            .toList(),
+    };
+
+    final response = await _postGraphQl(_searchQuery, variables);
     return parseCandidates(jsonDecode(response.body));
   }
 
@@ -161,7 +228,7 @@ class AniListService implements MediaService {
           coverImage?['extraLarge']?.toString() ??
           coverImage?['large']?.toString() ??
           '',
-      tags: List<String>.from(media['genres'] ?? const []),
+      tags: _tagsFromMedia(media),
       rating: score is num && score > 0 ? score.toDouble() / 10 : null,
       subtitle: _subtitleFor(type, format, totalUnits, progress),
       extensionId: sourceId,
@@ -175,6 +242,26 @@ class AniListService implements MediaService {
       updatedAt: entry?['updatedAt'] as int?,
       isAdult: media['isAdult'] as bool? ?? false,
     );
+  }
+
+  static List<String> _tagsFromMedia(Map<String, dynamic> media) {
+    final tags = <String>[...List<String>.from(media['genres'] ?? const [])];
+    final mediaTags = media['tags'];
+    if (mediaTags is List) {
+      for (final tag in mediaTags) {
+        final name = tag is Map ? tag['name']?.toString() : null;
+        final rank = tag is Map ? tag['rank'] as int? : null;
+        final spoiler = tag is Map ? tag['isMediaSpoiler'] == true : false;
+        if (name != null && !spoiler && (rank == null || rank >= 35)) {
+          tags.add(name);
+        }
+      }
+    }
+
+    return {
+      for (final tag in tags)
+        if (tag.trim().isNotEmpty) tag,
+    }.toList();
   }
 
   static String _subtitleFor(
@@ -208,6 +295,7 @@ class AniListService implements MediaService {
               title { userPreferred romaji english }
               coverImage { extraLarge large }
               genres
+              tags { name rank isMediaSpoiler isAdult }
               averageScore
               popularity
               episodes
@@ -237,6 +325,7 @@ class AniListService implements MediaService {
           title { userPreferred romaji english }
           coverImage { extraLarge large }
           genres
+          tags { name rank isMediaSpoiler isAdult }
           averageScore
           popularity
           episodes
@@ -250,6 +339,79 @@ class AniListService implements MediaService {
       }
     }
   ''';
+
+  static const _searchQuery = r'''
+    query (
+      $type: MediaType,
+      $page: Int,
+      $perPage: Int,
+      $isAdult: Boolean,
+      $search: String,
+      $formatIn: [MediaFormat],
+      $genreIn: [String],
+      $tagIn: [String]
+    ) {
+      Page(page: $page, perPage: $perPage) {
+        media(
+          type: $type,
+          search: $search,
+          format_in: $formatIn,
+          genre_in: $genreIn,
+          tag_in: $tagIn,
+          sort: [SEARCH_MATCH, TRENDING_DESC, POPULARITY_DESC],
+          isAdult: $isAdult
+        ) {
+          id
+          type
+          format
+          title { userPreferred romaji english }
+          coverImage { extraLarge large }
+          genres
+          tags { name rank isMediaSpoiler isAdult }
+          averageScore
+          popularity
+          episodes
+          chapters
+          status
+          isAdult
+          seasonYear
+          startDate { year month day }
+          description(asHtml: false)
+        }
+      }
+    }
+  ''';
+
+  static const _tagsQuery = r'''
+    query {
+      GenreCollection
+      MediaTagCollection {
+        name
+        isAdult
+      }
+    }
+  ''';
+
+  static const _knownAniListGenres = {
+    'Action',
+    'Adventure',
+    'Comedy',
+    'Drama',
+    'Ecchi',
+    'Fantasy',
+    'Horror',
+    'Mahou Shoujo',
+    'Mecha',
+    'Music',
+    'Mystery',
+    'Psychological',
+    'Romance',
+    'Sci-Fi',
+    'Slice of Life',
+    'Sports',
+    'Supernatural',
+    'Thriller',
+  };
 }
 
 class AniListException implements Exception {

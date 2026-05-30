@@ -1,10 +1,16 @@
 import 'package:majika/core/models/recommendation.dart';
+import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/taste_profile.dart';
 
 abstract class LocalAiService {
   bool get isConfigured;
 
   Future<String> summarizeProfile(TasteProfile profile);
+
+  Future<RecommendationQuery> interpretRecommendationRequest(
+    RecommendationQuery query, {
+    required Iterable<String> availableTags,
+  });
 
   Future<String> explainRecommendation(
     TasteProfile profile,
@@ -21,6 +27,14 @@ class DeterministicLocalAiService implements LocalAiService {
   @override
   Future<String> summarizeProfile(TasteProfile profile) async {
     return profile.summary;
+  }
+
+  @override
+  Future<RecommendationQuery> interpretRecommendationRequest(
+    RecommendationQuery query, {
+    required Iterable<String> availableTags,
+  }) async {
+    return query.withInferredSelections(availableTags);
   }
 
   @override
@@ -44,6 +58,16 @@ class FlutterGemmaLocalAiService implements LocalAiService {
   Future<String> summarizeProfile(TasteProfile profile) {
     throw UnimplementedError(
       'flutter_gemma model execution is the next step after model import UX.',
+    );
+  }
+
+  @override
+  Future<RecommendationQuery> interpretRecommendationRequest(
+    RecommendationQuery query, {
+    required Iterable<String> availableTags,
+  }) {
+    throw UnimplementedError(
+      'flutter_gemma query interpretation is planned for local model execution.',
     );
   }
 

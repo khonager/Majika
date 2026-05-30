@@ -166,4 +166,25 @@ void main() {
       hasLength(1),
     );
   });
+
+  test(
+    'request interpretation infers tags and formats from natural language',
+    () {
+      final timeTravelMovie = const RecommendationQuery(
+        request: 'romance movie about time travel',
+      ).withInferredSelections(RecommendationQuery.browsableTags);
+
+      expect(timeTravelMovie.selectedTags, contains('Romance'));
+      expect(timeTravelMovie.selectedTags, contains('Time Manipulation'));
+      expect(timeTravelMovie.formats, contains('MOVIE'));
+      expect(timeTravelMovie.mediaTypes, contains('ANIME'));
+
+      final obsessedCharacter = const RecommendationQuery(
+        request: 'obsessed character thriller',
+      ).withInferredSelections(RecommendationQuery.browsableTags);
+
+      expect(obsessedCharacter.selectedTags, contains('Yandere'));
+      expect(obsessedCharacter.selectedTags, contains('Thriller'));
+    },
+  );
 }

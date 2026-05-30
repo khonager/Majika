@@ -14,6 +14,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _downloadOnWifiOnly = true;
   bool _allowExplicitContent = false;
   bool _enableMotionEffects = true;
+  bool _useLocalAi = false;
+  bool _useAiForSearch = true;
   double _imageQuality = 0.85;
 
   @override
@@ -193,6 +195,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: 'Saved filters are not developed yet.',
                   onTap: () =>
                       showFeatureComingSoon(context, 'Discover filters'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            _SettingsSection(
+              title: 'Local AI',
+              subtitle:
+                  'Model controls for local-only profile summaries and search interpretation.',
+              children: [
+                _SwitchRow(
+                  icon: Icons.memory_rounded,
+                  title: 'Use local model when available',
+                  subtitle:
+                      'Falls back to rules until a Gemma model is imported.',
+                  value: _useLocalAi,
+                  onChanged: (value) {
+                    setState(() => _useLocalAi = value);
+                    showInfoToast(
+                      context,
+                      value
+                          ? 'Local AI will be used once a model is configured.'
+                          : 'Majika will use deterministic local rules.',
+                    );
+                  },
+                ),
+                _SwitchRow(
+                  icon: Icons.manage_search_rounded,
+                  title: 'AI search interpretation',
+                  subtitle:
+                      'Let the local model choose tags, formats, and filters from requests.',
+                  value: _useAiForSearch,
+                  onChanged: (value) {
+                    setState(() => _useAiForSearch = value);
+                    showInfoToast(
+                      context,
+                      value
+                          ? 'Search interpretation enabled.'
+                          : 'Search will use fallback rules only.',
+                    );
+                  },
+                ),
+                _ActionRow(
+                  icon: Icons.file_open_rounded,
+                  title: 'Import Gemma model',
+                  subtitle:
+                      'Planned: choose a .litertlm model file for flutter_gemma.',
+                  onTap: () =>
+                      showFeatureComingSoon(context, 'Local model import'),
+                ),
+                const _InfoRow(
+                  icon: Icons.offline_bolt_rounded,
+                  title: 'Current provider',
+                  subtitle: 'Deterministic fallback rules',
                 ),
               ],
             ),

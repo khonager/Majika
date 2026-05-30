@@ -9,7 +9,7 @@ The current first working slice is intentionally narrow: AniList public username
 - **First service:** AniList.
 - **Import path:** public AniList username. OAuth is planned so private lists can be imported later, but it is not wired yet.
 - **Recommendation path:** fetch public anime/manga list entries, derive a local taste profile, fetch trending/popular AniList candidates, rank them locally, and show match reasons.
-- **Search path:** after import, the user can steer recommendations with tags, anime/manga type chips, TV/movie/OVA/ONA/manga/novel format chips, an adult-content opt-in, and a plain search request. This is not a chat UI; the request is parsed into recommendation filters and ranking boosts.
+- **Search path:** after import, the user can steer recommendations with tags, anime/manga type chips, every AniList format chip, an adult-content opt-in, and a plain search request. This is not a chat UI; the request should be interpreted into recommendation filters, AniList search constraints, and ranking boosts. The intended interpreter is local AI; the current app uses a deterministic fallback only because no local model is connected yet.
 - **Storage:** local/session-first prototype with no backend. Firebase sync is a future option, so service and repository boundaries should stay clean.
 - **AI:** no remote AI API by default. The app works with deterministic local summaries today and is structured for a future `flutter_gemma` local model provider.
 - **Extensions:** the Lua extension runner and `extensions/anilist_template.lua` are experimental extension work. The main app uses the typed Dart AniList connector for reliability.
@@ -57,12 +57,20 @@ The current home screen wires these pieces together directly for the prototype. 
 
 ## Local AI Plan
 
-Majika should use local AI by default, not a hosted API. The planned Flutter integration is [`flutter_gemma`](https://pub.dev/packages/flutter_gemma), with user-imported or downloaded models instead of bundling a model in the app.
+Majika should use local AI by default, not a hosted API. The planned Flutter integration is [`flutter_gemma`](https://pub.dev/packages/flutter_gemma), with user-imported or downloaded models instead of bundling a model in the app. The current app does **not** run an LLM yet; it uses a deterministic local fallback through the same query-interpretation interface that the local model should replace.
+
+The desired search flow is:
+
+1. User types a request such as `romance movie about time travel` or `obsessed character thriller`.
+2. Local AI reads the request and chooses AniList-ready structured intent: media type, formats, tags, adult-content intent, and search text.
+3. The app fetches candidates from AniList using those structured constraints and ranks them against the user's taste profile.
+4. If no local model is configured, Majika falls back to small deterministic hints so the prototype still returns useful results. These hints are not meant to replace the AI interpreter.
 
 Recommended direction:
 
 - Start with a Gemma 4 E2B `.litertlm` model when model import UX is added.
 - Keep deterministic summaries as fallback when no model is configured.
+- Use local AI to turn natural-language searches like `romance movie about time travel` into structured tags/formats such as `Romance`, `Time Manipulation`, and `MOVIE`.
 - Let the app fetch current releases and service data itself, then pass structured context to the local model for summaries and recommendation explanations.
 - Later, optional custom providers can be added for users who want their own API key or external local server.
 

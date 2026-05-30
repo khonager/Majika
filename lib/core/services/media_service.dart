@@ -1,4 +1,5 @@
 import 'package:majika/core/models/media_item.dart';
+import 'package:majika/core/models/recommendation_query.dart';
 
 abstract class MediaService {
   String get id;
@@ -9,6 +10,12 @@ abstract class MediaService {
   Future<List<MediaItem>> fetchRecommendationCandidates({
     bool includeAdult = false,
   });
+
+  Future<List<MediaItem>> searchRecommendationCandidates(
+    RecommendationQuery query,
+  );
+
+  Future<List<String>> fetchAvailableTags();
 }
 
 abstract class ServiceAuthStrategy {
