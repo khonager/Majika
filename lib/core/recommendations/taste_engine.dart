@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation.dart';
+import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/taste_profile.dart';
 
 class TasteEngine {
@@ -54,13 +55,43 @@ class TasteEngine {
 
   List<Recommendation> rankCandidates(
     TasteProfile profile,
-    List<MediaItem> candidates,
-  ) {
+    List<MediaItem> candidates, {
+    RecommendationQuery query = const RecommendationQuery(),
+  }) {
     final libraryIds = profile.library.map((item) => item.id).toSet();
     final recommendations = <Recommendation>[];
+    final availableTags = {
+      ...profile.favoriteGenres,
+      for (final candidate in candidates) ...candidate.tags,
+    };
+    final requestedTags = {
+      ...query.selectedTags,
+      ...query.inferredTags(availableTags),
+    };
+    final requestedFormats = query.formats.isNotEmpty
+        ? query.formats
+        : query.inferredFormats();
+    final requestedMediaTypes = query.mediaTypes.isNotEmpty
+        ? query.mediaTypes
+        : query.inferredMediaTypes();
+    final includeAdult = query.includeAdult || query.infersAdult;
 
     for (final candidate in candidates) {
       if (libraryIds.contains(candidate.id)) continue;
+      if (candidate.isAdult && !includeAdult) continue;
+      if (requestedMediaTypes.isNotEmpty &&
+          !requestedMediaTypes.contains(candidate.mediaType)) {
+        continue;
+      }
+      if (requestedFormats.isNotEmpty &&
+          !requestedFormats.contains(candidate.format)) {
+        continue;
+      }
+      if (requestedTags.isNotEmpty &&
+          !candidate.tags.any(requestedTags.contains)) {
+        continue;
+      }
+      if (!query.matchesText(candidate)) continue;
 
       final signals = <String>[];
       var score = 0.0;
@@ -94,13 +125,41 @@ class TasteEngine {
         signals.add('recent release');
       }
 
+      final requestedGenreMatches = candidate.tags
+          .where(requestedTags.contains)
+          .take(4)
+          .toList();
+      if (requestedGenreMatches.isNotEmpty) {
+        score += requestedGenreMatches.length * 4.0;
+        signals.addAll(requestedGenreMatches.map((tag) => 'wanted $tag'));
+      }
+
+      if (requestedFormats.contains(candidate.format)) {
+        score += 3.2;
+        signals.add('wanted ${candidate.format.replaceAll('_', ' ')}');
+      }
+
+      if (requestedMediaTypes.contains(candidate.mediaType)) {
+        score += 2.2;
+        signals.add('wanted ${candidate.mediaType.toLowerCase()}');
+      }
+
+      if (candidate.isAdult && includeAdult) {
+        score += 1.4;
+        signals.add('adult filter');
+      }
+
+      if (query.request.trim().isNotEmpty) {
+        score += _requestTextScore(candidate, query.request);
+      }
+
       if (score <= 0) continue;
 
       recommendations.add(
         Recommendation(
           item: candidate,
           matchScore: score,
-          reason: _reasonFor(candidate, genreMatches, profile),
+          reason: _reasonFor(candidate, genreMatches, profile, query),
           signals: _uniqueSignals(signals),
           isPopularNow: (candidate.popularity ?? 0) > 20000,
         ),
@@ -131,7 +190,17 @@ class TasteEngine {
     MediaItem candidate,
     List<String> genreMatches,
     TasteProfile profile,
+    RecommendationQuery query,
   ) {
+    if (query.isActive) {
+      final request = query.request.trim();
+      final queryLead = request.isEmpty ? 'your filters' : '"$request"';
+      final strongestSignal = candidate.tags.isNotEmpty
+          ? candidate.tags.take(2).join(' and ')
+          : candidate.format.replaceAll('_', ' ');
+      return 'Found for $queryLead: $strongestSignal fits the request while staying close to ${profile.primaryTaste}.';
+    }
+
     if (genreMatches.isNotEmpty) {
       final genres = genreMatches.take(2).join(' and ');
       return 'Matches your $genres streak and keeps close to the ${profile.primaryTaste} profile.';
@@ -150,5 +219,27 @@ class TasteEngine {
       for (final signal in signals)
         if (seen.add(signal)) signal,
     ];
+  }
+
+  double _requestTextScore(MediaItem candidate, String request) {
+    final terms = request
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9+]+'))
+        .where((term) => term.length > 2)
+        .toList();
+    if (terms.isEmpty) return 0;
+
+    final title = candidate.title.toLowerCase();
+    final description = (candidate.description ?? '').toLowerCase();
+    final tags = candidate.tags.join(' ').toLowerCase();
+    var score = 0.0;
+
+    for (final term in terms) {
+      if (title.contains(term)) score += 1.6;
+      if (tags.contains(term)) score += 1.1;
+      if (description.contains(term)) score += 0.5;
+    }
+
+    return min(score, 5.0);
   }
 }

@@ -14,6 +14,7 @@ class MediaItem {
   final int? startYear;
   final int? popularity;
   final int? updatedAt;
+  final bool isAdult;
 
   MediaItem({
     required this.id,
@@ -31,6 +32,7 @@ class MediaItem {
     this.startYear,
     this.popularity,
     this.updatedAt,
+    this.isAdult = false,
   }) : sourceId = sourceId ?? extensionId;
 
   bool get hasCover => coverUrl.isNotEmpty;
@@ -58,6 +60,7 @@ class MediaItem {
     int? startYear,
     int? popularity,
     int? updatedAt,
+    bool? isAdult,
   }) {
     return MediaItem(
       id: id ?? this.id,
@@ -75,6 +78,7 @@ class MediaItem {
       startYear: startYear ?? this.startYear,
       popularity: popularity ?? this.popularity,
       updatedAt: updatedAt ?? this.updatedAt,
+      isAdult: isAdult ?? this.isAdult,
     );
   }
 
@@ -97,6 +101,7 @@ class MediaItem {
       startYear: json['startYear'] as int?,
       popularity: json['popularity'] as int?,
       updatedAt: json['updatedAt'] as int?,
+      isAdult: json['isAdult'] as bool? ?? false,
     );
   }
 
@@ -117,6 +122,7 @@ class MediaItem {
       'startYear': startYear,
       'popularity': popularity,
       'updatedAt': updatedAt,
+      'isAdult': isAdult,
     };
   }
 }

@@ -6,7 +6,9 @@ abstract class MediaService {
 
   Future<List<MediaItem>> fetchUserLibrary(String userName);
 
-  Future<List<MediaItem>> fetchRecommendationCandidates();
+  Future<List<MediaItem>> fetchRecommendationCandidates({
+    bool includeAdult = false,
+  });
 }
 
 abstract class ServiceAuthStrategy {

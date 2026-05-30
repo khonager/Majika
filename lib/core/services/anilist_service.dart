@@ -26,9 +26,11 @@ class AniListService implements MediaService {
   }
 
   @override
-  Future<List<MediaItem>> fetchRecommendationCandidates() async {
-    final anime = await _fetchCandidates('ANIME');
-    final manga = await _fetchCandidates('MANGA');
+  Future<List<MediaItem>> fetchRecommendationCandidates({
+    bool includeAdult = false,
+  }) async {
+    final anime = await _fetchCandidates('ANIME', includeAdult: includeAdult);
+    final manga = await _fetchCandidates('MANGA', includeAdult: includeAdult);
     return [...anime, ...manga];
   }
 
@@ -43,11 +45,15 @@ class AniListService implements MediaService {
     return parseUserCollection(jsonDecode(response.body));
   }
 
-  Future<List<MediaItem>> _fetchCandidates(String mediaType) async {
+  Future<List<MediaItem>> _fetchCandidates(
+    String mediaType, {
+    required bool includeAdult,
+  }) async {
     final response = await _postGraphQl(_candidateQuery, {
       'type': mediaType,
       'page': 1,
       'perPage': mediaType == 'ANIME' ? 24 : 16,
+      'isAdult': includeAdult,
     });
     return parseCandidates(jsonDecode(response.body));
   }
@@ -167,6 +173,7 @@ class AniListService implements MediaService {
       startYear: startDate is Map ? startDate['year'] as int? : null,
       popularity: media['popularity'] as int?,
       updatedAt: entry?['updatedAt'] as int?,
+      isAdult: media['isAdult'] as bool? ?? false,
     );
   }
 
@@ -217,12 +224,12 @@ class AniListService implements MediaService {
   ''';
 
   static const _candidateQuery = r'''
-    query ($type: MediaType, $page: Int, $perPage: Int) {
+    query ($type: MediaType, $page: Int, $perPage: Int, $isAdult: Boolean) {
       Page(page: $page, perPage: $perPage) {
         media(
           type: $type,
           sort: [TRENDING_DESC, POPULARITY_DESC],
-          isAdult: false
+          isAdult: $isAdult
         ) {
           id
           type
@@ -235,6 +242,7 @@ class AniListService implements MediaService {
           episodes
           chapters
           status
+          isAdult
           seasonYear
           startDate { year month day }
           description(asHtml: false)

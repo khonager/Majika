@@ -38,6 +38,35 @@ void main() {
       }
     },
   );
+
+  testWidgets('search request and chips refill recommendations', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search a vibe, tag, format, or request'),
+      'hentai romance ova',
+    );
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Adult Match'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('filter-type-manga')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Adult Match'), findsNothing);
+    expect(find.textContaining('No matches'), findsOneWidget);
+  });
 }
 
 class _FakeMediaService implements MediaService {
@@ -48,7 +77,9 @@ class _FakeMediaService implements MediaService {
   String get id => 'com.majika.service.anilist';
 
   @override
-  Future<List<MediaItem>> fetchRecommendationCandidates() async {
+  Future<List<MediaItem>> fetchRecommendationCandidates({
+    bool includeAdult = false,
+  }) async {
     return [
       MediaItem(
         id: 'anilist_2',
@@ -68,6 +99,17 @@ class _FakeMediaService implements MediaService {
         rating: 8,
         format: 'MOVIE',
       ),
+      if (includeAdult)
+        MediaItem(
+          id: 'anilist_4',
+          title: 'Adult Match',
+          coverUrl: '',
+          tags: const ['Romance'],
+          rating: 7.8,
+          format: 'OVA',
+          mediaType: 'ANIME',
+          isAdult: true,
+        ),
     ];
   }
 

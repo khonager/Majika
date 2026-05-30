@@ -9,6 +9,7 @@ The current first working slice is intentionally narrow: AniList public username
 - **First service:** AniList.
 - **Import path:** public AniList username. OAuth is planned so private lists can be imported later, but it is not wired yet.
 - **Recommendation path:** fetch public anime/manga list entries, derive a local taste profile, fetch trending/popular AniList candidates, rank them locally, and show match reasons.
+- **Search path:** after import, the user can steer recommendations with tags, anime/manga type chips, TV/movie/OVA/ONA/manga/novel format chips, an adult-content opt-in, and a plain search request. This is not a chat UI; the request is parsed into recommendation filters and ranking boosts.
 - **Storage:** local/session-first prototype with no backend. Firebase sync is a future option, so service and repository boundaries should stay clean.
 - **AI:** no remote AI API by default. The app works with deterministic local summaries today and is structured for a future `flutter_gemma` local model provider.
 - **Extensions:** the Lua extension runner and `extensions/anilist_template.lua` are experimental extension work. The main app uses the typed Dart AniList connector for reliability.
@@ -35,6 +36,7 @@ The black-ink top-left sketch is the main reference.
 - Settings button sits above or near the profile control in the rail/dock.
 - Main content after import:
   - large top recommendation card,
+  - recommendation search/filter controls,
   - list of additional recommendations/currently popular items,
   - bottom “current/latest activity” bar.
 - Palette: graphite glass, neutral dark background, milky translucent rail, restrained service accents.

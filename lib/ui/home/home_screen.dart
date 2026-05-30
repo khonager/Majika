@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:majika/core/ai/local_ai_service.dart';
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation.dart';
+import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/taste_profile.dart';
 import 'package:majika/core/recommendations/taste_engine.dart';
 import 'package:majika/core/services/anilist_service.dart';
@@ -35,9 +36,13 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _userNameController = TextEditingController();
 
   TasteProfile? _profile;
+  List<MediaItem> _candidates = [];
   List<Recommendation> _recommendations = [];
+  RecommendationQuery _recommendationQuery = const RecommendationQuery();
   String? _error;
   bool _isLoading = false;
+  bool _isRefreshingRecommendations = false;
+  bool _adultCandidatesLoaded = false;
 
   @override
   void initState() {
@@ -74,7 +79,10 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       setState(() {
         _profile = profile;
+        _candidates = candidates;
         _recommendations = recommendations;
+        _recommendationQuery = const RecommendationQuery();
+        _adultCandidatesLoaded = false;
         _isLoading = false;
       });
     } catch (error) {
@@ -83,6 +91,49 @@ class _HomeScreenState extends State<HomeScreen> {
         _error = error.toString();
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _updateRecommendationQuery(RecommendationQuery query) async {
+    final profile = _profile;
+    if (profile == null) return;
+
+    setState(() {
+      _recommendationQuery = query;
+      _isRefreshingRecommendations = true;
+    });
+
+    var candidates = _candidates;
+    final needsAdultCandidates =
+        (query.includeAdult || query.infersAdult) && !_adultCandidatesLoaded;
+
+    try {
+      if (needsAdultCandidates) {
+        final adultCandidates = await _mediaService
+            .fetchRecommendationCandidates(includeAdult: true);
+        candidates = _dedupeCandidates([...candidates, ...adultCandidates]);
+      }
+
+      final recommendations = _tasteEngine.rankCandidates(
+        profile,
+        candidates,
+        query: query,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _candidates = candidates;
+        _recommendations = recommendations;
+        _adultCandidatesLoaded = _adultCandidatesLoaded || needsAdultCandidates;
+        _isRefreshingRecommendations = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString();
+        _isRefreshingRecommendations = false;
+      });
+      showErrorToast(context, 'Could not refresh recommendations: $error');
     }
   }
 
@@ -116,6 +167,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 aiService: _aiService,
                 userNameController: _userNameController,
                 onImport: _importAniListProfile,
+                query: _recommendationQuery,
+                isRefreshingRecommendations: _isRefreshingRecommendations,
+                availableTags: _availableTags,
+                onQueryChanged: _updateRecommendationQuery,
               );
 
               if (isDesktop) {
@@ -161,6 +216,30 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  List<String> get _availableTags {
+    final counts = <String, int>{};
+    for (final tag in _profile?.favoriteGenres ?? const <String>[]) {
+      counts.update(tag, (count) => count + 4, ifAbsent: () => 4);
+    }
+    for (final item in _candidates) {
+      for (final tag in item.tags) {
+        counts.update(tag, (count) => count + 1, ifAbsent: () => 1);
+      }
+    }
+
+    final entries = counts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return entries.map((entry) => entry.key).take(18).toList();
+  }
+
+  List<MediaItem> _dedupeCandidates(List<MediaItem> candidates) {
+    final seen = <String>{};
+    return [
+      for (final candidate in candidates)
+        if (seen.add(candidate.id)) candidate,
+    ];
+  }
 }
 
 class _ContentShell extends StatelessWidget {
@@ -171,6 +250,10 @@ class _ContentShell extends StatelessWidget {
   final LocalAiService aiService;
   final TextEditingController userNameController;
   final VoidCallback onImport;
+  final RecommendationQuery query;
+  final bool isRefreshingRecommendations;
+  final List<String> availableTags;
+  final ValueChanged<RecommendationQuery> onQueryChanged;
 
   const _ContentShell({
     required this.profile,
@@ -180,6 +263,10 @@ class _ContentShell extends StatelessWidget {
     required this.aiService,
     required this.userNameController,
     required this.onImport,
+    required this.query,
+    required this.isRefreshingRecommendations,
+    required this.availableTags,
+    required this.onQueryChanged,
   });
 
   @override
@@ -232,6 +319,10 @@ class _ContentShell extends StatelessWidget {
                                 key: const ValueKey('recommendations'),
                                 profile: profile!,
                                 recommendations: recommendations,
+                                query: query,
+                                isRefreshing: isRefreshingRecommendations,
+                                availableTags: availableTags,
+                                onQueryChanged: onQueryChanged,
                               ),
                       ),
                     ),
@@ -398,11 +489,19 @@ class _ConnectState extends StatelessWidget {
 class _RecommendationState extends StatelessWidget {
   final TasteProfile profile;
   final List<Recommendation> recommendations;
+  final RecommendationQuery query;
+  final bool isRefreshing;
+  final List<String> availableTags;
+  final ValueChanged<RecommendationQuery> onQueryChanged;
 
   const _RecommendationState({
     super.key,
     required this.profile,
     required this.recommendations,
+    required this.query,
+    required this.isRefreshing,
+    required this.availableTags,
+    required this.onQueryChanged,
   });
 
   @override
@@ -420,8 +519,15 @@ class _RecommendationState extends StatelessWidget {
                 children: [
                   _TasteSummary(profile: profile),
                   const SizedBox(height: 14),
+                  _RecommendationSearchPanel(
+                    query: query,
+                    isRefreshing: isRefreshing,
+                    availableTags: availableTags,
+                    onQueryChanged: onQueryChanged,
+                  ),
+                  const SizedBox(height: 14),
                   if (topPick == null)
-                    _EmptyRecommendations(profile: profile)
+                    _EmptyRecommendations(profile: profile, query: query)
                   else
                     _TopRecommendationCard(recommendation: topPick),
                   const SizedBox(height: 18),
@@ -495,6 +601,270 @@ class _TasteSummary extends StatelessWidget {
   }
 }
 
+class _RecommendationSearchPanel extends StatefulWidget {
+  final RecommendationQuery query;
+  final bool isRefreshing;
+  final List<String> availableTags;
+  final ValueChanged<RecommendationQuery> onQueryChanged;
+
+  const _RecommendationSearchPanel({
+    required this.query,
+    required this.isRefreshing,
+    required this.availableTags,
+    required this.onQueryChanged,
+  });
+
+  @override
+  State<_RecommendationSearchPanel> createState() =>
+      _RecommendationSearchPanelState();
+}
+
+class _RecommendationSearchPanelState
+    extends State<_RecommendationSearchPanel> {
+  late final TextEditingController _searchController;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController(text: widget.query.request);
+  }
+
+  @override
+  void didUpdateWidget(covariant _RecommendationSearchPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.query.request != _searchController.text) {
+      _searchController.text = widget.query.request;
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _submitRequest() {
+    widget.onQueryChanged(
+      widget.query.copyWith(request: _searchController.text.trim()),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _GlassCard(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (_) => _submitRequest(),
+                  decoration: InputDecoration(
+                    hintText: 'Search a vibe, tag, format, or request',
+                    prefixIcon: const Icon(Icons.manage_search_rounded),
+                    filled: true,
+                    fillColor: Colors.black.withValues(alpha: 0.22),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filledTonal(
+                tooltip: 'Search recommendations',
+                onPressed: widget.isRefreshing ? null : _submitRequest,
+                icon: widget.isRefreshing
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.arrow_forward_rounded),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _FilterSection(
+            label: 'Type',
+            children: [
+              _FilterChipButton(
+                key: const ValueKey('filter-type-anime'),
+                label: 'Anime',
+                selected: widget.query.mediaTypes.contains('ANIME'),
+                onSelected: () => _toggleMediaType('ANIME'),
+              ),
+              _FilterChipButton(
+                key: const ValueKey('filter-type-manga'),
+                label: 'Manga',
+                selected: widget.query.mediaTypes.contains('MANGA'),
+                onSelected: () => _toggleMediaType('MANGA'),
+              ),
+              _FilterChipButton(
+                key: const ValueKey('filter-adult'),
+                label: 'Adult',
+                selected: widget.query.includeAdult || widget.query.infersAdult,
+                onSelected: _toggleAdult,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _FilterSection(
+            label: 'Format',
+            children:
+                const [
+                  _FormatChip(format: 'TV', label: 'TV'),
+                  _FormatChip(format: 'MOVIE', label: 'Movie'),
+                  _FormatChip(format: 'OVA', label: 'OVA'),
+                  _FormatChip(format: 'ONA', label: 'ONA'),
+                  _FormatChip(format: 'MANGA', label: 'Manga'),
+                  _FormatChip(format: 'NOVEL', label: 'Novel'),
+                ].map((chip) {
+                  return _FilterChipButton(
+                    key: ValueKey('filter-format-${chip.format.toLowerCase()}'),
+                    label: chip.label,
+                    selected: widget.query.formats.contains(chip.format),
+                    onSelected: () => _toggleFormat(chip.format),
+                  );
+                }).toList(),
+          ),
+          if (widget.availableTags.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _FilterSection(
+              label: 'Tags',
+              children: widget.availableTags.take(14).map((tag) {
+                return _FilterChipButton(
+                  key: ValueKey('filter-tag-${tag.toLowerCase()}'),
+                  label: tag,
+                  selected: widget.query.selectedTags.contains(tag),
+                  onSelected: () => _toggleTag(tag),
+                );
+              }).toList(),
+            ),
+          ],
+          if (widget.query.isActive) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () {
+                  _searchController.clear();
+                  widget.onQueryChanged(const RecommendationQuery());
+                },
+                icon: const Icon(Icons.clear_rounded),
+                label: const Text('Clear recommendation search'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _toggleTag(String tag) {
+    final tags = {...widget.query.selectedTags};
+    tags.contains(tag) ? tags.remove(tag) : tags.add(tag);
+    widget.onQueryChanged(widget.query.copyWith(selectedTags: tags));
+  }
+
+  void _toggleMediaType(String mediaType) {
+    final mediaTypes = {...widget.query.mediaTypes};
+    mediaTypes.contains(mediaType)
+        ? mediaTypes.remove(mediaType)
+        : mediaTypes.add(mediaType);
+    widget.onQueryChanged(widget.query.copyWith(mediaTypes: mediaTypes));
+  }
+
+  void _toggleFormat(String format) {
+    final formats = {...widget.query.formats};
+    formats.contains(format) ? formats.remove(format) : formats.add(format);
+    widget.onQueryChanged(widget.query.copyWith(formats: formats));
+  }
+
+  void _toggleAdult() {
+    widget.onQueryChanged(
+      widget.query.copyWith(includeAdult: !widget.query.includeAdult),
+    );
+  }
+}
+
+class _FormatChip {
+  final String format;
+  final String label;
+
+  const _FormatChip({required this.format, required this.label});
+}
+
+class _FilterSection extends StatelessWidget {
+  final String label;
+  final List<Widget> children;
+
+  const _FilterSection({required this.label, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.54),
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 7),
+        Wrap(spacing: 7, runSpacing: 7, children: children),
+      ],
+    );
+  }
+}
+
+class _FilterChipButton extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onSelected;
+
+  const _FilterChipButton({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FilterChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onSelected(),
+      showCheckmark: false,
+      selectedColor: Theme.of(
+        context,
+      ).colorScheme.secondary.withValues(alpha: 0.24),
+      backgroundColor: Colors.white.withValues(alpha: 0.07),
+      side: BorderSide(
+        color: selected
+            ? Theme.of(context).colorScheme.secondary.withValues(alpha: 0.5)
+            : Colors.white.withValues(alpha: 0.08),
+      ),
+      labelStyle: TextStyle(
+        color: selected ? Colors.white : Colors.white.withValues(alpha: 0.72),
+        fontWeight: FontWeight.w700,
+      ),
+    );
+  }
+}
+
 class _TopRecommendationCard extends StatelessWidget {
   final Recommendation recommendation;
 
@@ -508,7 +878,7 @@ class _TopRecommendationCard extends StatelessWidget {
     return _GlassCard(
       padding: EdgeInsets.zero,
       child: SizedBox(
-        height: 250,
+        height: 282,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -687,8 +1057,9 @@ class _CurrentActivityBar extends StatelessWidget {
 
 class _EmptyRecommendations extends StatelessWidget {
   final TasteProfile profile;
+  final RecommendationQuery query;
 
-  const _EmptyRecommendations({required this.profile});
+  const _EmptyRecommendations({required this.profile, required this.query});
 
   @override
   Widget build(BuildContext context) {
@@ -703,7 +1074,9 @@ class _EmptyRecommendations extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            'Profile imported, but no recommendations ranked high enough yet.',
+            query.isActive
+                ? 'No matches for this recommendation search yet. Try fewer tags or a broader format.'
+                : 'Profile imported, but no recommendations ranked high enough yet.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: Colors.white.withValues(alpha: 0.72),
