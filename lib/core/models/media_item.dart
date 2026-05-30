@@ -6,6 +6,14 @@ class MediaItem {
   final double? rating;
   final String subtitle;
   final String extensionId;
+  final String sourceId;
+  final String mediaType;
+  final String format;
+  final String? status;
+  final String? description;
+  final int? startYear;
+  final int? popularity;
+  final int? updatedAt;
 
   MediaItem({
     required this.id,
@@ -13,19 +21,82 @@ class MediaItem {
     required this.coverUrl,
     required this.tags,
     this.rating,
-    required this.subtitle,
-    required this.extensionId,
-  });
+    this.subtitle = '',
+    this.extensionId = '',
+    String? sourceId,
+    this.mediaType = 'ANIME',
+    this.format = 'UNKNOWN',
+    this.status,
+    this.description,
+    this.startYear,
+    this.popularity,
+    this.updatedAt,
+  }) : sourceId = sourceId ?? extensionId;
+
+  bool get hasCover => coverUrl.isNotEmpty;
+
+  String get serviceLabel {
+    if (sourceId.contains('anilist') || extensionId.contains('anilist')) {
+      return 'AniList';
+    }
+    return sourceId.isEmpty ? 'Source' : sourceId;
+  }
+
+  MediaItem copyWith({
+    String? id,
+    String? title,
+    String? coverUrl,
+    List<String>? tags,
+    double? rating,
+    String? subtitle,
+    String? extensionId,
+    String? sourceId,
+    String? mediaType,
+    String? format,
+    String? status,
+    String? description,
+    int? startYear,
+    int? popularity,
+    int? updatedAt,
+  }) {
+    return MediaItem(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      coverUrl: coverUrl ?? this.coverUrl,
+      tags: tags ?? this.tags,
+      rating: rating ?? this.rating,
+      subtitle: subtitle ?? this.subtitle,
+      extensionId: extensionId ?? this.extensionId,
+      sourceId: sourceId ?? this.sourceId,
+      mediaType: mediaType ?? this.mediaType,
+      format: format ?? this.format,
+      status: status ?? this.status,
+      description: description ?? this.description,
+      startYear: startYear ?? this.startYear,
+      popularity: popularity ?? this.popularity,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
 
   factory MediaItem.fromJson(Map<String, dynamic> json) {
     return MediaItem(
       id: json['id'] as String,
       title: json['title'] as String,
-      coverUrl: json['coverUrl'] as String,
+      coverUrl: json['coverUrl'] as String? ?? '',
       tags: List<String>.from(json['tags'] ?? []),
-      rating: json['rating'] != null ? (json['rating'] as num).toDouble() : null,
+      rating: json['rating'] != null
+          ? (json['rating'] as num).toDouble()
+          : null,
       subtitle: json['subtitle'] as String? ?? '',
-      extensionId: json['extensionId'] as String,
+      extensionId: json['extensionId'] as String? ?? '',
+      sourceId: json['sourceId'] as String?,
+      mediaType: json['mediaType'] as String? ?? 'ANIME',
+      format: json['format'] as String? ?? 'UNKNOWN',
+      status: json['status'] as String?,
+      description: json['description'] as String?,
+      startYear: json['startYear'] as int?,
+      popularity: json['popularity'] as int?,
+      updatedAt: json['updatedAt'] as int?,
     );
   }
 
@@ -38,6 +109,14 @@ class MediaItem {
       'rating': rating,
       'subtitle': subtitle,
       'extensionId': extensionId,
+      'sourceId': sourceId,
+      'mediaType': mediaType,
+      'format': format,
+      'status': status,
+      'description': description,
+      'startYear': startYear,
+      'popularity': popularity,
+      'updatedAt': updatedAt,
     };
   }
 }

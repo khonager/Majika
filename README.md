@@ -1,17 +1,111 @@
-# majika
+# Majika
 
-A new Flutter project.
+Majika is a local-first Flutter prototype for building taste profiles from the services a person already uses, then recommending new things to watch, read, play, or listen to. The long-term idea is to connect services such as AniList, Spotify, Steam, movie/TV libraries, and reading apps, normalize their signals, and let local AI plus recommendation systems explain what the user might enjoy next.
 
-## Getting Started
+The current first working slice is intentionally narrow: AniList public username import, local profile generation, deterministic recommendations, and a redesigned glass UI based on the sketch in this session.
 
-This project is a starting point for a Flutter application.
+## Current Scope
 
-A few resources to get you started if this is your first Flutter project:
+- **First service:** AniList.
+- **Import path:** public AniList username. OAuth is planned so private lists can be imported later, but it is not wired yet.
+- **Recommendation path:** fetch public anime/manga list entries, derive a local taste profile, fetch trending/popular AniList candidates, rank them locally, and show match reasons.
+- **Storage:** local/session-first prototype with no backend. Firebase sync is a future option, so service and repository boundaries should stay clean.
+- **AI:** no remote AI API by default. The app works with deterministic local summaries today and is structured for a future `flutter_gemma` local model provider.
+- **Extensions:** the Lua extension runner and `extensions/anilist_template.lua` are experimental extension work. The main app uses the typed Dart AniList connector for reliability.
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## Product Direction
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Majika should feel like a personal taste console, not a generic content feed. It should help answer:
+
+- What does this user consistently like?
+- What are they currently watching, reading, playing, or listening to?
+- Which new releases or popular items are worth trying?
+- Why is a recommendation a good match?
+
+The app should eventually combine multiple service profiles into one cross-media taste model. For example, a user who likes psychological anime, atmospheric games, and moody electronic music should get recommendations that understand the overlap instead of treating each service as a silo.
+
+## UI Direction
+
+The black-ink top-left sketch is the main reference.
+
+- Rounded app/content surface.
+- Glassy service/menu rail.
+- Mobile and tablet: rail on the left.
+- Desktop: rail/dock at the bottom with vertical content scrolling.
+- Settings button sits above or near the profile control in the rail/dock.
+- Main content after import:
+  - large top recommendation card,
+  - list of additional recommendations/currently popular items,
+  - bottom “current/latest activity” bar.
+- Palette: graphite glass, neutral dark background, milky translucent rail, restrained service accents.
+
+## Architecture Notes
+
+Important concepts live under `lib/core`:
+
+- `MediaItem`: normalized media object across AniList now and future services later.
+- `TasteProfile`: derived user profile with favorite genres, formats, high-rated items, and recent activity.
+- `Recommendation`: ranked candidate with score, signals, and explanation.
+- `MediaService`: interface for AniList, Steam, Spotify, movies/TV, etc.
+- `AniListService`: typed GraphQL client for the first real service.
+- `TasteEngine`: deterministic local profile and recommendation engine.
+- `LocalAiService`: abstraction for future local model execution.
+
+The current home screen wires these pieces together directly for the prototype. As Majika grows, move persistence and orchestration behind repositories so Firebase sync can be added without replacing the UI or service connectors.
+
+## Local AI Plan
+
+Majika should use local AI by default, not a hosted API. The planned Flutter integration is [`flutter_gemma`](https://pub.dev/packages/flutter_gemma), with user-imported or downloaded models instead of bundling a model in the app.
+
+Recommended direction:
+
+- Start with a Gemma 4 E2B `.litertlm` model when model import UX is added.
+- Keep deterministic summaries as fallback when no model is configured.
+- Let the app fetch current releases and service data itself, then pass structured context to the local model for summaries and recommendation explanations.
+- Later, optional custom providers can be added for users who want their own API key or external local server.
+
+Useful references:
+
+- [`flutter_gemma` on pub.dev](https://pub.dev/packages/flutter_gemma)
+- [AniList API docs](https://anilist.gitbook.io/anilist-apiv2-docs)
+- [AniList API route/OAuth notes](https://anilist.gitbook.io/anilist-apiv2-docs/docs/guide/migration/version-1/index)
+
+## Setup
+
+This repo is a Flutter app.
+
+```bash
+flutter pub get
+flutter run -d linux
+```
+
+The project also includes a Nix flake for a Flutter/Android-oriented development shell:
+
+```bash
+nix develop
+```
+
+Useful checks:
+
+```bash
+flutter analyze
+flutter test
+```
+
+## Known Limitations
+
+- AniList OAuth is not implemented yet.
+- Data is not persisted across devices yet.
+- Firebase is not configured yet.
+- Local model execution is abstracted but not connected to `flutter_gemma` yet.
+- Steam, Spotify, movies/TV, and other services are placeholders.
+- Recommendation scoring is deterministic and intentionally simple while the product loop is being proven.
+
+## Roadmap
+
+1. Persist imported profiles and the last used AniList username locally.
+2. Add AniList OAuth for private lists.
+3. Add model import/download UX and connect `flutter_gemma`.
+4. Add Firebase sync as an optional account layer.
+5. Add a second service, likely Steam or Spotify.
+6. Improve recommendations with embeddings, cross-service clustering, and better freshness signals.

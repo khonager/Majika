@@ -1,0 +1,254 @@
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+import 'package:majika/core/models/media_item.dart';
+import 'package:majika/core/services/media_service.dart';
+
+class AniListService implements MediaService {
+  AniListService({http.Client? client}) : _client = client ?? http.Client();
+
+  static const endpoint = 'https://graphql.anilist.co';
+  static const sourceId = 'com.majika.service.anilist';
+
+  final http.Client _client;
+
+  @override
+  String get id => sourceId;
+
+  @override
+  String get displayName => 'AniList';
+
+  @override
+  Future<List<MediaItem>> fetchUserLibrary(String userName) async {
+    final anime = await _fetchUserCollection(userName, 'ANIME');
+    final manga = await _fetchUserCollection(userName, 'MANGA');
+    return [...anime, ...manga];
+  }
+
+  @override
+  Future<List<MediaItem>> fetchRecommendationCandidates() async {
+    final anime = await _fetchCandidates('ANIME');
+    final manga = await _fetchCandidates('MANGA');
+    return [...anime, ...manga];
+  }
+
+  Future<List<MediaItem>> _fetchUserCollection(
+    String userName,
+    String mediaType,
+  ) async {
+    final response = await _postGraphQl(_userCollectionQuery, {
+      'userName': userName,
+      'type': mediaType,
+    });
+    return parseUserCollection(jsonDecode(response.body));
+  }
+
+  Future<List<MediaItem>> _fetchCandidates(String mediaType) async {
+    final response = await _postGraphQl(_candidateQuery, {
+      'type': mediaType,
+      'page': 1,
+      'perPage': mediaType == 'ANIME' ? 24 : 16,
+    });
+    return parseCandidates(jsonDecode(response.body));
+  }
+
+  Future<http.Response> _postGraphQl(
+    String query,
+    Map<String, dynamic> variables,
+  ) async {
+    final response = await _client.post(
+      Uri.parse(endpoint),
+      headers: const {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': 'Majika/1.0',
+      },
+      body: jsonEncode({'query': query, 'variables': variables}),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw AniListException(
+        'AniList returned HTTP ${response.statusCode}: ${response.body}',
+      );
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is Map && decoded['errors'] is List) {
+      final errors = decoded['errors'] as List;
+      final message = errors.isEmpty
+          ? 'Unknown AniList GraphQL error.'
+          : (errors.first as Map?)?['message']?.toString() ??
+                'Unknown AniList GraphQL error.';
+      throw AniListException(message);
+    }
+
+    return response;
+  }
+
+  static List<MediaItem> parseUserCollection(Map<String, dynamic> json) {
+    final collection = json['data']?['MediaListCollection'];
+    final lists = collection?['lists'];
+    if (lists is! List) return [];
+
+    final items = <MediaItem>[];
+    for (final list in lists) {
+      final entries = list is Map ? list['entries'] : null;
+      if (entries is! List) continue;
+
+      for (final entry in entries) {
+        if (entry is! Map<String, dynamic>) continue;
+        final media = entry['media'];
+        if (media is! Map<String, dynamic>) continue;
+        items.add(_mediaFromAniList(media, entry: entry));
+      }
+    }
+
+    return _dedupe(items);
+  }
+
+  static List<MediaItem> parseCandidates(Map<String, dynamic> json) {
+    final media = json['data']?['Page']?['media'];
+    if (media is! List) return [];
+
+    return _dedupe(
+      media
+          .whereType<Map<String, dynamic>>()
+          .map((item) => _mediaFromAniList(item))
+          .toList(),
+    );
+  }
+
+  static List<MediaItem> _dedupe(List<MediaItem> items) {
+    final seen = <String>{};
+    final deduped = <MediaItem>[];
+
+    for (final item in items) {
+      if (seen.add(item.id)) {
+        deduped.add(item);
+      }
+    }
+
+    return deduped;
+  }
+
+  static MediaItem _mediaFromAniList(
+    Map<String, dynamic> media, {
+    Map<String, dynamic>? entry,
+  }) {
+    final title = media['title'];
+    final coverImage = media['coverImage'];
+    final startDate = media['startDate'];
+    final score = entry?['score'] ?? media['averageScore'];
+    final progress = entry?['progress'];
+    final format = media['format']?.toString() ?? 'UNKNOWN';
+    final type = media['type']?.toString() ?? 'ANIME';
+    final totalUnits = type == 'MANGA' ? media['chapters'] : media['episodes'];
+
+    return MediaItem(
+      id: 'anilist_${media['id']}',
+      title:
+          title?['userPreferred']?.toString() ??
+          title?['english']?.toString() ??
+          title?['romaji']?.toString() ??
+          'Untitled',
+      coverUrl:
+          coverImage?['extraLarge']?.toString() ??
+          coverImage?['large']?.toString() ??
+          '',
+      tags: List<String>.from(media['genres'] ?? const []),
+      rating: score is num && score > 0 ? score.toDouble() / 10 : null,
+      subtitle: _subtitleFor(type, format, totalUnits, progress),
+      extensionId: sourceId,
+      sourceId: sourceId,
+      mediaType: type,
+      format: format,
+      status: entry?['status']?.toString() ?? media['status']?.toString(),
+      description: media['description']?.toString(),
+      startYear: startDate is Map ? startDate['year'] as int? : null,
+      popularity: media['popularity'] as int?,
+      updatedAt: entry?['updatedAt'] as int?,
+    );
+  }
+
+  static String _subtitleFor(
+    String type,
+    String format,
+    dynamic totalUnits,
+    dynamic progress,
+  ) {
+    final unit = type == 'MANGA' ? 'chapters' : 'episodes';
+    final pieces = <String>[
+      format.replaceAll('_', ' '),
+      if (totalUnits is int && totalUnits > 0) '$totalUnits $unit',
+      if (progress is int && progress > 0) '$progress seen',
+    ];
+    return pieces.join(' · ');
+  }
+
+  static const _userCollectionQuery = r'''
+    query ($userName: String, $type: MediaType) {
+      MediaListCollection(userName: $userName, type: $type) {
+        lists {
+          entries {
+            score(format: POINT_100)
+            status
+            progress
+            updatedAt
+            media {
+              id
+              type
+              format
+              title { userPreferred romaji english }
+              coverImage { extraLarge large }
+              genres
+              averageScore
+              popularity
+              episodes
+              chapters
+              status
+              seasonYear
+              startDate { year month day }
+              description(asHtml: false)
+            }
+          }
+        }
+      }
+    }
+  ''';
+
+  static const _candidateQuery = r'''
+    query ($type: MediaType, $page: Int, $perPage: Int) {
+      Page(page: $page, perPage: $perPage) {
+        media(
+          type: $type,
+          sort: [TRENDING_DESC, POPULARITY_DESC],
+          isAdult: false
+        ) {
+          id
+          type
+          format
+          title { userPreferred romaji english }
+          coverImage { extraLarge large }
+          genres
+          averageScore
+          popularity
+          episodes
+          chapters
+          status
+          seasonYear
+          startDate { year month day }
+          description(asHtml: false)
+        }
+      }
+    }
+  ''';
+}
+
+class AniListException implements Exception {
+  final String message;
+
+  const AniListException(this.message);
+
+  @override
+  String toString() => message;
+}

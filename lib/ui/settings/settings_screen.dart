@@ -209,7 +209,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _InfoRow(
                   icon: Icons.extension_rounded,
                   title: 'Discover source',
-                  subtitle: 'AniList Lua extension',
+                  subtitle: 'Typed AniList connector',
                 ),
               ],
             ),

@@ -16,11 +16,12 @@ class MajikaApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF121418), // Deep, elegant dark
-        primaryColor: const Color(0xFF6B4EE6), // Vibrant purple accent
+        scaffoldBackgroundColor: const Color(0xFF0F1115),
+        primaryColor: const Color(0xFFB9C4C9),
         colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF6B4EE6),
-          secondary: Color(0xFF00D2FF), // Neon cyan for secondary touches
+          primary: Color(0xFFE7ECEF),
+          secondary: Color(0xFF89D6B3),
+          surface: Color(0xFF171A20),
         ),
         textTheme: GoogleFonts.outfitTextTheme(ThemeData.dark().textTheme),
         useMaterial3: true,
