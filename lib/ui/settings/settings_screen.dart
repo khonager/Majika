@@ -1,10 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
 import 'package:majika/ui/shared/glass_panel.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const _downloadableLocalAiModels = [
+  _DownloadableModel(
+    name: 'Qwen3 0.6B',
+    sizeLabel: '586 MB',
+    providerLabel: 'Qwen',
+    mobileUrl:
+        'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
+    desktopUrl:
+        'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
+    description: 'Compact multilingual chat model with strong request parsing.',
+    modelType: ModelType.qwen,
+    fileType: ModelFileType.task,
+  ),
   _DownloadableModel(
     name: 'FunctionGemma 270M',
     sizeLabel: '284 MB',
@@ -16,18 +30,6 @@ const _downloadableLocalAiModels = [
     description:
         'Fastest option for turning search requests into tags and filters.',
     modelType: ModelType.functionGemma,
-    fileType: ModelFileType.task,
-  ),
-  _DownloadableModel(
-    name: 'Qwen3 0.6B',
-    sizeLabel: '586 MB',
-    providerLabel: 'Qwen',
-    mobileUrl:
-        'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
-    desktopUrl:
-        'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
-    description: 'Balanced small model for better language understanding.',
-    modelType: ModelType.qwen,
     fileType: ModelFileType.task,
   ),
   _DownloadableModel(
@@ -53,6 +55,19 @@ const _downloadableLocalAiModels = [
         'https://huggingface.co/litert-community/Phi-4-mini-instruct/resolve/main/Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.litertlm',
     description:
         'Large option for high-end devices; expect slower downloads and startup.',
+    modelType: ModelType.general,
+    fileType: ModelFileType.task,
+  ),
+  _DownloadableModel(
+    name: 'FastVLM 0.5B',
+    sizeLabel: '0.5 GB',
+    providerLabel: 'FastVLM',
+    mobileUrl:
+        'https://huggingface.co/litert-community/FastVLM-0.5B/resolve/main/FastVLM-0.5B.litertlm',
+    desktopUrl:
+        'https://huggingface.co/litert-community/FastVLM-0.5B/resolve/main/FastVLM-0.5B.litertlm',
+    description:
+        'Vision-language model; useful later when image prompts are wired.',
     modelType: ModelType.general,
     fileType: ModelFileType.task,
   ),
@@ -82,10 +97,97 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _aiContextItems = 24;
   double? _downloadProgress;
   final _localEndpointController = TextEditingController(
-    text: 'http://127.0.0.1:11434',
+    text: defaultLocalAiEndpoint,
+  );
+  final _localServerModelController = TextEditingController(
+    text: defaultLocalAiModel,
   );
 
   bool get _hasDownloadedModel => _downloadedModelName != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+
+    final selectedModelName = prefs.getString(
+      LocalAiSettingsKeys.selectedModelName,
+    );
+    _DownloadableModel? selectedModel;
+    for (final model in _downloadableLocalAiModels) {
+      if (model.name == selectedModelName) {
+        selectedModel = model;
+        break;
+      }
+    }
+
+    setState(() {
+      _immersiveReader =
+          prefs.getBool(LocalAiSettingsKeys.immersiveReader) ??
+          _immersiveReader;
+      _downloadOnWifiOnly =
+          prefs.getBool(LocalAiSettingsKeys.downloadOnWifiOnly) ??
+          _downloadOnWifiOnly;
+      _allowExplicitContent =
+          prefs.getBool(LocalAiSettingsKeys.allowExplicitContent) ??
+          _allowExplicitContent;
+      _enableMotionEffects =
+          prefs.getBool(LocalAiSettingsKeys.enableMotionEffects) ??
+          _enableMotionEffects;
+      _useLocalAi =
+          prefs.getBool(LocalAiSettingsKeys.useLocalAi) ?? _useLocalAi;
+      _useAiForSearch =
+          prefs.getBool(LocalAiSettingsKeys.useAiForSearch) ?? _useAiForSearch;
+      _localAiProvider =
+          prefs.getString(LocalAiSettingsKeys.localAiProvider) ??
+          _localAiProvider;
+      _selectedModel = selectedModel ?? _selectedModel;
+      _downloadedModelName = prefs.getString(
+        LocalAiSettingsKeys.downloadedModelName,
+      );
+      _imageQuality =
+          prefs.getDouble(LocalAiSettingsKeys.imageQuality) ?? _imageQuality;
+      _aiContextItems =
+          prefs.getDouble(LocalAiSettingsKeys.aiContextItems) ??
+          _aiContextItems;
+      _localEndpointController.text =
+          prefs.getString(LocalAiSettingsKeys.localEndpoint) ??
+          _localEndpointController.text;
+      _localServerModelController.text =
+          prefs.getString(LocalAiSettingsKeys.localServerModel) ??
+          _localServerModelController.text;
+    });
+  }
+
+  Future<void> _saveBool(String key, bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(key, value);
+  }
+
+  Future<void> _saveDouble(String key, double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(key, value);
+  }
+
+  Future<void> _saveString(String key, String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, value);
+  }
+
+  Future<void> _saveDownloadedModel(_DownloadableModel model) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(LocalAiSettingsKeys.downloadedModelName, model.name);
+    await prefs.setBool(LocalAiSettingsKeys.useLocalAi, true);
+    await prefs.setString(
+      LocalAiSettingsKeys.localAiProvider,
+      model.providerLabel,
+    );
+  }
 
   Future<void> _downloadRecommendedModel() async {
     if (_isDownloadingModel) return;
@@ -113,6 +215,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _localAiProvider = modelToDownload.providerLabel;
         _downloadProgress = 1;
       });
+      await _saveDownloadedModel(modelToDownload);
+      if (!mounted) return;
       showInfoToast(
         context,
         '${installation.modelId} downloaded and activated.',
@@ -130,6 +234,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     _localEndpointController.dispose();
+    _localServerModelController.dispose();
     super.dispose();
   }
 
@@ -169,7 +274,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'These controls are local for now, but the page is fully interactive so we can keep building on top of it.',
+                    'Settings here are saved on this device. Rows marked planned are visible now but not wired into the rest of the app yet.',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: Colors.white70,
                       height: 1.45,
@@ -210,40 +315,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _SwitchRow(
                   icon: Icons.chrome_reader_mode_rounded,
                   title: 'Immersive reader',
-                  subtitle: 'Hide extra chrome while reading pages.',
+                  subtitle:
+                      'Saved preference; reader chrome integration is planned.',
                   value: _immersiveReader,
                   onChanged: (value) {
                     setState(() => _immersiveReader = value);
+                    _saveBool(LocalAiSettingsKeys.immersiveReader, value);
                     showInfoToast(
                       context,
                       value
-                          ? 'Immersive reader enabled.'
-                          : 'Reader chrome will stay visible.',
+                          ? 'Immersive reader preference saved.'
+                          : 'Reader chrome preference saved.',
                     );
                   },
                 ),
                 _SwitchRow(
                   icon: Icons.animation_rounded,
                   title: 'Motion effects',
-                  subtitle: 'Keep subtle transitions and glass shimmer.',
+                  subtitle:
+                      'Saved preference; app-wide motion handling is planned.',
                   value: _enableMotionEffects,
                   onChanged: (value) {
                     setState(() => _enableMotionEffects = value);
+                    _saveBool(LocalAiSettingsKeys.enableMotionEffects, value);
                     showInfoToast(
                       context,
                       value
-                          ? 'Motion effects enabled.'
-                          : 'Motion effects reduced.',
+                          ? 'Motion preference saved.'
+                          : 'Reduced-motion preference saved.',
                     );
                   },
                 ),
                 _SliderRow(
                   icon: Icons.hd_rounded,
                   title: 'Image quality',
-                  subtitle: 'Balances sharper pages against faster loading.',
+                  subtitle:
+                      'Saved preference; image request quality is not wired yet.',
                   value: _imageQuality,
                   onChanged: (value) => setState(() => _imageQuality = value),
                   onChangeEnd: (value) {
+                    _saveDouble(LocalAiSettingsKeys.imageQuality, value);
                     showInfoToast(
                       context,
                       'Preferred image quality set to ${(100 * value).round()}%.',
@@ -260,15 +371,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _SwitchRow(
                   icon: Icons.wifi_tethering_rounded,
                   title: 'Wi-Fi only downloads',
-                  subtitle: 'Avoid large transfers on mobile data.',
+                  subtitle:
+                      'Saved preference; network gating is not wired yet.',
                   value: _downloadOnWifiOnly,
                   onChanged: (value) {
                     setState(() => _downloadOnWifiOnly = value);
+                    _saveBool(LocalAiSettingsKeys.downloadOnWifiOnly, value);
                     showInfoToast(
                       context,
                       value
-                          ? 'Downloads are now limited to Wi-Fi.'
-                          : 'Downloads can use any network.',
+                          ? 'Wi-Fi-only download preference saved.'
+                          : 'Any-network download preference saved.',
                     );
                   },
                 ),
@@ -292,15 +405,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _SwitchRow(
                   icon: Icons.visibility_off_rounded,
                   title: 'Hide explicit content',
-                  subtitle: 'Safer browsing while the filter system is basic.',
+                  subtitle:
+                      'Saved preference; feed filtering is not wired yet.',
                   value: !_allowExplicitContent,
                   onChanged: (value) {
                     setState(() => _allowExplicitContent = !value);
+                    _saveBool(LocalAiSettingsKeys.allowExplicitContent, !value);
                     showInfoToast(
                       context,
                       value
-                          ? 'Explicit content will stay hidden.'
-                          : 'Explicit content may appear in future feeds.',
+                          ? 'Explicit-content preference saved.'
+                          : 'Explicit-content preference saved.',
                     );
                   },
                 ),
@@ -322,18 +437,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _OptionRow(
                   icon: Icons.hub_rounded,
                   title: 'Provider',
-                  subtitle: 'Pick the local model runner Majika should target.',
+                  subtitle:
+                      'Saved preference for local AI controls and downloads.',
                   value: _localAiProvider,
                   options: const [
                     'FunctionGemma',
                     'Qwen',
                     'Phi',
-                    'External local server',
-                    'Fallback rules only',
+                    externalLocalAiProvider,
+                    fallbackRulesProvider,
                   ],
                   onChanged: (value) {
                     if (value == null) return;
-                    setState(() => _localAiProvider = value);
+                    setState(() {
+                      _localAiProvider = value;
+                      if (value == externalLocalAiProvider) {
+                        _useLocalAi = true;
+                      }
+                      if (value == fallbackRulesProvider) {
+                        _useLocalAi = false;
+                      }
+                    });
+                    _saveString(LocalAiSettingsKeys.localAiProvider, value);
+                    if (value == externalLocalAiProvider) {
+                      _saveBool(LocalAiSettingsKeys.useLocalAi, true);
+                    }
+                    if (value == fallbackRulesProvider) {
+                      _saveBool(LocalAiSettingsKeys.useLocalAi, false);
+                    }
                     showInfoToast(context, 'Local AI provider set to $value.');
                   },
                 ),
@@ -348,6 +479,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _selectedModel = model;
                       _localAiProvider = model.providerLabel;
                     });
+                    _saveString(
+                      LocalAiSettingsKeys.selectedModelName,
+                      model.name,
+                    );
+                    _saveString(
+                      LocalAiSettingsKeys.localAiProvider,
+                      model.providerLabel,
+                    );
                   },
                   onDownload: _downloadRecommendedModel,
                 ),
@@ -355,19 +494,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   fieldKey: const ValueKey('local-ai-endpoint'),
                   icon: Icons.dns_rounded,
                   title: 'Local server endpoint',
-                  subtitle:
-                      'Optional later path for Ollama, llama.cpp, or another local runner.',
+                  subtitle: 'OpenAI-compatible /v1/chat/completions endpoint.',
                   controller: _localEndpointController,
-                  hintText: 'http://127.0.0.1:11434',
+                  hintText: defaultLocalAiEndpoint,
+                  onChanged: (value) =>
+                      _saveString(LocalAiSettingsKeys.localEndpoint, value),
+                ),
+                _TextFieldRow(
+                  fieldKey: const ValueKey('local-ai-server-model'),
+                  icon: Icons.smart_toy_rounded,
+                  title: 'Local server model',
+                  subtitle:
+                      'Model name sent in OpenAI-compatible requests, such as gemma3:4b.',
+                  controller: _localServerModelController,
+                  hintText: defaultLocalAiModel,
+                  onChanged: (value) =>
+                      _saveString(LocalAiSettingsKeys.localServerModel, value),
                 ),
                 _SwitchRow(
                   icon: Icons.memory_rounded,
                   title: 'Use local model when available',
                   subtitle:
-                      'Falls back to rules until a Gemma model is imported.',
+                      'Saved preference; active only after a Gemma model downloads.',
                   value: _useLocalAi,
                   onChanged: (value) {
                     setState(() => _useLocalAi = value);
+                    _saveBool(LocalAiSettingsKeys.useLocalAi, value);
                     showInfoToast(
                       context,
                       value
@@ -380,10 +532,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   icon: Icons.manage_search_rounded,
                   title: 'AI search interpretation',
                   subtitle:
-                      'Let the local model choose tags, formats, and filters from requests.',
+                      'Saved preference; falls back to deterministic parsing without a local model.',
                   value: _useAiForSearch,
                   onChanged: (value) {
                     setState(() => _useAiForSearch = value);
+                    _saveBool(LocalAiSettingsKeys.useAiForSearch, value);
                     showInfoToast(
                       context,
                       value
@@ -405,6 +558,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   valueText: _aiContextItems.round().toString(),
                   onChanged: (value) => setState(() => _aiContextItems = value),
                   onChangeEnd: (value) {
+                    _saveDouble(LocalAiSettingsKeys.aiContextItems, value);
                     showInfoToast(
                       context,
                       'Local AI context limit set to ${value.round()} items.',
@@ -767,6 +921,7 @@ class _TextFieldRow extends StatelessWidget {
   final String subtitle;
   final TextEditingController controller;
   final String hintText;
+  final ValueChanged<String>? onChanged;
 
   const _TextFieldRow({
     this.fieldKey,
@@ -775,6 +930,7 @@ class _TextFieldRow extends StatelessWidget {
     required this.subtitle,
     required this.controller,
     required this.hintText,
+    this.onChanged,
   });
 
   @override
@@ -796,6 +952,7 @@ class _TextFieldRow extends StatelessWidget {
           TextField(
             key: fieldKey,
             controller: controller,
+            onChanged: onChanged,
             style: const TextStyle(color: Colors.white),
             decoration: _fieldDecoration(context).copyWith(hintText: hintText),
           ),

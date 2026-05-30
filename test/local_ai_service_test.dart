@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/ai/local_ai_service.dart';
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation.dart';
@@ -70,6 +74,54 @@ void main() {
     expect(chosen?.item.id, 'anilist_2');
     expect(chosen?.isAiPick, isTrue);
     expect(chosen?.reason, 'Best fit from the AI pass.');
+  });
+
+  test('local AI service can use an OpenAI-compatible local server', () async {
+    Object? requestBody;
+    Uri? requestUrl;
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        provider: externalLocalAiProvider,
+        endpoint: 'http://127.0.0.1:52625',
+        serverModel: 'gemma3:4b',
+        contextItems: 24,
+      ),
+      httpPost: (url, {headers, body}) async {
+        requestUrl = url;
+        requestBody = jsonDecode(body.toString());
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {
+                  'role': 'assistant',
+                  'content':
+                      '{"tags":["Romance"],"formats":["MOVIE"],"mediaTypes":["ANIME"],"includeAdult":false}',
+                },
+              },
+            ],
+          }),
+          200,
+        );
+      },
+    );
+
+    final interpreted = await service.interpretRecommendationRequest(
+      const RecommendationQuery(request: 'romance movie'),
+      availableTags: const ['Romance', 'Mystery'],
+    );
+
+    expect(requestUrl.toString(), 'http://127.0.0.1:52625/v1/chat/completions');
+    expect(requestBody, isA<Map<String, dynamic>>());
+    expect((requestBody as Map<String, dynamic>)['model'], 'gemma3:4b');
+    expect(
+      (requestBody as Map<String, dynamic>)['messages'],
+      isA<List<dynamic>>(),
+    );
+    expect(interpreted.aiSelectedTags, contains('Romance'));
+    expect(interpreted.formats, contains('MOVIE'));
   });
 }
 

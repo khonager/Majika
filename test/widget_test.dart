@@ -7,8 +7,13 @@ import 'package:majika/core/services/media_service.dart';
 import 'package:majika/main.dart';
 import 'package:majika/ui/home/home_screen.dart';
 import 'package:majika/ui/settings/settings_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   testWidgets('app renders AniList connect prompt', (
     WidgetTester tester,
   ) async {
@@ -198,16 +203,17 @@ void main() {
 
     expect(find.text('Local AI'), findsOneWidget);
     expect(find.text('Provider'), findsOneWidget);
-    expect(find.text('FunctionGemma 270M'), findsOneWidget);
-    expect(find.text('284 MB · FunctionGemma'), findsOneWidget);
-    expect(find.text('Qwen3 0.6B'), findsNothing);
-    await tester.tap(find.text('FunctionGemma 270M'));
-    await tester.pumpAndSettle();
     expect(find.text('Qwen3 0.6B'), findsOneWidget);
-    await tester.tap(find.text('Qwen3 0.6B').last);
-    await tester.pumpAndSettle();
     expect(find.text('586 MB · Qwen'), findsOneWidget);
+    expect(find.text('FunctionGemma 270M'), findsNothing);
+    await tester.tap(find.text('Qwen3 0.6B'));
+    await tester.pumpAndSettle();
+    expect(find.text('FunctionGemma 270M'), findsOneWidget);
+    await tester.tap(find.text('FunctionGemma 270M').last);
+    await tester.pumpAndSettle();
+    expect(find.text('284 MB · FunctionGemma'), findsOneWidget);
     expect(find.text('Local server endpoint'), findsOneWidget);
+    expect(find.text('Local server model'), findsOneWidget);
 
     expect(find.text('Use local model when available'), findsOneWidget);
     expect(find.text('AI search interpretation'), findsOneWidget);
@@ -227,6 +233,43 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Current provider'), findsOneWidget);
+  });
+
+  testWidgets('settings persists recommendation context items', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('Recommendation context items'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('24'), findsOneWidget);
+
+    await tester.drag(find.byType(Slider).last, const Offset(300, 0));
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    final savedContextItems = prefs.getDouble('settings.aiContextItems');
+    expect(savedContextItems, isNotNull);
+    expect(savedContextItems, isNot(equals(24)));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('Recommendation context items'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text(savedContextItems!.round().toString()), findsOneWidget);
   });
 }
 

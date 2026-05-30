@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:http/http.dart' as http;
+import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/models/recommendation.dart';
 import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/taste_profile.dart';
@@ -67,10 +69,19 @@ class DeterministicLocalAiService implements LocalAiService {
 class FlutterGemmaLocalAiService implements LocalAiService {
   final LocalAiService fallback;
   final Future<String> Function(String prompt, int maxTokens)? textGenerator;
+  final Future<LocalAiRuntimeSettings> Function()? settingsLoader;
+  final Future<http.Response> Function(
+    Uri url, {
+    Map<String, String>? headers,
+    Object? body,
+  })?
+  httpPost;
 
   const FlutterGemmaLocalAiService({
     this.fallback = const DeterministicLocalAiService(),
     this.textGenerator,
+    this.settingsLoader,
+    this.httpPost,
   });
 
   @override
@@ -85,7 +96,10 @@ class FlutterGemmaLocalAiService implements LocalAiService {
 
   @override
   Future<String> summarizeProfile(TasteProfile profile) async {
-    if (!isConfigured) return fallback.summarizeProfile(profile);
+    final settings = await _runtimeSettings();
+    if (!settings.useLocalAi && textGenerator == null) {
+      return fallback.summarizeProfile(profile);
+    }
 
     final prompt =
         '''
@@ -97,7 +111,11 @@ High rated examples: ${profile.highRatedItems.map((item) => item.title).take(8).
 ''';
 
     try {
-      final text = await _generateText(prompt, maxTokens: 512);
+      final text = await _generateText(
+        prompt,
+        maxTokens: 512,
+        settings: settings,
+      );
       return text.trim().isEmpty ? profile.summary : text.trim();
     } catch (_) {
       return fallback.summarizeProfile(profile);
@@ -109,7 +127,10 @@ High rated examples: ${profile.highRatedItems.map((item) => item.title).take(8).
     RecommendationQuery query, {
     required Iterable<String> availableTags,
   }) async {
-    if (!query.isActive || !isConfigured) {
+    final settings = await _runtimeSettings();
+    if (!query.isActive ||
+        (!settings.useLocalAi && textGenerator == null) ||
+        !settings.useAiForSearch) {
       return fallback.interpretRecommendationRequest(
         query,
         availableTags: availableTags,
@@ -135,7 +156,11 @@ Adult content selected: ${query.includeAdult}
 ''';
 
     try {
-      final response = await _generateText(prompt, maxTokens: 768);
+      final response = await _generateText(
+        prompt,
+        maxTokens: 768,
+        settings: settings,
+      );
       final interpreted = _queryFromModelJson(
         response,
         original: query,
@@ -161,7 +186,8 @@ Adult content selected: ${query.includeAdult}
     TasteProfile profile,
     Recommendation recommendation,
   ) async {
-    if (!isConfigured) {
+    final settings = await _runtimeSettings();
+    if (!settings.useLocalAi && textGenerator == null) {
       return fallback.explainRecommendation(profile, recommendation);
     }
 
@@ -178,17 +204,37 @@ Signals: ${recommendation.signals.join(', ')}
 ''';
 
     try {
-      final text = await _generateText(prompt, maxTokens: 384);
+      final text = await _generateText(
+        prompt,
+        maxTokens: 384,
+        settings: settings,
+      );
       return text.trim().isEmpty ? recommendation.reason : text.trim();
     } catch (_) {
       return fallback.explainRecommendation(profile, recommendation);
     }
   }
 
-  Future<String> _generateText(String prompt, {required int maxTokens}) async {
+  Future<String> _generateText(
+    String prompt, {
+    required int maxTokens,
+    required LocalAiRuntimeSettings settings,
+  }) async {
     final generator = textGenerator;
     if (generator != null) {
       return generator(prompt, maxTokens);
+    }
+
+    if (settings.usesExternalServer) {
+      return _generateExternalText(
+        prompt,
+        maxTokens: maxTokens,
+        settings: settings,
+      );
+    }
+
+    if (!isConfigured) {
+      throw StateError('No local AI model is configured.');
     }
 
     final model = await FlutterGemma.getActiveModel(
@@ -211,6 +257,68 @@ Signals: ${recommendation.signals.join(', ')}
     } finally {
       await model.close();
     }
+  }
+
+  Future<String> _generateExternalText(
+    String prompt, {
+    required int maxTokens,
+    required LocalAiRuntimeSettings settings,
+  }) async {
+    final post = httpPost ?? http.post;
+    final response = await post(
+      settings.chatCompletionsUri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'model': settings.serverModel,
+        'messages': [
+          {'role': 'user', 'content': prompt},
+        ],
+        'temperature': 0.1,
+        'max_tokens': maxTokens,
+        'stream': false,
+      }),
+    ).timeout(const Duration(seconds: 60));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError(
+        'Local AI server returned HTTP ${response.statusCode}: ${response.body}',
+      );
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Local AI response was not a JSON object.');
+    }
+
+    final choices = decoded['choices'];
+    if (choices is! List || choices.isEmpty) {
+      throw const FormatException('Local AI response did not include choices.');
+    }
+
+    final firstChoice = choices.first;
+    if (firstChoice is! Map<String, dynamic>) {
+      throw const FormatException('Local AI choice was not a JSON object.');
+    }
+
+    final message = firstChoice['message'];
+    if (message is Map<String, dynamic>) {
+      final content = message['content'];
+      if (content != null) return content.toString();
+    }
+
+    final text = firstChoice['text'];
+    if (text != null) return text.toString();
+
+    throw const FormatException('Local AI response did not include text.');
+  }
+
+  Future<LocalAiRuntimeSettings> _runtimeSettings() {
+    final loader = settingsLoader;
+    if (loader != null) return loader();
+    if (textGenerator != null) {
+      return Future.value(const LocalAiRuntimeSettings.defaults(enabled: true));
+    }
+    return LocalAiRuntimeSettings.load(defaultEnabled: textGenerator != null);
   }
 
   ModelType _activeModelType() {
@@ -278,7 +386,8 @@ Signals: ${recommendation.signals.join(', ')}
     required RecommendationQuery query,
   }) async {
     if (recommendations.isEmpty) return null;
-    if (!isConfigured) {
+    final settings = await _runtimeSettings();
+    if (!settings.useLocalAi && textGenerator == null) {
       return fallback.chooseTopRecommendation(
         profile,
         recommendations,
@@ -312,7 +421,11 @@ Options: ${jsonEncode(options)}
 ''';
 
     try {
-      final response = await _generateText(prompt, maxTokens: 512);
+      final response = await _generateText(
+        prompt,
+        maxTokens: 512,
+        settings: settings,
+      );
       final jsonText = _extractJsonObject(response);
       if (jsonText == null) return recommendations.first;
       final decoded = jsonDecode(jsonText);

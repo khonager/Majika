@@ -40,6 +40,7 @@ dependencies:
   lua_dardo: ^0.0.5
   url_launcher: ^6.3.2
   path_provider: ^2.1.5
+  shared_preferences: ^2.5.5
   flutter_gemma: ^0.12.6
 
 dev_dependencies:
