@@ -16,7 +16,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _enableMotionEffects = true;
   bool _useLocalAi = false;
   bool _useAiForSearch = true;
+  String _localAiProvider = 'Gemma .litertlm';
   double _imageQuality = 0.85;
+  double _aiContextItems = 24;
+  final _modelPathController = TextEditingController();
+  final _localEndpointController = TextEditingController(
+    text: 'http://127.0.0.1:11434',
+  );
+
+  bool get _hasModelPath => _modelPathController.text.trim().isNotEmpty;
+
+  @override
+  void dispose() {
+    _modelPathController.dispose();
+    _localEndpointController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -204,6 +219,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle:
                   'Model controls for local-only profile summaries and search interpretation.',
               children: [
+                _OptionRow(
+                  icon: Icons.hub_rounded,
+                  title: 'Provider',
+                  subtitle: 'Pick the local model runner Majika should target.',
+                  value: _localAiProvider,
+                  options: const [
+                    'Gemma .litertlm',
+                    'External local server',
+                    'Fallback rules only',
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _localAiProvider = value);
+                    showInfoToast(context, 'Local AI provider set to $value.');
+                  },
+                ),
+                _TextFieldRow(
+                  fieldKey: const ValueKey('local-ai-model-path'),
+                  icon: Icons.storage_rounded,
+                  title: 'Model path',
+                  subtitle:
+                      'Point this at a downloaded .litertlm file when flutter_gemma is connected.',
+                  controller: _modelPathController,
+                  hintText: '~/models/gemma-4-e2b-it.litertlm',
+                  onChanged: (_) => setState(() {}),
+                ),
+                _TextFieldRow(
+                  fieldKey: const ValueKey('local-ai-endpoint'),
+                  icon: Icons.dns_rounded,
+                  title: 'Local server endpoint',
+                  subtitle:
+                      'Optional later path for Ollama, llama.cpp, or another local runner.',
+                  controller: _localEndpointController,
+                  hintText: 'http://127.0.0.1:11434',
+                ),
                 _SwitchRow(
                   icon: Icons.memory_rounded,
                   title: 'Use local model when available',
@@ -236,6 +286,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     );
                   },
                 ),
+                _SliderRow(
+                  icon: Icons.dataset_rounded,
+                  title: 'Recommendation context items',
+                  subtitle:
+                      'How many profile and candidate signals to pass to the local model.',
+                  value: _aiContextItems,
+                  min: 8,
+                  max: 48,
+                  divisions: 5,
+                  label: _aiContextItems.round().toString(),
+                  valueText: _aiContextItems.round().toString(),
+                  onChanged: (value) => setState(() => _aiContextItems = value),
+                  onChangeEnd: (value) {
+                    showInfoToast(
+                      context,
+                      'Local AI context limit set to ${value.round()} items.',
+                    );
+                  },
+                ),
                 _ActionRow(
                   icon: Icons.file_open_rounded,
                   title: 'Import Gemma model',
@@ -244,10 +313,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onTap: () =>
                       showFeatureComingSoon(context, 'Local model import'),
                 ),
-                const _InfoRow(
+                _InfoRow(
                   icon: Icons.offline_bolt_rounded,
                   title: 'Current provider',
-                  subtitle: 'Deterministic fallback rules',
+                  subtitle: _useLocalAi && _hasModelPath
+                      ? 'Configured for $_localAiProvider, execution not wired yet'
+                      : 'Deterministic fallback rules until a model is configured',
                 ),
               ],
             ),
@@ -384,11 +455,115 @@ class _SwitchRow extends StatelessWidget {
   }
 }
 
+class _OptionRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String value;
+  final List<String> options;
+  final ValueChanged<String?> onChanged;
+
+  const _OptionRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(icon, color: Colors.white70),
+            title: Text(title, style: const TextStyle(color: Colors.white)),
+            subtitle: Text(
+              subtitle,
+              style: const TextStyle(color: Colors.white70),
+            ),
+          ),
+          DropdownButtonFormField<String>(
+            initialValue: value,
+            dropdownColor: const Color(0xFF1A1F27),
+            iconEnabledColor: Colors.white70,
+            style: const TextStyle(color: Colors.white),
+            decoration: _fieldDecoration(context),
+            items: [
+              for (final option in options)
+                DropdownMenuItem(value: option, child: Text(option)),
+            ],
+            onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TextFieldRow extends StatelessWidget {
+  final Key? fieldKey;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final TextEditingController controller;
+  final String hintText;
+  final ValueChanged<String>? onChanged;
+
+  const _TextFieldRow({
+    this.fieldKey,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.controller,
+    required this.hintText,
+    this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(icon, color: Colors.white70),
+            title: Text(title, style: const TextStyle(color: Colors.white)),
+            subtitle: Text(
+              subtitle,
+              style: const TextStyle(color: Colors.white70),
+            ),
+          ),
+          TextField(
+            key: fieldKey,
+            controller: controller,
+            onChanged: onChanged,
+            style: const TextStyle(color: Colors.white),
+            decoration: _fieldDecoration(context).copyWith(hintText: hintText),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SliderRow extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
   final double value;
+  final double min;
+  final double max;
+  final int? divisions;
+  final String? label;
+  final String? valueText;
   final ValueChanged<double> onChanged;
   final ValueChanged<double> onChangeEnd;
 
@@ -397,6 +572,11 @@ class _SliderRow extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.value,
+    this.min = 0,
+    this.max = 1,
+    this.divisions,
+    this.label,
+    this.valueText,
     required this.onChanged,
     required this.onChangeEnd,
   });
@@ -416,11 +596,19 @@ class _SliderRow extends StatelessWidget {
               style: const TextStyle(color: Colors.white70),
             ),
             trailing: Text(
-              '${(100 * value).round()}%',
+              valueText ?? '${(100 * value).round()}%',
               style: const TextStyle(color: Colors.white),
             ),
           ),
-          Slider(value: value, onChanged: onChanged, onChangeEnd: onChangeEnd),
+          Slider(
+            value: value,
+            min: min,
+            max: max,
+            divisions: divisions,
+            label: label,
+            onChanged: onChanged,
+            onChangeEnd: onChangeEnd,
+          ),
         ],
       ),
     );
@@ -451,6 +639,24 @@ class _ActionRow extends StatelessWidget {
       onTap: onTap,
     );
   }
+}
+
+InputDecoration _fieldDecoration(BuildContext context) {
+  final accent = Theme.of(context).colorScheme.secondary;
+
+  return InputDecoration(
+    filled: true,
+    fillColor: Colors.white.withValues(alpha: 0.06),
+    hintStyle: const TextStyle(color: Colors.white38),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: accent.withValues(alpha: 0.8)),
+    ),
+  );
 }
 
 class _InfoRow extends StatelessWidget {

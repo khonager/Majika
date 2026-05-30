@@ -122,6 +122,27 @@ void main() {
     },
   );
 
+  testWidgets('sign out clears the imported AniList profile', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('@tester · Mystery + Drama'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Sign out'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Connect AniList'), findsOneWidget);
+    expect(find.text('@tester · Mystery + Drama'), findsNothing);
+  });
+
   testWidgets('settings exposes local AI management controls', (
     WidgetTester tester,
   ) async {
@@ -130,13 +151,32 @@ void main() {
     await tester.scrollUntilVisible(
       find.text('Local AI'),
       500,
-      scrollable: find.byType(Scrollable),
+      scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
 
     expect(find.text('Local AI'), findsOneWidget);
+    expect(find.text('Provider'), findsOneWidget);
+    expect(find.text('Model path'), findsOneWidget);
+    expect(find.text('Local server endpoint'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('local-ai-model-path')),
+      '/tmp/gemma-4-e2b-it.litertlm',
+    );
+    await tester.pumpAndSettle();
+
     expect(find.text('Use local model when available'), findsOneWidget);
     expect(find.text('AI search interpretation'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('Recommendation context items'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Recommendation context items'), findsOneWidget);
     expect(find.text('Import Gemma model'), findsOneWidget);
     expect(find.text('Current provider'), findsOneWidget);
   });

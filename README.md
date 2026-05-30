@@ -69,6 +69,7 @@ The desired search flow is:
 Recommended direction:
 
 - Start with a Gemma 4 E2B `.litertlm` model when model import UX is added.
+- Settings already expose the intended knobs: provider target, model path, optional local-server endpoint, search-interpretation toggle, and context-item budget. These controls are configuration scaffolding until model execution is wired.
 - Keep deterministic summaries as fallback when no model is configured.
 - Use local AI to turn natural-language searches like `romance movie about time travel` into structured tags/formats such as `Romance`, `Time Manipulation`, and `MOVIE`.
 - Let the app fetch current releases and service data itself, then pass structured context to the local model for summaries and recommendation explanations.
