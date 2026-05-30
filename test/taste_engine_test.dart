@@ -250,8 +250,9 @@ void main() {
         request: 'romance movie about time travel',
       ).withInferredSelections(RecommendationQuery.browsableTags);
 
-      expect(timeTravelMovie.selectedTags, contains('Romance'));
-      expect(timeTravelMovie.selectedTags, contains('Time Manipulation'));
+      expect(timeTravelMovie.selectedTags, isEmpty);
+      expect(timeTravelMovie.aiSelectedTags, contains('Romance'));
+      expect(timeTravelMovie.aiSelectedTags, contains('Time Manipulation'));
       expect(timeTravelMovie.formats, contains('MOVIE'));
       expect(timeTravelMovie.mediaTypes, contains('ANIME'));
 
@@ -259,8 +260,26 @@ void main() {
         request: 'obsessed character thriller',
       ).withInferredSelections(RecommendationQuery.browsableTags);
 
-      expect(obsessedCharacter.selectedTags, contains('Yandere'));
-      expect(obsessedCharacter.selectedTags, contains('Thriller'));
+      expect(obsessedCharacter.aiSelectedTags, contains('Yandere'));
+      expect(obsessedCharacter.aiSelectedTags, contains('Thriller'));
+    },
+  );
+
+  test(
+    'new searches clear stale AI selected tags while keeping pinned tags',
+    () {
+      final firstQuery = const RecommendationQuery(
+        request: 'romance movie about time travel',
+        selectedTags: {'Mystery'},
+      ).withInferredSelections(RecommendationQuery.browsableTags);
+
+      final secondQuery = firstQuery
+          .copyWith(request: 'sports anime', aiSelectedTags: {})
+          .withInferredSelections(RecommendationQuery.browsableTags);
+
+      expect(secondQuery.selectedTags, contains('Mystery'));
+      expect(secondQuery.aiSelectedTags, isNot(contains('Time Manipulation')));
+      expect(secondQuery.aiSelectedTags, contains('Sports'));
     },
   );
 }

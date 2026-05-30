@@ -1,6 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:majika/core/ai/local_ai_service.dart';
+import 'package:majika/core/models/media_item.dart';
+import 'package:majika/core/models/recommendation.dart';
 import 'package:majika/core/models/recommendation_query.dart';
+import 'package:majika/core/models/taste_profile.dart';
 
 void main() {
   test(
@@ -20,8 +23,9 @@ void main() {
         availableTags: const ['Romance', 'Time Manipulation', 'Yandere'],
       );
 
-      expect(interpreted.selectedTags, contains('Romance'));
-      expect(interpreted.selectedTags, contains('Time Manipulation'));
+      expect(interpreted.selectedTags, isEmpty);
+      expect(interpreted.aiSelectedTags, contains('Romance'));
+      expect(interpreted.aiSelectedTags, contains('Time Manipulation'));
       expect(interpreted.formats, contains('MOVIE'));
       expect(interpreted.mediaTypes, contains('ANIME'));
     },
@@ -39,8 +43,65 @@ void main() {
         availableTags: RecommendationQuery.browsableTags,
       );
 
-      expect(interpreted.selectedTags, contains('Yandere'));
-      expect(interpreted.selectedTags, contains('Thriller'));
+      expect(interpreted.aiSelectedTags, contains('Yandere'));
+      expect(interpreted.aiSelectedTags, contains('Thriller'));
     },
+  );
+
+  test('flutter gemma service can choose an AI top recommendation', () async {
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        expect(prompt, contains('Pick the single best recommendation'));
+        return '{"id":"anilist_2","reason":"Best fit from the AI pass."}';
+      },
+    );
+    final profile = _profile();
+    final recommendations = [
+      _recommendation('anilist_1', 'First'),
+      _recommendation('anilist_2', 'Second'),
+    ];
+
+    final chosen = await service.chooseTopRecommendation(
+      profile,
+      recommendations,
+      query: const RecommendationQuery(request: 'moody mystery'),
+    );
+
+    expect(chosen?.item.id, 'anilist_2');
+    expect(chosen?.isAiPick, isTrue);
+    expect(chosen?.reason, 'Best fit from the AI pass.');
+  });
+}
+
+TasteProfile _profile() {
+  return TasteProfile(
+    userName: 'tester',
+    library: const [],
+    favoriteGenres: const ['Mystery'],
+    tagWeights: const {},
+    formatWeights: const {},
+    formatCounts: const {},
+    favoriteCharacters: const [],
+    favoriteStaff: const [],
+    favoriteStudios: const [],
+    highRatedItems: const [],
+    recentActivity: null,
+    completedCount: 0,
+    currentCount: 0,
+    importedAt: DateTime(2026),
+  );
+}
+
+Recommendation _recommendation(String id, String title) {
+  return Recommendation(
+    item: MediaItem(
+      id: id,
+      title: title,
+      coverUrl: '',
+      tags: const ['Mystery'],
+    ),
+    matchScore: 80,
+    reason: 'Reason',
+    signals: const ['Mystery'],
   );
 }

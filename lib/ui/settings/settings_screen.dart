@@ -1,18 +1,64 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
 import 'package:majika/ui/shared/glass_panel.dart';
 
-const _recommendedLocalAiModel = _DownloadableModel(
-  name: 'FunctionGemma 270M',
-  fileName: 'functiongemma-270M-it.litertlm',
-  sizeLabel: '284 MB',
-  providerLabel: 'Gemma .litertlm',
-  url:
-      'https://huggingface.co/sasha-denisov/function-gemma-270M-it/resolve/main/functiongemma-270M-it.litertlm',
-  description:
-      'Small function-calling model suited for turning requests into tags and filters.',
-);
+const _downloadableLocalAiModels = [
+  _DownloadableModel(
+    name: 'FunctionGemma 270M',
+    sizeLabel: '284 MB',
+    providerLabel: 'FunctionGemma',
+    mobileUrl:
+        'https://huggingface.co/sasha-denisov/function-gemma-270M-it/resolve/main/functiongemma-270M-it.task',
+    desktopUrl:
+        'https://huggingface.co/sasha-denisov/function-gemma-270M-it/resolve/main/functiongemma-270M-it.litertlm',
+    description:
+        'Fastest option for turning search requests into tags and filters.',
+    modelType: ModelType.functionGemma,
+    fileType: ModelFileType.task,
+  ),
+  _DownloadableModel(
+    name: 'Qwen3 0.6B',
+    sizeLabel: '586 MB',
+    providerLabel: 'Qwen',
+    mobileUrl:
+        'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
+    desktopUrl:
+        'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
+    description: 'Balanced small model for better language understanding.',
+    modelType: ModelType.qwen,
+    fileType: ModelFileType.task,
+  ),
+  _DownloadableModel(
+    name: 'Qwen 2.5 1.5B Instruct',
+    sizeLabel: '1.6 GB',
+    providerLabel: 'Qwen',
+    mobileUrl:
+        'https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
+    desktopUrl:
+        'https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm',
+    description:
+        'Larger text model for stronger devices and better request parsing.',
+    modelType: ModelType.qwen,
+    fileType: ModelFileType.task,
+  ),
+  _DownloadableModel(
+    name: 'Phi-4 Mini Instruct',
+    sizeLabel: '3.9 GB',
+    providerLabel: 'Phi',
+    mobileUrl:
+        'https://huggingface.co/litert-community/Phi-4-mini-instruct/resolve/main/Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.task',
+    desktopUrl:
+        'https://huggingface.co/litert-community/Phi-4-mini-instruct/resolve/main/Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.litertlm',
+    description:
+        'Large option for high-end devices; expect slower downloads and startup.',
+    modelType: ModelType.general,
+    fileType: ModelFileType.task,
+  ),
+];
+
+final _recommendedLocalAiModel = _downloadableLocalAiModels.first;
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -30,6 +76,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _useAiForSearch = true;
   bool _isDownloadingModel = false;
   String _localAiProvider = _recommendedLocalAiModel.providerLabel;
+  _DownloadableModel _selectedModel = _recommendedLocalAiModel;
   String? _downloadedModelName;
   double _imageQuality = 0.85;
   double _aiContextItems = 24;
@@ -50,19 +97,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       await FlutterGemma.initialize();
+      final modelToDownload = _selectedModel;
       final installation =
           await FlutterGemma.installModel(
-            modelType: ModelType.functionGemma,
-            fileType: ModelFileType.task,
-          ).fromNetwork(_recommendedLocalAiModel.url).withProgress((progress) {
+            modelType: modelToDownload.modelType,
+            fileType: modelToDownload.fileType,
+          ).fromNetwork(modelToDownload.url).withProgress((progress) {
             if (mounted) setState(() => _downloadProgress = progress / 100);
           }).install();
 
       if (!mounted) return;
       setState(() {
-        _downloadedModelName = _recommendedLocalAiModel.name;
+        _downloadedModelName = modelToDownload.name;
         _useLocalAi = true;
-        _localAiProvider = _recommendedLocalAiModel.providerLabel;
+        _localAiProvider = modelToDownload.providerLabel;
         _downloadProgress = 1;
       });
       showInfoToast(
@@ -277,7 +325,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: 'Pick the local model runner Majika should target.',
                   value: _localAiProvider,
                   options: const [
-                    'Gemma .litertlm',
+                    'FunctionGemma',
+                    'Qwen',
+                    'Phi',
                     'External local server',
                     'Fallback rules only',
                   ],
@@ -288,10 +338,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   },
                 ),
                 _ModelDownloadCard(
-                  model: _recommendedLocalAiModel,
+                  models: _downloadableLocalAiModels,
+                  selectedModel: _selectedModel,
                   isDownloading: _isDownloadingModel,
                   progress: _downloadProgress,
                   downloadedName: _downloadedModelName,
+                  onModelSelected: (model) {
+                    setState(() {
+                      _selectedModel = model;
+                      _localAiProvider = model.providerLabel;
+                    });
+                  },
                   onDownload: _downloadRecommendedModel,
                 ),
                 _TextFieldRow(
@@ -452,41 +509,58 @@ class _SettingsSection extends StatelessWidget {
 
 class _DownloadableModel {
   final String name;
-  final String fileName;
   final String sizeLabel;
   final String providerLabel;
-  final String url;
+  final String mobileUrl;
+  final String desktopUrl;
   final String description;
+  final ModelType modelType;
+  final ModelFileType fileType;
 
   const _DownloadableModel({
     required this.name,
-    required this.fileName,
     required this.sizeLabel,
     required this.providerLabel,
-    required this.url,
+    required this.mobileUrl,
+    required this.desktopUrl,
     required this.description,
+    required this.modelType,
+    this.fileType = ModelFileType.task,
   });
+
+  String get url {
+    final isDesktop =
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.linux ||
+            defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.windows);
+    return isDesktop ? desktopUrl : mobileUrl;
+  }
 }
 
 class _ModelDownloadCard extends StatelessWidget {
-  final _DownloadableModel model;
+  final List<_DownloadableModel> models;
+  final _DownloadableModel selectedModel;
   final bool isDownloading;
   final double? progress;
   final String? downloadedName;
+  final ValueChanged<_DownloadableModel> onModelSelected;
   final VoidCallback onDownload;
 
   const _ModelDownloadCard({
-    required this.model,
+    required this.models,
+    required this.selectedModel,
     required this.isDownloading,
     required this.progress,
     required this.downloadedName,
+    required this.onModelSelected,
     required this.onDownload,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDownloaded = downloadedName == model.name;
+    final isDownloaded = downloadedName == selectedModel.name;
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
@@ -518,16 +592,32 @@ class _ModelDownloadCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      model.name,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
+                    DropdownButtonHideUnderline(
+                      child: DropdownButton<_DownloadableModel>(
+                        value: selectedModel,
+                        dropdownColor: const Color(0xFF1A1F27),
+                        iconEnabledColor: Colors.white70,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        items: [
+                          for (final model in models)
+                            DropdownMenuItem(
+                              value: model,
+                              child: Text(model.name),
+                            ),
+                        ],
+                        onChanged: isDownloading
+                            ? null
+                            : (model) {
+                                if (model != null) onModelSelected(model);
+                              },
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${model.sizeLabel} · ${model.providerLabel}',
+                      '${selectedModel.sizeLabel} · ${selectedModel.providerLabel}',
                       style: const TextStyle(color: Colors.white70),
                     ),
                   ],
@@ -552,7 +642,7 @@ class _ModelDownloadCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            model.description,
+            selectedModel.description,
             style: const TextStyle(color: Colors.white70, height: 1.35),
           ),
           if (isDownloading || progress != null) ...[

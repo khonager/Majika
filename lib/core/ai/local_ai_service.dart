@@ -19,6 +19,12 @@ abstract class LocalAiService {
     TasteProfile profile,
     Recommendation recommendation,
   );
+
+  Future<Recommendation?> chooseTopRecommendation(
+    TasteProfile profile,
+    List<Recommendation> recommendations, {
+    required RecommendationQuery query,
+  });
 }
 
 class DeterministicLocalAiService implements LocalAiService {
@@ -46,6 +52,15 @@ class DeterministicLocalAiService implements LocalAiService {
     Recommendation recommendation,
   ) async {
     return recommendation.reason;
+  }
+
+  @override
+  Future<Recommendation?> chooseTopRecommendation(
+    TasteProfile profile,
+    List<Recommendation> recommendations, {
+    required RecommendationQuery query,
+  }) async {
+    return recommendations.isEmpty ? null : recommendations.first;
   }
 }
 
@@ -113,6 +128,7 @@ Schema:
 {"tags":["Romance"],"formats":["MOVIE"],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"optional leftover search terms"}
 User request: ${query.request}
 Currently selected tags: ${query.selectedTags.join(', ')}
+Previously AI selected tags: ${query.aiSelectedTags.join(', ')}
 Currently selected formats: ${query.formats.join(', ')}
 Currently selected media types: ${query.mediaTypes.join(', ')}
 Adult content selected: ${query.includeAdult}
@@ -184,7 +200,7 @@ Signals: ${recommendation.signals.join(', ')}
         temperature: 0.1,
         topK: 1,
         tokenBuffer: 128,
-        modelType: ModelType.functionGemma,
+        modelType: _activeModelType(),
       );
       await chat.addQueryChunk(Message.text(text: prompt, isUser: true));
       final response = await chat.generateChatResponse();
@@ -195,6 +211,14 @@ Signals: ${recommendation.signals.join(', ')}
     } finally {
       await model.close();
     }
+  }
+
+  ModelType _activeModelType() {
+    final activeModel =
+        FlutterGemmaPlugin.instance.modelManager.activeInferenceModel;
+    return activeModel is InferenceModelSpec
+        ? activeModel.modelType
+        : ModelType.gemmaIt;
   }
 
   RecommendationQuery? _queryFromModelJson(
@@ -224,7 +248,8 @@ Signals: ${recommendation.signals.join(', ')}
       request: searchText == null || searchText.isEmpty
           ? original.request
           : searchText,
-      selectedTags: {...original.selectedTags, ...tags},
+      selectedTags: original.selectedTags,
+      aiSelectedTags: tags,
       formats: formats.isEmpty ? original.formats : formats,
       mediaTypes: mediaTypes.isEmpty ? original.mediaTypes : mediaTypes,
       includeAdult: original.includeAdult || decoded['includeAdult'] == true,
@@ -244,5 +269,74 @@ Signals: ${recommendation.signals.join(', ')}
       for (final item in value)
         if (item != null) item.toString().trim(),
     ].where((item) => item.isNotEmpty).toList();
+  }
+
+  @override
+  Future<Recommendation?> chooseTopRecommendation(
+    TasteProfile profile,
+    List<Recommendation> recommendations, {
+    required RecommendationQuery query,
+  }) async {
+    if (recommendations.isEmpty) return null;
+    if (!isConfigured) {
+      return fallback.chooseTopRecommendation(
+        profile,
+        recommendations,
+        query: query,
+      );
+    }
+
+    final options = recommendations.take(8).map((recommendation) {
+      final item = recommendation.item;
+      return {
+        'id': item.id,
+        'title': item.title,
+        'score': recommendation.matchScore.round(),
+        'tags': item.tags.take(8).toList(),
+        'format': item.format,
+        'signals': recommendation.signals.take(6).toList(),
+      };
+    }).toList();
+    final prompt =
+        '''
+Pick the single best recommendation for this user from the options.
+Return JSON only with this schema: {"id":"anilist_123","reason":"short reason"}
+User taste: ${profile.primaryTaste}
+Favorite tags: ${profile.favoriteGenres.join(', ')}
+Favorite characters: ${profile.favoriteCharacters.take(8).join(', ')}
+Favorite studios: ${profile.favoriteStudios.take(8).join(', ')}
+Search request: ${query.request}
+User-selected tags: ${query.selectedTags.join(', ')}
+AI-selected tags: ${query.aiSelectedTags.join(', ')}
+Options: ${jsonEncode(options)}
+''';
+
+    try {
+      final response = await _generateText(prompt, maxTokens: 512);
+      final jsonText = _extractJsonObject(response);
+      if (jsonText == null) return recommendations.first;
+      final decoded = jsonDecode(jsonText);
+      if (decoded is! Map<String, dynamic>) return recommendations.first;
+      final id = decoded['id']?.toString();
+      final reason = decoded['reason']?.toString().trim();
+      Recommendation? chosen;
+      for (final recommendation in recommendations) {
+        if (recommendation.item.id == id) {
+          chosen = recommendation;
+          break;
+        }
+      }
+      if (chosen == null) return recommendations.first;
+      return chosen.copyWith(
+        reason: reason == null || reason.isEmpty ? chosen.reason : reason,
+        isAiPick: true,
+      );
+    } catch (_) {
+      return fallback.chooseTopRecommendation(
+        profile,
+        recommendations,
+        query: query,
+      );
+    }
   }
 }

@@ -61,6 +61,7 @@ class RecommendationQuery {
 
   final String request;
   final Set<String> selectedTags;
+  final Set<String> aiSelectedTags;
   final Set<String> mediaTypes;
   final Set<String> formats;
   final bool includeAdult;
@@ -68,6 +69,7 @@ class RecommendationQuery {
   const RecommendationQuery({
     this.request = '',
     this.selectedTags = const {},
+    this.aiSelectedTags = const {},
     this.mediaTypes = const {},
     this.formats = const {},
     this.includeAdult = false,
@@ -76,6 +78,7 @@ class RecommendationQuery {
   bool get isActive =>
       request.trim().isNotEmpty ||
       selectedTags.isNotEmpty ||
+      aiSelectedTags.isNotEmpty ||
       mediaTypes.isNotEmpty ||
       formats.isNotEmpty ||
       includeAdult;
@@ -95,6 +98,7 @@ class RecommendationQuery {
   RecommendationQuery copyWith({
     String? request,
     Set<String>? selectedTags,
+    Set<String>? aiSelectedTags,
     Set<String>? mediaTypes,
     Set<String>? formats,
     bool? includeAdult,
@@ -102,6 +106,7 @@ class RecommendationQuery {
     return RecommendationQuery(
       request: request ?? this.request,
       selectedTags: selectedTags ?? this.selectedTags,
+      aiSelectedTags: aiSelectedTags ?? this.aiSelectedTags,
       mediaTypes: mediaTypes ?? this.mediaTypes,
       formats: formats ?? this.formats,
       includeAdult: includeAdult ?? this.includeAdult,
@@ -110,7 +115,7 @@ class RecommendationQuery {
 
   RecommendationQuery withInferredSelections(Iterable<String> availableTags) {
     return copyWith(
-      selectedTags: effectiveTags(availableTags),
+      aiSelectedTags: inferredTags(availableTags),
       mediaTypes: effectiveMediaTypes(),
       formats: effectiveFormats(),
       includeAdult: includeAdult || infersAdult,
@@ -118,7 +123,7 @@ class RecommendationQuery {
   }
 
   Set<String> effectiveTags(Iterable<String> availableTags) {
-    return {...selectedTags, ...inferredTags(availableTags)};
+    return {...selectedTags, ...aiSelectedTags, ...inferredTags(availableTags)};
   }
 
   Set<String> effectiveFormats() {

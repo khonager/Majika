@@ -80,6 +80,7 @@ class TasteEngine {
     };
     final requestedTags = {
       ...query.selectedTags,
+      ...query.aiSelectedTags,
       ...query.inferredTags(availableTags),
     };
     final requestedFormats = query.formats.isNotEmpty

@@ -6,6 +6,7 @@ class Recommendation {
   final String reason;
   final List<String> signals;
   final bool isTopPick;
+  final bool isAiPick;
   final bool isPopularNow;
 
   const Recommendation({
@@ -14,6 +15,7 @@ class Recommendation {
     required this.reason,
     required this.signals,
     this.isTopPick = false,
+    this.isAiPick = false,
     this.isPopularNow = false,
   });
 
@@ -23,6 +25,7 @@ class Recommendation {
     String? reason,
     List<String>? signals,
     bool? isTopPick,
+    bool? isAiPick,
     bool? isPopularNow,
   }) {
     return Recommendation(
@@ -31,6 +34,7 @@ class Recommendation {
       reason: reason ?? this.reason,
       signals: signals ?? this.signals,
       isTopPick: isTopPick ?? this.isTopPick,
+      isAiPick: isAiPick ?? this.isAiPick,
       isPopularNow: isPopularNow ?? this.isPopularNow,
     );
   }

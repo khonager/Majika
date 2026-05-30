@@ -86,7 +86,11 @@ class _HomeScreenState extends State<HomeScreen> {
         library,
         signals: signals,
       );
-      final recommendations = _tasteEngine.rankCandidates(profile, candidates);
+      final recommendations = await _withChosenTopRecommendation(
+        profile,
+        _tasteEngine.rankCandidates(profile, candidates),
+        const RecommendationQuery(),
+      );
 
       if (!mounted) return;
       setState(() {
@@ -163,12 +167,17 @@ class _HomeScreenState extends State<HomeScreen> {
         candidates,
         query: query,
       );
+      final orderedRecommendations = await _withChosenTopRecommendation(
+        profile,
+        recommendations,
+        query,
+      );
 
       if (!mounted) return;
       setState(() {
         _recommendationQuery = query;
         _candidates = candidates;
-        _recommendations = recommendations;
+        _recommendations = orderedRecommendations;
         _adultCandidatesLoaded = _adultCandidatesLoaded || needsAdultCandidates;
         _isRefreshingRecommendations = false;
       });
@@ -187,6 +196,28 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       MaterialPageRoute(builder: (context) => const SettingsScreen()),
     );
+  }
+
+  Future<List<Recommendation>> _withChosenTopRecommendation(
+    TasteProfile profile,
+    List<Recommendation> recommendations,
+    RecommendationQuery query,
+  ) async {
+    if (recommendations.isEmpty) return recommendations;
+
+    final chosen = await _aiService.chooseTopRecommendation(
+      profile,
+      recommendations,
+      query: query,
+    );
+    if (chosen == null) return recommendations;
+
+    return [
+      chosen.copyWith(isTopPick: true),
+      for (final recommendation in recommendations)
+        if (recommendation.item.id != chosen.item.id)
+          recommendation.copyWith(isTopPick: false),
+    ];
   }
 
   @override
@@ -763,8 +794,15 @@ class _RecommendationSearchPanelState
   }
 
   void _submitRequest() {
+    final nextRequest = _searchController.text.trim();
+    final requestChanged = nextRequest != widget.query.request.trim();
     widget.onQueryChanged(
-      widget.query.copyWith(request: _searchController.text.trim()),
+      widget.query.copyWith(
+        request: nextRequest,
+        aiSelectedTags: requestChanged
+            ? <String>{}
+            : widget.query.aiSelectedTags,
+      ),
     );
   }
 
@@ -852,6 +890,7 @@ class _RecommendationSearchPanelState
             _TagPickerSection(
               availableTags: widget.availableTags,
               selectedTags: widget.query.selectedTags,
+              aiSelectedTags: widget.query.aiSelectedTags,
               onBrowse: _openTagPicker,
               onToggleTag: _toggleTag,
             ),
@@ -893,8 +932,11 @@ class _RecommendationSearchPanelState
 
   void _toggleTag(String tag) {
     final tags = {...widget.query.selectedTags};
+    final aiTags = {...widget.query.aiSelectedTags}..remove(tag);
     tags.contains(tag) ? tags.remove(tag) : tags.add(tag);
-    widget.onQueryChanged(widget.query.copyWith(selectedTags: tags));
+    widget.onQueryChanged(
+      widget.query.copyWith(selectedTags: tags, aiSelectedTags: aiTags),
+    );
   }
 
   Future<void> _openTagPicker() async {
@@ -907,11 +949,14 @@ class _RecommendationSearchPanelState
         return _TagPickerSheet(
           availableTags: widget.availableTags,
           selectedTags: widget.query.selectedTags,
+          aiSelectedTags: widget.query.aiSelectedTags,
         );
       },
     );
     if (selected == null) return;
-    widget.onQueryChanged(widget.query.copyWith(selectedTags: selected));
+    widget.onQueryChanged(
+      widget.query.copyWith(selectedTags: selected, aiSelectedTags: {}),
+    );
   }
 
   void _toggleMediaType(String mediaType) {
@@ -968,21 +1013,24 @@ class _FilterSection extends StatelessWidget {
 class _TagPickerSection extends StatelessWidget {
   final List<String> availableTags;
   final Set<String> selectedTags;
+  final Set<String> aiSelectedTags;
   final VoidCallback onBrowse;
   final ValueChanged<String> onToggleTag;
 
   const _TagPickerSection({
     required this.availableTags,
     required this.selectedTags,
+    required this.aiSelectedTags,
     required this.onBrowse,
     required this.onToggleTag,
   });
 
   @override
   Widget build(BuildContext context) {
-    final visibleTags = selectedTags.isEmpty
+    final activeTags = {...selectedTags, ...aiSelectedTags};
+    final visibleTags = activeTags.isEmpty
         ? availableTags.take(6).toList()
-        : selectedTags.take(8).toList();
+        : activeTags.take(8).toList();
     final hiddenCount = max(0, availableTags.length - visibleTags.length);
 
     return Column(
@@ -992,9 +1040,9 @@ class _TagPickerSection extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                selectedTags.isEmpty
+                activeTags.isEmpty
                     ? 'Tags'
-                    : 'Tags · ${selectedTags.length} selected',
+                    : 'Tags · ${selectedTags.length} pinned · ${aiSelectedTags.length} AI',
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.54),
                   fontSize: 11,
@@ -1020,6 +1068,8 @@ class _TagPickerSection extends StatelessWidget {
                 key: ValueKey('filter-tag-${tag.toLowerCase()}'),
                 label: tag,
                 selected: selectedTags.contains(tag),
+                aiSelected:
+                    aiSelectedTags.contains(tag) && !selectedTags.contains(tag),
                 onSelected: () => onToggleTag(tag),
               ),
             if (hiddenCount > 0)
@@ -1044,10 +1094,12 @@ class _TagPickerSection extends StatelessWidget {
 class _TagPickerSheet extends StatefulWidget {
   final List<String> availableTags;
   final Set<String> selectedTags;
+  final Set<String> aiSelectedTags;
 
   const _TagPickerSheet({
     required this.availableTags,
     required this.selectedTags,
+    required this.aiSelectedTags,
   });
 
   @override
@@ -1134,6 +1186,9 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
                         _FilterChipButton(
                           label: tag,
                           selected: _selectedTags.contains(tag),
+                          aiSelected:
+                              widget.aiSelectedTags.contains(tag) &&
+                              !_selectedTags.contains(tag),
                           onSelected: () {
                             setState(() {
                               _selectedTags.contains(tag)
@@ -1173,33 +1228,41 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
 class _FilterChipButton extends StatelessWidget {
   final String label;
   final bool selected;
+  final bool aiSelected;
   final VoidCallback onSelected;
 
   const _FilterChipButton({
     super.key,
     required this.label,
     required this.selected,
+    this.aiSelected = false,
     required this.onSelected,
   });
 
   @override
   Widget build(BuildContext context) {
+    final accent = Theme.of(context).colorScheme.secondary;
+    final aiAccent = const Color(0xFFB6A7FF);
+
     return FilterChip(
       label: Text(label),
-      selected: selected,
+      avatar: aiSelected
+          ? const Icon(Icons.auto_awesome_rounded, size: 15)
+          : null,
+      selected: selected || aiSelected,
       onSelected: (_) => onSelected(),
       showCheckmark: false,
-      selectedColor: Theme.of(
-        context,
-      ).colorScheme.secondary.withValues(alpha: 0.24),
+      selectedColor: (aiSelected ? aiAccent : accent).withValues(alpha: 0.24),
       backgroundColor: Colors.white.withValues(alpha: 0.07),
       side: BorderSide(
-        color: selected
-            ? Theme.of(context).colorScheme.secondary.withValues(alpha: 0.5)
+        color: selected || aiSelected
+            ? (aiSelected ? aiAccent : accent).withValues(alpha: 0.5)
             : Colors.white.withValues(alpha: 0.08),
       ),
       labelStyle: TextStyle(
-        color: selected ? Colors.white : Colors.white.withValues(alpha: 0.72),
+        color: selected || aiSelected
+            ? Colors.white
+            : Colors.white.withValues(alpha: 0.72),
         fontWeight: FontWeight.w700,
       ),
     );
@@ -1284,9 +1347,13 @@ class _TopRecommendationDetails extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        const _StatusPill(
-          icon: Icons.star_rounded,
-          label: 'Top recommendation',
+        _StatusPill(
+          icon: recommendation.isAiPick
+              ? Icons.auto_awesome_rounded
+              : Icons.star_rounded,
+          label: recommendation.isAiPick
+              ? 'AI recommendation'
+              : 'Top recommendation',
         ),
         const SizedBox(height: 12),
         Text(

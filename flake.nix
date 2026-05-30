@@ -22,7 +22,7 @@
           cmdLineToolsVersion = "8.0";
           toolsVersion = "26.1.1";
           platformToolsVersion = "36.0.2";
-          buildToolsVersions = [ "28.0.3" "30.0.3" "33.0.1" "34.0.0" ];
+          buildToolsVersions = [ "28.0.3" "30.0.3" "33.0.1" "34.0.0" "35.0.0" ];
           includeEmulator = true;
           emulatorVersion = "36.4.2";
           platformVersions = [ "28" "33" "34" "36" ];
@@ -31,7 +31,8 @@
           systemImageTypes = [ "google_apis_playstore" ];
           abiVersions = [ "armeabi-v7a" "arm64-v8a" ];
           cmakeVersions = [ "3.22.1" ];
-          includeNDK = false;
+          includeNDK = true;
+          ndkVersions = [ "28.2.13676358" ];
           useGoogleAPIs = false;
           useGoogleTVAddOns = false;
           includeExtras = [

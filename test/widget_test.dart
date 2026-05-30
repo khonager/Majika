@@ -199,7 +199,14 @@ void main() {
     expect(find.text('Local AI'), findsOneWidget);
     expect(find.text('Provider'), findsOneWidget);
     expect(find.text('FunctionGemma 270M'), findsOneWidget);
-    expect(find.text('284 MB · Gemma .litertlm'), findsOneWidget);
+    expect(find.text('284 MB · FunctionGemma'), findsOneWidget);
+    expect(find.text('Qwen3 0.6B'), findsNothing);
+    await tester.tap(find.text('FunctionGemma 270M'));
+    await tester.pumpAndSettle();
+    expect(find.text('Qwen3 0.6B'), findsOneWidget);
+    await tester.tap(find.text('Qwen3 0.6B').last);
+    await tester.pumpAndSettle();
+    expect(find.text('586 MB · Qwen'), findsOneWidget);
     expect(find.text('Local server endpoint'), findsOneWidget);
 
     expect(find.text('Use local model when available'), findsOneWidget);
@@ -274,8 +281,9 @@ class _FakeMediaService implements MediaService {
   Future<List<MediaItem>> searchRecommendationCandidates(
     RecommendationQuery query,
   ) async {
+    final tags = query.effectiveTags(await fetchAvailableTags());
     return [
-      if (query.selectedTags.contains('Time Manipulation'))
+      if (tags.contains('Time Manipulation'))
         MediaItem(
           id: 'anilist_5',
           title: 'Time Travel Movie',
