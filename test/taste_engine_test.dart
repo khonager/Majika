@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation_query.dart';
+import 'package:majika/core/models/user_taste_signals.dart';
 import 'package:majika/core/recommendations/taste_engine.dart';
 
 void main() {
@@ -80,8 +81,83 @@ void main() {
     expect(recommendations.first.item.title, 'Best Match');
     expect(recommendations.first.isTopPick, isTrue);
     expect(recommendations.first.signals, contains('Mystery'));
+    expect(recommendations.first.matchScore, lessThanOrEqualTo(99));
     expect(recommendations.any((rec) => rec.item.title == 'Seen'), isFalse);
   });
+
+  test(
+    'ratings and AniList favorites affect match scores without flat 99s',
+    () {
+      final engine = TasteEngine();
+      final profile = engine.buildProfile(
+        'tester',
+        [
+          MediaItem(
+            id: 'anilist_1',
+            title: 'Loved Mystery',
+            coverUrl: '',
+            tags: const ['Mystery', 'Drama'],
+            rating: 10,
+            format: 'TV',
+            status: 'COMPLETED',
+            characters: const ['Coco'],
+            studios: const ['Kyoto Animation'],
+          ),
+          MediaItem(
+            id: 'anilist_2',
+            title: 'Dropped Sports',
+            coverUrl: '',
+            tags: const ['Sports'],
+            rating: 3,
+            format: 'TV',
+            status: 'DROPPED',
+          ),
+        ],
+        signals: const UserTasteSignals(
+          favoriteCharacters: ['Coco'],
+          favoriteStudios: ['Kyoto Animation'],
+        ),
+      );
+
+      final recommendations = engine.rankCandidates(profile, [
+        MediaItem(
+          id: 'anilist_3',
+          title: 'Favorite Signal Match',
+          coverUrl: '',
+          tags: const ['Mystery'],
+          rating: 8.8,
+          format: 'TV',
+          characters: const ['Coco'],
+          studios: const ['Kyoto Animation'],
+          popularity: 80000,
+        ),
+        MediaItem(
+          id: 'anilist_4',
+          title: 'Low Signal Match',
+          coverUrl: '',
+          tags: const ['Sports'],
+          rating: 8.8,
+          format: 'MOVIE',
+          popularity: 10000,
+        ),
+      ]);
+
+      expect(recommendations.first.item.title, 'Favorite Signal Match');
+      expect(recommendations.first.signals, contains('favorite Coco'));
+      expect(
+        recommendations.first.signals,
+        contains('favorite studio Kyoto Animation'),
+      );
+      expect(
+        recommendations.first.matchScore,
+        greaterThan(recommendations.last.matchScore),
+      );
+      expect(
+        recommendations.map((rec) => rec.matchScore).toSet(),
+        hasLength(2),
+      );
+    },
+  );
 
   test('search query filters by requested tag, format, and media type', () {
     final engine = TasteEngine();

@@ -27,6 +27,19 @@ void main() {
                       'extraLarge': 'https://example.com/cover.jpg',
                     },
                     'genres': ['Mystery', 'Drama'],
+                    'siteUrl': 'https://anilist.co/anime/1',
+                    'characters': {
+                      'nodes': [
+                        {
+                          'name': {'userPreferred': 'Hiroshi Odokawa'},
+                        },
+                      ],
+                    },
+                    'studios': {
+                      'nodes': [
+                        {'name': 'OLM'},
+                      ],
+                    },
                     'averageScore': 84,
                     'popularity': 120000,
                     'episodes': 13,
@@ -49,6 +62,9 @@ void main() {
     expect(items.first.rating, 9.2);
     expect(items.first.status, 'COMPLETED');
     expect(items.first.tags, contains('Mystery'));
+    expect(items.first.siteUrl, 'https://anilist.co/anime/1');
+    expect(items.first.characters, contains('Hiroshi Odokawa'));
+    expect(items.first.studios, contains('OLM'));
   });
 
   test('parses recommendation candidates', () {
@@ -67,6 +83,15 @@ void main() {
               },
               'coverImage': {'large': 'https://example.com/manga.jpg'},
               'genres': ['Fantasy'],
+              'siteUrl': 'https://anilist.co/manga/2',
+              'characters': {
+                'nodes': [
+                  {
+                    'name': {'userPreferred': 'Coco'},
+                  },
+                ],
+              },
+              'studios': {'nodes': []},
               'averageScore': 86,
               'popularity': 80000,
               'episodes': null,
@@ -84,5 +109,41 @@ void main() {
     expect(items.first.mediaType, 'MANGA');
     expect(items.first.rating, 8.6);
     expect(items.first.serviceLabel, 'AniList');
+    expect(items.first.siteUrl, 'https://anilist.co/manga/2');
+    expect(items.first.characters, contains('Coco'));
+  });
+
+  test('parses AniList favorite characters and studios as taste signals', () {
+    final signals = AniListService.parseTasteSignals({
+      'data': {
+        'User': {
+          'favourites': {
+            'characters': {
+              'nodes': [
+                {
+                  'name': {'userPreferred': 'Coco'},
+                },
+              ],
+            },
+            'staff': {
+              'nodes': [
+                {
+                  'name': {'userPreferred': 'Naoko Yamada'},
+                },
+              ],
+            },
+            'studios': {
+              'nodes': [
+                {'name': 'Kyoto Animation'},
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    expect(signals.favoriteCharacters, contains('Coco'));
+    expect(signals.favoriteStaff, contains('Naoko Yamada'));
+    expect(signals.favoriteStudios, contains('Kyoto Animation'));
   });
 }

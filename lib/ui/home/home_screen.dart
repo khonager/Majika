@@ -12,6 +12,7 @@ import 'package:majika/core/services/anilist_service.dart';
 import 'package:majika/core/services/media_service.dart';
 import 'package:majika/ui/settings/settings_screen.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class HomeScreen extends StatefulWidget {
   final MediaService? mediaService;
@@ -50,7 +51,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _mediaService = widget.mediaService ?? AniListService();
     _tasteEngine = widget.tasteEngine ?? TasteEngine();
-    _aiService = widget.aiService ?? const DeterministicLocalAiService();
+    _aiService = widget.aiService ?? const FlutterGemmaLocalAiService();
   }
 
   @override
@@ -73,12 +74,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final libraryFuture = _mediaService.fetchUserLibrary(userName);
+      final signalsFuture = _mediaService.fetchTasteSignals(userName);
       final candidatesFuture = _mediaService.fetchRecommendationCandidates();
       final serviceTagsFuture = _mediaService.fetchAvailableTags();
       final library = await libraryFuture;
+      final signals = await signalsFuture;
       final candidates = await candidatesFuture;
       final serviceTags = await serviceTagsFuture;
-      final profile = _tasteEngine.buildProfile(userName, library);
+      final profile = _tasteEngine.buildProfile(
+        userName,
+        library,
+        signals: signals,
+      );
       final recommendations = _tasteEngine.rankCandidates(profile, candidates);
 
       if (!mounted) return;
@@ -283,6 +290,27 @@ class _HomeScreenState extends State<HomeScreen> {
       for (final candidate in candidates)
         if (seen.add(candidate.id)) candidate,
     ];
+  }
+}
+
+Future<void> _openMediaOnAniList(BuildContext context, MediaItem item) async {
+  final fallbackId = item.id.startsWith('anilist_')
+      ? item.id.replaceFirst('anilist_', '')
+      : '';
+  final url = item.siteUrl.isNotEmpty
+      ? item.siteUrl
+      : fallbackId.isNotEmpty
+      ? 'https://anilist.co/${item.mediaType.toLowerCase()}/$fallbackId'
+      : '';
+  final uri = Uri.tryParse(url);
+  if (uri == null || url.isEmpty) {
+    showErrorToast(context, 'No AniList page is available for this item.');
+    return;
+  }
+
+  final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!launched && context.mounted) {
+    showErrorToast(context, 'Could not open AniList.');
   }
 }
 
@@ -821,16 +849,11 @@ class _RecommendationSearchPanelState
           ),
           if (widget.availableTags.isNotEmpty) ...[
             const SizedBox(height: 10),
-            _FilterSection(
-              label: 'Tags',
-              children: widget.availableTags.map((tag) {
-                return _FilterChipButton(
-                  key: ValueKey('filter-tag-${tag.toLowerCase()}'),
-                  label: tag,
-                  selected: widget.query.selectedTags.contains(tag),
-                  onSelected: () => _toggleTag(tag),
-                );
-              }).toList(),
+            _TagPickerSection(
+              availableTags: widget.availableTags,
+              selectedTags: widget.query.selectedTags,
+              onBrowse: _openTagPicker,
+              onToggleTag: _toggleTag,
             ),
           ],
           if (widget.query.isActive) ...[
@@ -872,6 +895,23 @@ class _RecommendationSearchPanelState
     final tags = {...widget.query.selectedTags};
     tags.contains(tag) ? tags.remove(tag) : tags.add(tag);
     widget.onQueryChanged(widget.query.copyWith(selectedTags: tags));
+  }
+
+  Future<void> _openTagPicker() async {
+    final selected = await showModalBottomSheet<Set<String>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return _TagPickerSheet(
+          availableTags: widget.availableTags,
+          selectedTags: widget.query.selectedTags,
+        );
+      },
+    );
+    if (selected == null) return;
+    widget.onQueryChanged(widget.query.copyWith(selectedTags: selected));
   }
 
   void _toggleMediaType(String mediaType) {
@@ -925,6 +965,211 @@ class _FilterSection extends StatelessWidget {
   }
 }
 
+class _TagPickerSection extends StatelessWidget {
+  final List<String> availableTags;
+  final Set<String> selectedTags;
+  final VoidCallback onBrowse;
+  final ValueChanged<String> onToggleTag;
+
+  const _TagPickerSection({
+    required this.availableTags,
+    required this.selectedTags,
+    required this.onBrowse,
+    required this.onToggleTag,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleTags = selectedTags.isEmpty
+        ? availableTags.take(6).toList()
+        : selectedTags.take(8).toList();
+    final hiddenCount = max(0, availableTags.length - visibleTags.length);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                selectedTags.isEmpty
+                    ? 'Tags'
+                    : 'Tags · ${selectedTags.length} selected',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.54),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            TextButton.icon(
+              key: const ValueKey('browse-tags-button'),
+              onPressed: onBrowse,
+              icon: const Icon(Icons.sell_rounded, size: 16),
+              label: Text(selectedTags.isEmpty ? 'Browse tags' : 'Edit tags'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 7),
+        Wrap(
+          spacing: 7,
+          runSpacing: 7,
+          children: [
+            for (final tag in visibleTags)
+              _FilterChipButton(
+                key: ValueKey('filter-tag-${tag.toLowerCase()}'),
+                label: tag,
+                selected: selectedTags.contains(tag),
+                onSelected: () => onToggleTag(tag),
+              ),
+            if (hiddenCount > 0)
+              ActionChip(
+                label: Text('+$hiddenCount more'),
+                avatar: const Icon(Icons.unfold_more_rounded, size: 16),
+                onPressed: onBrowse,
+                backgroundColor: Colors.white.withValues(alpha: 0.07),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+                labelStyle: const TextStyle(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _TagPickerSheet extends StatefulWidget {
+  final List<String> availableTags;
+  final Set<String> selectedTags;
+
+  const _TagPickerSheet({
+    required this.availableTags,
+    required this.selectedTags,
+  });
+
+  @override
+  State<_TagPickerSheet> createState() => _TagPickerSheetState();
+}
+
+class _TagPickerSheetState extends State<_TagPickerSheet> {
+  late final TextEditingController _searchController;
+  late Set<String> _selectedTags;
+  String _search = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController();
+    _selectedTags = {...widget.selectedTags};
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final tags = widget.availableTags.where((tag) {
+      if (_search.trim().isEmpty) return true;
+      return tag.toLowerCase().contains(_search.toLowerCase().trim());
+    }).toList();
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: _GlassCard(
+        padding: const EdgeInsets.all(18),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 620),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Choose tags',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close tag picker',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                key: const ValueKey('tag-picker-search'),
+                controller: _searchController,
+                onChanged: (value) => setState(() => _search = value),
+                decoration: InputDecoration(
+                  hintText: 'Filter tags',
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  filled: true,
+                  fillColor: Colors.black.withValues(alpha: 0.22),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Wrap(
+                    spacing: 7,
+                    runSpacing: 7,
+                    children: [
+                      for (final tag in tags)
+                        _FilterChipButton(
+                          label: tag,
+                          selected: _selectedTags.contains(tag),
+                          onSelected: () {
+                            setState(() {
+                              _selectedTags.contains(tag)
+                                  ? _selectedTags.remove(tag)
+                                  : _selectedTags.add(tag);
+                            });
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: () => setState(_selectedTags.clear),
+                    icon: const Icon(Icons.clear_rounded),
+                    label: const Text('Clear'),
+                  ),
+                  const Spacer(),
+                  FilledButton.icon(
+                    onPressed: () => Navigator.pop(context, _selectedTags),
+                    icon: const Icon(Icons.check_rounded),
+                    label: Text('Apply ${_selectedTags.length}'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _FilterChipButton extends StatelessWidget {
   final String label;
   final bool selected;
@@ -970,49 +1215,52 @@ class _TopRecommendationCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final item = recommendation.item;
 
-    return _GlassCard(
-      padding: EdgeInsets.zero,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final isNarrow = constraints.maxWidth < 560;
-          if (isNarrow) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+    return _OpenableRecommendation(
+      item: item,
+      child: _GlassCard(
+        padding: EdgeInsets.zero,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isNarrow = constraints.maxWidth < 560;
+            if (isNarrow) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(
+                    height: 190,
+                    child: _CoverImage(item: item, borderRadius: 24),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: _TopRecommendationDetails(
+                      recommendation: recommendation,
+                      compact: true,
+                    ),
+                  ),
+                ],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SizedBox(
-                  height: 190,
+                  width: 132,
+                  height: 282,
                   child: _CoverImage(item: item, borderRadius: 24),
                 ),
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: _TopRecommendationDetails(
-                    recommendation: recommendation,
-                    compact: true,
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(18),
+                    child: _TopRecommendationDetails(
+                      recommendation: recommendation,
+                    ),
                   ),
                 ),
               ],
             );
-          }
-
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 132,
-                height: 282,
-                child: _CoverImage(item: item, borderRadius: 24),
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: _TopRecommendationDetails(
-                    recommendation: recommendation,
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
+          },
+        ),
       ),
     );
   }
@@ -1085,54 +1333,83 @@ class _RecommendationTile extends StatelessWidget {
     final item = recommendation.item;
     final theme = Theme.of(context);
 
-    return _GlassCard(
-      padding: const EdgeInsets.all(10),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 70,
-            height: 96,
-            child: _CoverImage(item: item, borderRadius: 16),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  item.subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.55),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  recommendation.reason,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.68),
-                    height: 1.3,
-                  ),
-                ),
-              ],
+    return _OpenableRecommendation(
+      item: item,
+      child: _GlassCard(
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 70,
+              height: 96,
+              child: _CoverImage(item: item, borderRadius: 16),
             ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    item.subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.white.withValues(alpha: 0.55),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    recommendation.reason,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.white.withValues(alpha: 0.68),
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            _ScoreRing(score: recommendation.matchScore),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OpenableRecommendation extends StatelessWidget {
+  final MediaItem item;
+  final Widget child;
+
+  const _OpenableRecommendation({required this.item, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Open on AniList',
+      child: Semantics(
+        button: true,
+        label: 'Open ${item.title} on AniList',
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _openMediaOnAniList(context, item),
+            child: child,
           ),
-          const SizedBox(width: 8),
-          _ScoreRing(score: recommendation.matchScore),
-        ],
+        ),
       ),
     );
   }
@@ -1482,7 +1759,7 @@ class _ScoreRing extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final normalized = min(0.99, score / 16);
+    final normalized = (score / 100).clamp(0.0, 0.99);
     return SizedBox.square(
       dimension: 46,
       child: Stack(

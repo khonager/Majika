@@ -1,6 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
 import 'package:majika/ui/shared/glass_panel.dart';
+
+const _recommendedLocalAiModel = _DownloadableModel(
+  name: 'FunctionGemma 270M',
+  fileName: 'functiongemma-270M-it.litertlm',
+  sizeLabel: '284 MB',
+  providerLabel: 'Gemma .litertlm',
+  url:
+      'https://huggingface.co/sasha-denisov/function-gemma-270M-it/resolve/main/functiongemma-270M-it.litertlm',
+  description:
+      'Small function-calling model suited for turning requests into tags and filters.',
+);
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -16,19 +28,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _enableMotionEffects = true;
   bool _useLocalAi = false;
   bool _useAiForSearch = true;
-  String _localAiProvider = 'Gemma .litertlm';
+  bool _isDownloadingModel = false;
+  String _localAiProvider = _recommendedLocalAiModel.providerLabel;
+  String? _downloadedModelName;
   double _imageQuality = 0.85;
   double _aiContextItems = 24;
-  final _modelPathController = TextEditingController();
+  double? _downloadProgress;
   final _localEndpointController = TextEditingController(
     text: 'http://127.0.0.1:11434',
   );
 
-  bool get _hasModelPath => _modelPathController.text.trim().isNotEmpty;
+  bool get _hasDownloadedModel => _downloadedModelName != null;
+
+  Future<void> _downloadRecommendedModel() async {
+    if (_isDownloadingModel) return;
+
+    setState(() {
+      _isDownloadingModel = true;
+      _downloadProgress = null;
+    });
+
+    try {
+      await FlutterGemma.initialize();
+      final installation =
+          await FlutterGemma.installModel(
+            modelType: ModelType.functionGemma,
+            fileType: ModelFileType.task,
+          ).fromNetwork(_recommendedLocalAiModel.url).withProgress((progress) {
+            if (mounted) setState(() => _downloadProgress = progress / 100);
+          }).install();
+
+      if (!mounted) return;
+      setState(() {
+        _downloadedModelName = _recommendedLocalAiModel.name;
+        _useLocalAi = true;
+        _localAiProvider = _recommendedLocalAiModel.providerLabel;
+        _downloadProgress = 1;
+      });
+      showInfoToast(
+        context,
+        '${installation.modelId} downloaded and activated.',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      showErrorToast(context, 'Could not download model: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _isDownloadingModel = false);
+      }
+    }
+  }
 
   @override
   void dispose() {
-    _modelPathController.dispose();
     _localEndpointController.dispose();
     super.dispose();
   }
@@ -235,15 +287,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     showInfoToast(context, 'Local AI provider set to $value.');
                   },
                 ),
-                _TextFieldRow(
-                  fieldKey: const ValueKey('local-ai-model-path'),
-                  icon: Icons.storage_rounded,
-                  title: 'Model path',
-                  subtitle:
-                      'Point this at a downloaded .litertlm file when flutter_gemma is connected.',
-                  controller: _modelPathController,
-                  hintText: '~/models/gemma-4-e2b-it.litertlm',
-                  onChanged: (_) => setState(() {}),
+                _ModelDownloadCard(
+                  model: _recommendedLocalAiModel,
+                  isDownloading: _isDownloadingModel,
+                  progress: _downloadProgress,
+                  downloadedName: _downloadedModelName,
+                  onDownload: _downloadRecommendedModel,
                 ),
                 _TextFieldRow(
                   fieldKey: const ValueKey('local-ai-endpoint'),
@@ -316,8 +365,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _InfoRow(
                   icon: Icons.offline_bolt_rounded,
                   title: 'Current provider',
-                  subtitle: _useLocalAi && _hasModelPath
-                      ? 'Configured for $_localAiProvider, execution not wired yet'
+                  subtitle: _useLocalAi && _hasDownloadedModel
+                      ? '${_downloadedModelName ?? 'Local model'} is active for search interpretation'
                       : 'Deterministic fallback rules until a model is configured',
                 ),
               ],
@@ -395,6 +444,121 @@ class _SettingsSection extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           ...children,
+        ],
+      ),
+    );
+  }
+}
+
+class _DownloadableModel {
+  final String name;
+  final String fileName;
+  final String sizeLabel;
+  final String providerLabel;
+  final String url;
+  final String description;
+
+  const _DownloadableModel({
+    required this.name,
+    required this.fileName,
+    required this.sizeLabel,
+    required this.providerLabel,
+    required this.url,
+    required this.description,
+  });
+}
+
+class _ModelDownloadCard extends StatelessWidget {
+  final _DownloadableModel model;
+  final bool isDownloading;
+  final double? progress;
+  final String? downloadedName;
+  final VoidCallback onDownload;
+
+  const _ModelDownloadCard({
+    required this.model,
+    required this.isDownloading,
+    required this.progress,
+    required this.downloadedName,
+    required this.onDownload,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDownloaded = downloadedName == model.name;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.secondary.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.download_for_offline_rounded,
+                  color: theme.colorScheme.secondary,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      model.name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${model.sizeLabel} · ${model.providerLabel}',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ],
+                ),
+              ),
+              FilledButton.icon(
+                key: const ValueKey('download-recommended-ai-model'),
+                onPressed: isDownloading ? null : onDownload,
+                icon: isDownloading
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        isDownloaded
+                            ? Icons.download_done_rounded
+                            : Icons.download_rounded,
+                      ),
+                label: Text(isDownloaded ? 'Downloaded' : 'Download'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            model.description,
+            style: const TextStyle(color: Colors.white70, height: 1.35),
+          ),
+          if (isDownloading || progress != null) ...[
+            const SizedBox(height: 12),
+            LinearProgressIndicator(value: progress),
+          ],
         ],
       ),
     );
@@ -513,7 +677,6 @@ class _TextFieldRow extends StatelessWidget {
   final String subtitle;
   final TextEditingController controller;
   final String hintText;
-  final ValueChanged<String>? onChanged;
 
   const _TextFieldRow({
     this.fieldKey,
@@ -522,7 +685,6 @@ class _TextFieldRow extends StatelessWidget {
     required this.subtitle,
     required this.controller,
     required this.hintText,
-    this.onChanged,
   });
 
   @override
@@ -544,7 +706,6 @@ class _TextFieldRow extends StatelessWidget {
           TextField(
             key: fieldKey,
             controller: controller,
-            onChanged: onChanged,
             style: const TextStyle(color: Colors.white),
             decoration: _fieldDecoration(context).copyWith(hintText: hintText),
           ),

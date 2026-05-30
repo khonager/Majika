@@ -4,7 +4,12 @@ class TasteProfile {
   final String userName;
   final List<MediaItem> library;
   final List<String> favoriteGenres;
+  final Map<String, double> tagWeights;
+  final Map<String, double> formatWeights;
   final Map<String, int> formatCounts;
+  final List<String> favoriteCharacters;
+  final List<String> favoriteStaff;
+  final List<String> favoriteStudios;
   final List<MediaItem> highRatedItems;
   final MediaItem? recentActivity;
   final int completedCount;
@@ -15,7 +20,12 @@ class TasteProfile {
     required this.userName,
     required this.library,
     required this.favoriteGenres,
+    required this.tagWeights,
+    required this.formatWeights,
     required this.formatCounts,
+    required this.favoriteCharacters,
+    required this.favoriteStaff,
+    required this.favoriteStudios,
     required this.highRatedItems,
     required this.recentActivity,
     required this.completedCount,

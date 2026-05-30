@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation_query.dart';
+import 'package:majika/core/models/user_taste_signals.dart';
 import 'package:majika/core/services/media_service.dart';
 
 class AniListService implements MediaService {
@@ -24,6 +25,14 @@ class AniListService implements MediaService {
     final anime = await _fetchUserCollection(userName, 'ANIME');
     final manga = await _fetchUserCollection(userName, 'MANGA');
     return [...anime, ...manga];
+  }
+
+  @override
+  Future<UserTasteSignals> fetchTasteSignals(String userName) async {
+    final response = await _postGraphQl(_tasteSignalsQuery, {
+      'userName': userName,
+    });
+    return parseTasteSignals(jsonDecode(response.body));
   }
 
   @override
@@ -191,6 +200,23 @@ class AniListService implements MediaService {
     );
   }
 
+  static UserTasteSignals parseTasteSignals(Map<String, dynamic> json) {
+    final favourites = json['data']?['User']?['favourites'];
+    if (favourites is! Map) return UserTasteSignals.empty;
+
+    return UserTasteSignals(
+      favoriteCharacters: _namesFromNodes(
+        favourites['characters']?['nodes'],
+        nestedName: true,
+      ),
+      favoriteStaff: _namesFromNodes(
+        favourites['staff']?['nodes'],
+        nestedName: true,
+      ),
+      favoriteStudios: _namesFromNodes(favourites['studios']?['nodes']),
+    );
+  }
+
   static List<MediaItem> _dedupe(List<MediaItem> items) {
     final seen = <String>{};
     final deduped = <MediaItem>[];
@@ -237,6 +263,12 @@ class AniListService implements MediaService {
       format: format,
       status: entry?['status']?.toString() ?? media['status']?.toString(),
       description: media['description']?.toString(),
+      siteUrl: media['siteUrl']?.toString() ?? '',
+      characters: _namesFromNodes(
+        media['characters']?['nodes'],
+        nestedName: true,
+      ),
+      studios: _namesFromNodes(media['studios']?['nodes']),
       startYear: startDate is Map ? startDate['year'] as int? : null,
       popularity: media['popularity'] as int?,
       updatedAt: entry?['updatedAt'] as int?,
@@ -279,6 +311,32 @@ class AniListService implements MediaService {
     return pieces.join(' · ');
   }
 
+  static List<String> _namesFromNodes(
+    dynamic nodes, {
+    bool nestedName = false,
+  }) {
+    if (nodes is! List) return const [];
+
+    return {
+      for (final node in nodes)
+        if (node is Map) _nameFromNode(node, nestedName: nestedName),
+    }.whereType<String>().toList();
+  }
+
+  static String? _nameFromNode(
+    Map<dynamic, dynamic> node, {
+    required bool nestedName,
+  }) {
+    final value = nestedName ? node['name'] : node;
+    if (value is Map) {
+      return value['userPreferred']?.toString() ??
+          value['full']?.toString() ??
+          value['native']?.toString() ??
+          value['name']?.toString();
+    }
+    return node['name']?.toString();
+  }
+
   static const _userCollectionQuery = r'''
     query ($userName: String, $type: MediaType) {
       MediaListCollection(userName: $userName, type: $type) {
@@ -296,6 +354,13 @@ class AniListService implements MediaService {
               coverImage { extraLarge large }
               genres
               tags { name rank isMediaSpoiler isAdult }
+              siteUrl
+              characters(page: 1, perPage: 8) {
+                nodes { name { userPreferred full native } }
+              }
+              studios(isMain: true) {
+                nodes { name }
+              }
               averageScore
               popularity
               episodes
@@ -326,6 +391,13 @@ class AniListService implements MediaService {
           coverImage { extraLarge large }
           genres
           tags { name rank isMediaSpoiler isAdult }
+          siteUrl
+          characters(page: 1, perPage: 8) {
+            nodes { name { userPreferred full native } }
+          }
+          studios(isMain: true) {
+            nodes { name }
+          }
           averageScore
           popularity
           episodes
@@ -368,6 +440,13 @@ class AniListService implements MediaService {
           coverImage { extraLarge large }
           genres
           tags { name rank isMediaSpoiler isAdult }
+          siteUrl
+          characters(page: 1, perPage: 8) {
+            nodes { name { userPreferred full native } }
+          }
+          studios(isMain: true) {
+            nodes { name }
+          }
           averageScore
           popularity
           episodes
@@ -388,6 +467,24 @@ class AniListService implements MediaService {
       MediaTagCollection {
         name
         isAdult
+      }
+    }
+  ''';
+
+  static const _tasteSignalsQuery = r'''
+    query ($userName: String) {
+      User(name: $userName) {
+        favourites {
+          characters(page: 1, perPage: 25) {
+            nodes { name { userPreferred full native } }
+          }
+          staff(page: 1, perPage: 20) {
+            nodes { name { userPreferred full native } }
+          }
+          studios(page: 1, perPage: 20) {
+            nodes { name }
+          }
+        }
       }
     }
   ''';

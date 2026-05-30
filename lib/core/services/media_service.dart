@@ -1,11 +1,14 @@
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation_query.dart';
+import 'package:majika/core/models/user_taste_signals.dart';
 
 abstract class MediaService {
   String get id;
   String get displayName;
 
   Future<List<MediaItem>> fetchUserLibrary(String userName);
+
+  Future<UserTasteSignals> fetchTasteSignals(String userName);
 
   Future<List<MediaItem>> fetchRecommendationCandidates({
     bool includeAdult = false,

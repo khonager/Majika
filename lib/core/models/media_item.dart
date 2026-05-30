@@ -11,6 +11,9 @@ class MediaItem {
   final String format;
   final String? status;
   final String? description;
+  final String siteUrl;
+  final List<String> characters;
+  final List<String> studios;
   final int? startYear;
   final int? popularity;
   final int? updatedAt;
@@ -29,6 +32,9 @@ class MediaItem {
     this.format = 'UNKNOWN',
     this.status,
     this.description,
+    this.siteUrl = '',
+    this.characters = const [],
+    this.studios = const [],
     this.startYear,
     this.popularity,
     this.updatedAt,
@@ -57,6 +63,9 @@ class MediaItem {
     String? format,
     String? status,
     String? description,
+    String? siteUrl,
+    List<String>? characters,
+    List<String>? studios,
     int? startYear,
     int? popularity,
     int? updatedAt,
@@ -75,6 +84,9 @@ class MediaItem {
       format: format ?? this.format,
       status: status ?? this.status,
       description: description ?? this.description,
+      siteUrl: siteUrl ?? this.siteUrl,
+      characters: characters ?? this.characters,
+      studios: studios ?? this.studios,
       startYear: startYear ?? this.startYear,
       popularity: popularity ?? this.popularity,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -98,6 +110,9 @@ class MediaItem {
       format: json['format'] as String? ?? 'UNKNOWN',
       status: json['status'] as String?,
       description: json['description'] as String?,
+      siteUrl: json['siteUrl'] as String? ?? '',
+      characters: List<String>.from(json['characters'] ?? []),
+      studios: List<String>.from(json['studios'] ?? []),
       startYear: json['startYear'] as int?,
       popularity: json['popularity'] as int?,
       updatedAt: json['updatedAt'] as int?,
@@ -119,6 +134,9 @@ class MediaItem {
       'format': format,
       'status': status,
       'description': description,
+      'siteUrl': siteUrl,
+      'characters': characters,
+      'studios': studios,
       'startYear': startYear,
       'popularity': popularity,
       'updatedAt': updatedAt,

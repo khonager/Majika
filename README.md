@@ -8,10 +8,10 @@ The current first working slice is intentionally narrow: AniList public username
 
 - **First service:** AniList.
 - **Import path:** public AniList username. OAuth is planned so private lists can be imported later, but it is not wired yet.
-- **Recommendation path:** fetch public anime/manga list entries, derive a local taste profile, fetch trending/popular AniList candidates, rank them locally, and show match reasons.
-- **Search path:** after import, the user can steer recommendations with tags, anime/manga type chips, every AniList format chip, an adult-content opt-in, and a plain search request. This is not a chat UI; the request should be interpreted into recommendation filters, AniList search constraints, and ranking boosts. The intended interpreter is local AI; the current app uses a deterministic fallback only because no local model is connected yet.
+- **Recommendation path:** fetch public anime/manga list entries, AniList favorites, visible media characters/studios, derive a local taste profile, fetch trending/popular AniList candidates, rank them locally, and show match reasons.
+- **Search path:** after import, the user can steer recommendations with tags, anime/manga type chips, every AniList format chip, an adult-content opt-in, and a plain search request. This is not a chat UI; the request should be interpreted into recommendation filters, AniList search constraints, and ranking boosts. Tags stay compact in the main feed and open into a searchable picker sheet. The intended interpreter is local AI; the current app uses a deterministic fallback only because no local model is connected yet.
 - **Storage:** local/session-first prototype with no backend. Firebase sync is a future option, so service and repository boundaries should stay clean.
-- **AI:** no remote AI API by default. The app works with deterministic local summaries today and is structured for a future `flutter_gemma` local model provider.
+- **AI:** no remote AI API by default. The app can download a small FunctionGemma model with `flutter_gemma` and tries that active local model for search interpretation, with deterministic local rules as fallback.
 - **Extensions:** the Lua extension runner and `extensions/anilist_template.lua` are experimental extension work. The main app uses the typed Dart AniList connector for reliability.
 
 ## Product Direction
@@ -47,6 +47,7 @@ Important concepts live under `lib/core`:
 
 - `MediaItem`: normalized media object across AniList now and future services later.
 - `TasteProfile`: derived user profile with favorite genres, formats, high-rated items, and recent activity.
+- `UserTasteSignals`: public AniList favorites such as favorite characters, staff, and studios.
 - `Recommendation`: ranked candidate with score, signals, and explanation.
 - `MediaService`: interface for AniList, Steam, Spotify, movies/TV, etc.
 - `AniListService`: typed GraphQL client for the first real service.
@@ -57,7 +58,7 @@ The current home screen wires these pieces together directly for the prototype. 
 
 ## Local AI Plan
 
-Majika should use local AI by default, not a hosted API. The planned Flutter integration is [`flutter_gemma`](https://pub.dev/packages/flutter_gemma), with user-imported or downloaded models instead of bundling a model in the app. The current app does **not** run an LLM yet; it uses a deterministic local fallback through the same query-interpretation interface that the local model should replace.
+Majika should use local AI by default, not a hosted API. The Flutter integration is [`flutter_gemma`](https://pub.dev/packages/flutter_gemma), with user-downloaded models instead of bundling a model in the app. The current app downloads FunctionGemma 270M as the beginner option, registers it as the active model, and uses it for natural-language search interpretation when available. Deterministic local hints remain as the fallback when no model is installed or inference fails.
 
 The desired search flow is:
 
@@ -69,7 +70,7 @@ The desired search flow is:
 Recommended direction:
 
 - Start with a Gemma 4 E2B `.litertlm` model when model import UX is added.
-- Settings already expose the intended knobs: provider target, model path, optional local-server endpoint, search-interpretation toggle, and context-item budget. These controls are configuration scaffolding until model execution is wired.
+- Settings expose the intended knobs: provider target, one-click recommended model download, optional local-server endpoint, search-interpretation toggle, and context-item budget.
 - Keep deterministic summaries as fallback when no model is configured.
 - Use local AI to turn natural-language searches like `romance movie about time travel` into structured tags/formats such as `Romance`, `Time Manipulation`, and `MOVIE`.
 - Let the app fetch current releases and service data itself, then pass structured context to the local model for summaries and recommendation explanations.
@@ -108,7 +109,7 @@ flutter test
 - AniList OAuth is not implemented yet.
 - Data is not persisted across devices yet.
 - Firebase is not configured yet.
-- Local model execution is abstracted but not connected to `flutter_gemma` yet.
+- Local model execution is currently used for search interpretation only. Profile summaries and recommendation explanations still fall back if inference is unavailable or fails.
 - Steam, Spotify, movies/TV, and other services are placeholders.
 - Recommendation scoring is deterministic and intentionally simple while the product loop is being proven.
 
@@ -116,7 +117,7 @@ flutter test
 
 1. Persist imported profiles and the last used AniList username locally.
 2. Add AniList OAuth for private lists.
-3. Add model import/download UX and connect `flutter_gemma`.
+3. Add model status persistence, delete/re-download controls, and richer model health checks.
 4. Add Firebase sync as an optional account layer.
 5. Add a second service, likely Steam or Spotify.
 6. Improve recommendations with embeddings, cross-service clustering, and better freshness signals.

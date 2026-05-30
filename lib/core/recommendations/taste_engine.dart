@@ -4,10 +4,16 @@ import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation.dart';
 import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/taste_profile.dart';
+import 'package:majika/core/models/user_taste_signals.dart';
 
 class TasteEngine {
-  TasteProfile buildProfile(String userName, List<MediaItem> library) {
+  TasteProfile buildProfile(
+    String userName,
+    List<MediaItem> library, {
+    UserTasteSignals signals = UserTasteSignals.empty,
+  }) {
     final genreWeights = <String, double>{};
+    final formatWeights = <String, double>{};
     final formatCounts = <String, int>{};
     var completedCount = 0;
     var currentCount = 0;
@@ -19,15 +25,18 @@ class TasteEngine {
 
       formatCounts.update(item.format, (count) => count + 1, ifAbsent: () => 1);
 
-      final ratingBoost = item.rating == null ? 0.75 : max(0.4, item.rating!);
-      final statusBoost = status == 'COMPLETED' || status == 'CURRENT'
-          ? 1.15
-          : 1.0;
+      final itemWeight = _libraryItemWeight(item);
+      formatWeights.update(
+        item.format,
+        (weight) => weight + itemWeight,
+        ifAbsent: () => itemWeight,
+      );
+
       for (final genre in item.tags) {
         genreWeights.update(
           genre,
-          (weight) => weight + ratingBoost * statusBoost,
-          ifAbsent: () => ratingBoost * statusBoost,
+          (weight) => weight + itemWeight,
+          ifAbsent: () => itemWeight,
         );
       }
     }
@@ -44,7 +53,12 @@ class TasteEngine {
       userName: userName,
       library: library,
       favoriteGenres: favoriteGenres.map((entry) => entry.key).take(8).toList(),
+      tagWeights: genreWeights,
+      formatWeights: formatWeights,
       formatCounts: formatCounts,
+      favoriteCharacters: signals.favoriteCharacters,
+      favoriteStaff: signals.favoriteStaff,
+      favoriteStudios: signals.favoriteStudios,
       highRatedItems: highRatedItems.take(6).toList(),
       recentActivity: recentActivity,
       completedCount: completedCount,
@@ -59,7 +73,7 @@ class TasteEngine {
     RecommendationQuery query = const RecommendationQuery(),
   }) {
     final libraryIds = profile.library.map((item) => item.id).toSet();
-    final recommendations = <Recommendation>[];
+    final recommendations = <_ScoredRecommendation>[];
     final availableTags = {
       ...profile.favoriteGenres,
       for (final candidate in candidates) ...candidate.tags,
@@ -101,27 +115,51 @@ class TasteEngine {
           .take(4)
           .toList();
       if (genreMatches.isNotEmpty) {
-        score += genreMatches.length * 2.8;
+        score += genreMatches.fold<double>(
+          0,
+          (total, tag) => total + min(profile.tagWeights[tag] ?? 0, 10) * 0.7,
+        );
         signals.addAll(genreMatches);
       }
 
-      final formatAffinity = profile.formatCounts[candidate.format] ?? 0;
+      final formatAffinity = profile.formatWeights[candidate.format] ?? 0;
       if (formatAffinity > 0) {
-        score += min(formatAffinity, 6) * 0.45;
+        score += min(formatAffinity, 8) * 0.4;
         signals.add(candidate.format.replaceAll('_', ' '));
       }
 
       if (candidate.rating != null) {
-        score += candidate.rating! * 0.85;
+        score += max(0, candidate.rating! - 6) * 0.85;
       }
 
-      if ((candidate.popularity ?? 0) > 20000) {
-        score += 0.8;
+      final characterMatches = candidate.characters
+          .where(profile.favoriteCharacters.contains)
+          .take(3)
+          .toList();
+      if (characterMatches.isNotEmpty) {
+        score += characterMatches.length * 3.4;
+        signals.addAll(characterMatches.map((name) => 'favorite $name'));
+      }
+
+      final studioMatches = candidate.studios
+          .where(profile.favoriteStudios.contains)
+          .take(2)
+          .toList();
+      if (studioMatches.isNotEmpty) {
+        score += studioMatches.length * 2.6;
+        signals.addAll(studioMatches.map((name) => 'favorite studio $name'));
+      }
+
+      final popularity = candidate.popularity ?? 0;
+      if (popularity > 0) {
+        score += min(log(popularity + 1) / log(10), 5) * 0.35;
+      }
+      if (popularity > 20000) {
         signals.add('popular now');
       }
 
       if ((candidate.startYear ?? 0) >= DateTime.now().year - 1) {
-        score += 0.7;
+        score += 0.9;
         signals.add('recent release');
       }
 
@@ -145,7 +183,7 @@ class TasteEngine {
       }
 
       if (candidate.isAdult && includeAdult) {
-        score += 1.4;
+        score += 0.8;
         signals.add('adult filter');
       }
 
@@ -156,23 +194,31 @@ class TasteEngine {
       if (score <= 0) continue;
 
       recommendations.add(
-        Recommendation(
-          item: candidate,
-          matchScore: score,
-          reason: _reasonFor(candidate, genreMatches, profile, query),
-          signals: _uniqueSignals(signals),
-          isPopularNow: (candidate.popularity ?? 0) > 20000,
+        _ScoredRecommendation(
+          rawScore: score,
+          recommendation: Recommendation(
+            item: candidate,
+            matchScore: score,
+            reason: _reasonFor(
+              candidate,
+              genreMatches,
+              characterMatches,
+              studioMatches,
+              profile,
+              query,
+            ),
+            signals: _uniqueSignals(signals),
+            isPopularNow: (candidate.popularity ?? 0) > 20000,
+          ),
         ),
       );
     }
 
-    recommendations.sort((a, b) => b.matchScore.compareTo(a.matchScore));
+    recommendations.sort((a, b) => b.rawScore.compareTo(a.rawScore));
     if (recommendations.isEmpty) return [];
 
-    return [
-      recommendations.first.copyWith(isTopPick: true),
-      ...recommendations.skip(1),
-    ];
+    final calibrated = _calibrateScores(recommendations);
+    return [calibrated.first.copyWith(isTopPick: true), ...calibrated.skip(1)];
   }
 
   MediaItem? _recentActivity(List<MediaItem> library) {
@@ -189,6 +235,8 @@ class TasteEngine {
   String _reasonFor(
     MediaItem candidate,
     List<String> genreMatches,
+    List<String> characterMatches,
+    List<String> studioMatches,
     TasteProfile profile,
     RecommendationQuery query,
   ) {
@@ -204,6 +252,14 @@ class TasteEngine {
     if (genreMatches.isNotEmpty) {
       final genres = genreMatches.take(2).join(' and ');
       return 'Matches your $genres streak and keeps close to the ${profile.primaryTaste} profile.';
+    }
+
+    if (characterMatches.isNotEmpty) {
+      return 'Includes character signals you have favorited on AniList.';
+    }
+
+    if (studioMatches.isNotEmpty) {
+      return 'Comes from a studio you have favorited on AniList.';
     }
 
     if (candidate.rating != null && candidate.rating! >= 8) {
@@ -242,4 +298,56 @@ class TasteEngine {
 
     return min(score, 5.0);
   }
+
+  double _libraryItemWeight(MediaItem item) {
+    final rating = item.rating;
+    final ratingWeight = rating == null ? 0.8 : max(0.15, rating / 7.2);
+    final status = item.status ?? '';
+    final statusWeight = switch (status) {
+      'CURRENT' => 1.25,
+      'REPEATING' => 1.2,
+      'COMPLETED' => 1.1,
+      'PAUSED' => 0.7,
+      'DROPPED' => 0.35,
+      'PLANNING' => 0.45,
+      _ => 0.85,
+    };
+    final updatedAt = item.updatedAt;
+    final recentWeight = updatedAt == null
+        ? 1.0
+        : DateTime.fromMillisecondsSinceEpoch(
+            updatedAt * 1000,
+          ).isAfter(DateTime.now().subtract(const Duration(days: 180)))
+        ? 1.12
+        : 1.0;
+
+    return ratingWeight * statusWeight * recentWeight;
+  }
+
+  List<Recommendation> _calibrateScores(
+    List<_ScoredRecommendation> recommendations,
+  ) {
+    final minScore = recommendations.last.rawScore;
+    final maxScore = recommendations.first.rawScore;
+    final range = maxScore - minScore;
+
+    return [
+      for (final entry in recommendations)
+        entry.recommendation.copyWith(
+          matchScore: range <= 0
+              ? max(54, min(91, 58 + entry.rawScore * 2.4))
+              : 52 + ((entry.rawScore - minScore) / range) * 47,
+        ),
+    ];
+  }
+}
+
+class _ScoredRecommendation {
+  final double rawScore;
+  final Recommendation recommendation;
+
+  const _ScoredRecommendation({
+    required this.rawScore,
+    required this.recommendation,
+  });
 }

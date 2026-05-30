@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:majika/ui/home/home_screen.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await FlutterGemma.initialize();
   runApp(const MajikaApp());
 }
 

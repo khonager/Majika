@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation_query.dart';
+import 'package:majika/core/models/user_taste_signals.dart';
 import 'package:majika/core/services/media_service.dart';
 import 'package:majika/main.dart';
 import 'package:majika/ui/home/home_screen.dart';
@@ -95,6 +96,46 @@ void main() {
     expect(find.text('Time Manipulation'), findsWidgets);
   });
 
+  testWidgets('tag picker keeps the long tag list out of the main feed', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('browse-tags-button')), findsOneWidget);
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -180));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('browse-tags-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Choose tags'), findsOneWidget);
+    expect(find.byKey(const ValueKey('tag-picker-search')), findsOneWidget);
+    expect(find.text('Yandere'), findsOneWidget);
+  });
+
+  testWidgets('recommendation results expose AniList links', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Open on AniList'), findsWidgets);
+  });
+
   testWidgets(
     'switch user returns to the import form without layout overflow',
     (WidgetTester tester) async {
@@ -157,14 +198,9 @@ void main() {
 
     expect(find.text('Local AI'), findsOneWidget);
     expect(find.text('Provider'), findsOneWidget);
-    expect(find.text('Model path'), findsOneWidget);
+    expect(find.text('FunctionGemma 270M'), findsOneWidget);
+    expect(find.text('284 MB · Gemma .litertlm'), findsOneWidget);
     expect(find.text('Local server endpoint'), findsOneWidget);
-
-    await tester.enterText(
-      find.byKey(const ValueKey('local-ai-model-path')),
-      '/tmp/gemma-4-e2b-it.litertlm',
-    );
-    await tester.pumpAndSettle();
 
     expect(find.text('Use local model when available'), findsOneWidget);
     expect(find.text('AI search interpretation'), findsOneWidget);
@@ -178,6 +214,11 @@ void main() {
 
     expect(find.text('Recommendation context items'), findsOneWidget);
     expect(find.text('Import Gemma model'), findsOneWidget);
+    expect(find.text('Download'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('download-recommended-ai-model')),
+      findsOneWidget,
+    );
     expect(find.text('Current provider'), findsOneWidget);
   });
 }
@@ -203,6 +244,7 @@ class _FakeMediaService implements MediaService {
         format: 'TV',
         popularity: 50000,
         startYear: DateTime.now().year,
+        siteUrl: 'https://anilist.co/anime/2',
       ),
       MediaItem(
         id: 'anilist_3',
@@ -211,6 +253,7 @@ class _FakeMediaService implements MediaService {
         tags: const ['Mystery'],
         rating: 8,
         format: 'MOVIE',
+        siteUrl: 'https://anilist.co/anime/3',
       ),
       if (includeAdult)
         MediaItem(
@@ -222,6 +265,7 @@ class _FakeMediaService implements MediaService {
           format: 'OVA',
           mediaType: 'ANIME',
           isAdult: true,
+          siteUrl: 'https://anilist.co/anime/4',
         ),
     ];
   }
@@ -240,6 +284,7 @@ class _FakeMediaService implements MediaService {
           rating: 8.4,
           format: 'MOVIE',
           mediaType: 'ANIME',
+          siteUrl: 'https://anilist.co/anime/5',
         ),
       ...await fetchRecommendationCandidates(
         includeAdult: query.includeAdult || query.infersAdult,
@@ -259,6 +304,14 @@ class _FakeMediaService implements MediaService {
   }
 
   @override
+  Future<UserTasteSignals> fetchTasteSignals(String userName) async {
+    return const UserTasteSignals(
+      favoriteCharacters: ['Odokawa'],
+      favoriteStudios: ['OLM'],
+    );
+  }
+
+  @override
   Future<List<MediaItem>> fetchUserLibrary(String userName) async {
     return [
       MediaItem(
@@ -270,6 +323,9 @@ class _FakeMediaService implements MediaService {
         format: 'TV',
         status: 'CURRENT',
         updatedAt: 100,
+        characters: const ['Odokawa'],
+        studios: const ['OLM'],
+        siteUrl: 'https://anilist.co/anime/1',
       ),
     ];
   }
