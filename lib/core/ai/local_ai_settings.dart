@@ -2,6 +2,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const externalLocalAiProvider = 'External local server';
 const fallbackRulesProvider = 'Fallback rules only';
+const localAiModeOnDevice = 'Automatic on-device';
+const localAiModeExternalServer = externalLocalAiProvider;
+const localAiModeRulesOnly = fallbackRulesProvider;
 const defaultLocalAiEndpoint = 'http://127.0.0.1:52625/v1/chat/completions';
 const defaultLocalAiModel = 'gemma3:4b';
 
@@ -12,8 +15,11 @@ class LocalAiSettingsKeys {
   static const enableMotionEffects = 'settings.enableMotionEffects';
   static const useLocalAi = 'settings.useLocalAi';
   static const useAiForSearch = 'settings.useAiForSearch';
+  static const localAiMode = 'settings.localAiMode';
   static const localAiProvider = 'settings.localAiProvider';
+  static const selectedModelId = 'settings.selectedModelId';
   static const selectedModelName = 'settings.selectedModelName';
+  static const downloadedModelId = 'settings.downloadedModelId';
   static const downloadedModelName = 'settings.downloadedModelName';
   static const imageQuality = 'settings.imageQuality';
   static const aiContextItems = 'settings.aiContextItems';
@@ -24,6 +30,7 @@ class LocalAiSettingsKeys {
 class LocalAiRuntimeSettings {
   final bool useLocalAi;
   final bool useAiForSearch;
+  final String mode;
   final String provider;
   final String endpoint;
   final String serverModel;
@@ -32,6 +39,7 @@ class LocalAiRuntimeSettings {
   const LocalAiRuntimeSettings({
     required this.useLocalAi,
     required this.useAiForSearch,
+    this.mode = localAiModeRulesOnly,
     required this.provider,
     required this.endpoint,
     required this.serverModel,
@@ -41,13 +49,21 @@ class LocalAiRuntimeSettings {
   const LocalAiRuntimeSettings.defaults({bool enabled = false})
     : useLocalAi = enabled,
       useAiForSearch = true,
+      mode = enabled ? localAiModeOnDevice : localAiModeRulesOnly,
       provider = fallbackRulesProvider,
       endpoint = defaultLocalAiEndpoint,
       serverModel = defaultLocalAiModel,
       contextItems = 24;
 
   bool get usesExternalServer =>
-      useLocalAi && provider == externalLocalAiProvider && endpoint.isNotEmpty;
+      useLocalAi &&
+      mode == localAiModeExternalServer &&
+      endpoint.trim().isNotEmpty;
+
+  bool get usesOnDeviceModel =>
+      useLocalAi && mode == localAiModeOnDevice && !usesExternalServer;
+
+  int get contextItemLimit => contextItems.round().clamp(8, 48);
 
   Uri get chatCompletionsUri {
     final parsed = Uri.parse(endpoint.trim());
@@ -66,13 +82,21 @@ class LocalAiRuntimeSettings {
     bool defaultEnabled = false,
   }) async {
     final prefs = await SharedPreferences.getInstance();
+    final legacyProvider = prefs.getString(LocalAiSettingsKeys.localAiProvider);
+    final mode =
+        prefs.getString(LocalAiSettingsKeys.localAiMode) ??
+        _modeFromLegacyProvider(legacyProvider);
+    final useLocalAi =
+        prefs.getBool(LocalAiSettingsKeys.useLocalAi) ??
+        (defaultEnabled ||
+            mode == localAiModeOnDevice ||
+            mode == localAiModeExternalServer);
+
     return LocalAiRuntimeSettings(
-      useLocalAi:
-          prefs.getBool(LocalAiSettingsKeys.useLocalAi) ?? defaultEnabled,
+      useLocalAi: mode == localAiModeRulesOnly ? false : useLocalAi,
       useAiForSearch: prefs.getBool(LocalAiSettingsKeys.useAiForSearch) ?? true,
-      provider:
-          prefs.getString(LocalAiSettingsKeys.localAiProvider) ??
-          fallbackRulesProvider,
+      mode: mode,
+      provider: legacyProvider ?? fallbackRulesProvider,
       endpoint:
           prefs.getString(LocalAiSettingsKeys.localEndpoint) ??
           defaultLocalAiEndpoint,
@@ -81,5 +105,14 @@ class LocalAiRuntimeSettings {
           defaultLocalAiModel,
       contextItems: prefs.getDouble(LocalAiSettingsKeys.aiContextItems) ?? 24,
     );
+  }
+
+  static String _modeFromLegacyProvider(String? provider) {
+    return switch (provider) {
+      externalLocalAiProvider => localAiModeExternalServer,
+      fallbackRulesProvider => localAiModeRulesOnly,
+      null => localAiModeRulesOnly,
+      _ => localAiModeOnDevice,
+    };
   }
 }

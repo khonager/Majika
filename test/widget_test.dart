@@ -202,21 +202,25 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Local AI'), findsOneWidget);
-    expect(find.text('Provider'), findsOneWidget);
-    expect(find.text('Qwen3 0.6B'), findsOneWidget);
-    expect(find.text('586 MB · Qwen'), findsOneWidget);
-    expect(find.text('FunctionGemma 270M'), findsNothing);
-    await tester.tap(find.text('Qwen3 0.6B'));
-    await tester.pumpAndSettle();
-    expect(find.text('FunctionGemma 270M'), findsOneWidget);
-    await tester.tap(find.text('FunctionGemma 270M').last);
-    await tester.pumpAndSettle();
-    expect(find.text('284 MB · FunctionGemma'), findsOneWidget);
-    expect(find.text('Local server endpoint'), findsOneWidget);
-    expect(find.text('Local server model'), findsOneWidget);
+    expect(find.text('AI mode'), findsOneWidget);
+    expect(find.text('Provider'), findsNothing);
+    expect(find.text('FastVLM 0.5B'), findsNothing);
+    expect(find.textContaining('token'), findsNothing);
+    expect(find.text('Local server endpoint'), findsNothing);
+    expect(find.text('Local server model'), findsNothing);
 
-    expect(find.text('Use local model when available'), findsOneWidget);
+    await tester.tap(find.text('Fallback rules only'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Automatic on-device').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Qwen3 0.6B'), findsOneWidget);
+    expect(find.text('586 MB · Balanced public text model'), findsOneWidget);
+    expect(find.text('FunctionGemma 270M'), findsNothing);
+
+    expect(find.text('Use local model when available'), findsNothing);
     expect(find.text('AI search interpretation'), findsOneWidget);
+    expect(find.text('Advanced model choice'), findsOneWidget);
 
     await tester.scrollUntilVisible(
       find.text('Recommendation context items'),
@@ -226,13 +230,66 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Recommendation context items'), findsOneWidget);
-    expect(find.text('Import Gemma model'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Qwen3 0.6B'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Qwen3 0.6B'));
+    await tester.pumpAndSettle();
+    expect(find.text('FunctionGemma 270M'), findsOneWidget);
+    expect(find.text('DeepSeek R1 Distill Qwen 1.5B'), findsOneWidget);
+    expect(find.text('Qwen 2.5 1.5B Instruct'), findsOneWidget);
+    expect(find.text('Phi-4 Mini Instruct'), findsOneWidget);
+    await tester.tap(find.text('Qwen 2.5 1.5B Instruct').last);
+    await tester.pumpAndSettle();
+    expect(find.text('1.6 GB · Advanced public text model'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('Advanced model choice'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    final advancedTile = find.widgetWithText(ListTile, 'Advanced model choice');
+    await tester.tap(
+      find.descendant(of: advancedTile, matching: find.byType(Switch)).first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Import custom model file'), findsOneWidget);
     expect(find.text('Download'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('download-recommended-ai-model')),
       findsOneWidget,
     );
-    expect(find.text('Current provider'), findsOneWidget);
+    expect(find.text('Current AI path'), findsOneWidget);
+  });
+
+  testWidgets('settings shows local server fields only for external mode', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+
+    await tester.scrollUntilVisible(
+      find.text('Local AI'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Local server endpoint'), findsNothing);
+    await tester.tap(find.text('Fallback rules only'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('External local server').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Local server endpoint'), findsOneWidget);
+    expect(find.text('Server model preset'), findsOneWidget);
+    expect(find.text('gemma3:4b'), findsWidgets);
+    expect(find.text('Local server model'), findsOneWidget);
+    expect(find.text('Qwen3 0.6B'), findsNothing);
   });
 
   testWidgets('settings persists recommendation context items', (

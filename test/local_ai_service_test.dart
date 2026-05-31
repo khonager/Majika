@@ -76,6 +76,83 @@ void main() {
     expect(chosen?.reason, 'Best fit from the AI pass.');
   });
 
+  test('flutter gemma service ignores echoed JSON examples', () async {
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        expect(prompt, isNot(contains('anilist_123')));
+        return '''
+{"id":"anilist_123","reason":"short reason"}
+{"id":"anilist_2","reason":"Actual fit from the options."}
+''';
+      },
+    );
+
+    final chosen = await service.chooseTopRecommendation(_profile(), [
+      _recommendation('anilist_1', 'First'),
+      _recommendation('anilist_2', 'Second'),
+    ], query: const RecommendationQuery(request: 'magic school'));
+
+    expect(chosen?.item.id, 'anilist_2');
+    expect(chosen?.reason, 'Actual fit from the options.');
+  });
+
+  test('flutter gemma service uses compact tag prompts', () async {
+    late String capturedPrompt;
+    late int capturedMaxTokens;
+    final availableTags = [
+      for (var index = 0; index < 80; index++) 'Generated Tag $index',
+    ];
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        mode: localAiModeOnDevice,
+        provider: 'FunctionGemma',
+        endpoint: defaultLocalAiEndpoint,
+        serverModel: defaultLocalAiModel,
+        contextItems: 8,
+      ),
+      textGenerator: (prompt, maxTokens) async {
+        capturedPrompt = prompt;
+        capturedMaxTokens = maxTokens;
+        return '{"tags":["Fantasy"],"formats":[],"mediaTypes":[],"includeAdult":false}';
+      },
+    );
+
+    await service.interpretRecommendationRequest(
+      const RecommendationQuery(request: 'like harry potter'),
+      availableTags: availableTags,
+    );
+
+    expect(capturedMaxTokens, 1024);
+    expect(capturedPrompt, contains('Allowed tags:'));
+    expect(capturedPrompt, contains('Fantasy'));
+    expect(capturedPrompt, isNot(contains('{"tags":["Romance"]')));
+    expect(capturedPrompt, contains('Use empty arrays'));
+    expect(capturedPrompt, isNot(contains('Generated Tag 40')));
+  });
+
+  test(
+    'flutter gemma service uses the last query-shaped JSON object',
+    () async {
+      final service = FlutterGemmaLocalAiService(
+        textGenerator: (prompt, maxTokens) async => '''
+{"tags":["Romance"],"formats":["MOVIE"],"mediaTypes":["ANIME"],"includeAdult":false}
+{"tags":["Mystery"],"formats":["TV"],"mediaTypes":["ANIME"],"includeAdult":false}
+''',
+      );
+
+      final interpreted = await service.interpretRecommendationRequest(
+        const RecommendationQuery(request: 'mystery tv'),
+        availableTags: const ['Romance', 'Mystery'],
+      );
+
+      expect(interpreted.aiSelectedTags, contains('Mystery'));
+      expect(interpreted.aiSelectedTags, isNot(contains('Romance')));
+      expect(interpreted.formats, contains('TV'));
+    },
+  );
+
   test('local AI service can use an OpenAI-compatible local server', () async {
     Object? requestBody;
     Uri? requestUrl;
@@ -83,6 +160,7 @@ void main() {
       settingsLoader: () async => const LocalAiRuntimeSettings(
         useLocalAi: true,
         useAiForSearch: true,
+        mode: localAiModeExternalServer,
         provider: externalLocalAiProvider,
         endpoint: 'http://127.0.0.1:52625',
         serverModel: 'gemma3:4b',
@@ -122,6 +200,39 @@ void main() {
     );
     expect(interpreted.aiSelectedTags, contains('Romance'));
     expect(interpreted.formats, contains('MOVIE'));
+  });
+
+  test('local AI service respects the configured context budget', () async {
+    late String capturedPrompt;
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        mode: localAiModeOnDevice,
+        provider: 'Qwen',
+        endpoint: defaultLocalAiEndpoint,
+        serverModel: defaultLocalAiModel,
+        contextItems: 8,
+      ),
+      textGenerator: (prompt, maxTokens) async {
+        capturedPrompt = prompt;
+        return '{"id":"anilist_1","reason":"Compact context."}';
+      },
+    );
+
+    final recommendations = [
+      for (var index = 0; index < 12; index++)
+        _recommendation('anilist_$index', 'Title $index'),
+    ];
+
+    await service.chooseTopRecommendation(
+      _profile(),
+      recommendations,
+      query: const RecommendationQuery(request: 'mystery'),
+    );
+
+    expect(capturedPrompt, contains('anilist_2'));
+    expect(capturedPrompt, isNot(contains('anilist_3')));
   });
 }
 

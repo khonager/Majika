@@ -8,72 +8,122 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const _downloadableLocalAiModels = [
   _DownloadableModel(
+    id: 'qwen3_0_6b',
     name: 'Qwen3 0.6B',
     sizeLabel: '586 MB',
     providerLabel: 'Qwen',
+    resourceLabel: 'Balanced public text model',
     mobileUrl:
         'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
     desktopUrl:
         'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
-    description: 'Compact multilingual chat model with strong request parsing.',
+    description:
+        'Primary candidate for the default recommendation after benchmark validation.',
     modelType: ModelType.qwen,
     fileType: ModelFileType.task,
   ),
   _DownloadableModel(
+    id: 'qwen25_0_5b_instruct',
+    name: 'Qwen 2.5 0.5B Instruct',
+    sizeLabel: '0.5 GB',
+    providerLabel: 'Qwen',
+    resourceLabel: 'Small public text model',
+    mobileUrl:
+        'https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
+    description:
+        'Mobile-friendly candidate that is smaller than Qwen 2.5 1.5B but less capable.',
+    modelType: ModelType.qwen,
+    fileType: ModelFileType.task,
+    isAdvanced: true,
+  ),
+  _DownloadableModel(
+    id: 'functiongemma_270m',
     name: 'FunctionGemma 270M',
     sizeLabel: '284 MB',
     providerLabel: 'FunctionGemma',
+    resourceLabel: 'Advanced function-calling model',
     mobileUrl:
         'https://huggingface.co/sasha-denisov/function-gemma-270M-it/resolve/main/functiongemma-270M-it.task',
     desktopUrl:
         'https://huggingface.co/sasha-denisov/function-gemma-270M-it/resolve/main/functiongemma-270M-it.litertlm',
     description:
-        'Fastest option for turning search requests into tags and filters.',
+        'Experimental: tiny function-calling base that likely needs task-specific tool wiring or fine-tuning.',
     modelType: ModelType.functionGemma,
     fileType: ModelFileType.task,
+    isAdvanced: true,
   ),
   _DownloadableModel(
+    id: 'deepseek_r1_qwen_1_5b',
+    name: 'DeepSeek R1 Distill Qwen 1.5B',
+    sizeLabel: '1.7 GB',
+    providerLabel: 'DeepSeek',
+    resourceLabel: 'Advanced reasoning model',
+    mobileUrl:
+        'https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv1280.task',
+    desktopUrl:
+        'https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv4096.litertlm',
+    description:
+        'Reasoning-oriented candidate; benchmark before recommending because thinking output may add noise.',
+    modelType: ModelType.deepSeek,
+    fileType: ModelFileType.task,
+    isAdvanced: true,
+  ),
+  _DownloadableModel(
+    id: 'qwen25_1_5b_instruct',
     name: 'Qwen 2.5 1.5B Instruct',
     sizeLabel: '1.6 GB',
     providerLabel: 'Qwen',
+    resourceLabel: 'Advanced public text model',
     mobileUrl:
         'https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
     desktopUrl:
         'https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm',
     description:
-        'Larger text model for stronger devices and better request parsing.',
+        'Larger candidate to benchmark against Qwen3 before recommending.',
     modelType: ModelType.qwen,
     fileType: ModelFileType.task,
+    isAdvanced: true,
   ),
   _DownloadableModel(
+    id: 'smollm_135m_instruct',
+    name: 'SmolLM 135M Instruct',
+    sizeLabel: '135 MB',
+    providerLabel: 'SmolLM',
+    resourceLabel: 'Tiny public text model',
+    mobileUrl:
+        'https://huggingface.co/litert-community/SmolLM-135M-Instruct/resolve/main/SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task',
+    description:
+        'Very small mobile candidate; likely only useful as a low-resource fallback after testing.',
+    modelType: ModelType.general,
+    fileType: ModelFileType.task,
+    isAdvanced: true,
+  ),
+  _DownloadableModel(
+    id: 'phi4_mini_instruct',
     name: 'Phi-4 Mini Instruct',
     sizeLabel: '3.9 GB',
     providerLabel: 'Phi',
+    resourceLabel: 'Large public text model',
     mobileUrl:
         'https://huggingface.co/litert-community/Phi-4-mini-instruct/resolve/main/Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.task',
     desktopUrl:
         'https://huggingface.co/litert-community/Phi-4-mini-instruct/resolve/main/Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.litertlm',
     description:
-        'Large option for high-end devices; expect slower downloads and startup.',
+        'Large advanced candidate for better reasoning on machines with enough memory.',
     modelType: ModelType.general,
     fileType: ModelFileType.task,
-  ),
-  _DownloadableModel(
-    name: 'FastVLM 0.5B',
-    sizeLabel: '0.5 GB',
-    providerLabel: 'FastVLM',
-    mobileUrl:
-        'https://huggingface.co/litert-community/FastVLM-0.5B/resolve/main/FastVLM-0.5B.litertlm',
-    desktopUrl:
-        'https://huggingface.co/litert-community/FastVLM-0.5B/resolve/main/FastVLM-0.5B.litertlm',
-    description:
-        'Vision-language model; useful later when image prompts are wired.',
-    modelType: ModelType.general,
-    fileType: ModelFileType.task,
+    isAdvanced: true,
   ),
 ];
 
-final _recommendedLocalAiModel = _downloadableLocalAiModels.first;
+final _defaultLocalAiModel = _downloadableLocalAiModels.first;
+const _externalLocalServerModelPresets = [
+  'gemma3:270m',
+  'gemma3:1b',
+  'gemma3:4b',
+  'gemma3:12b',
+  'gemma3:27b',
+];
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -90,8 +140,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _useLocalAi = false;
   bool _useAiForSearch = true;
   bool _isDownloadingModel = false;
-  String _localAiProvider = _recommendedLocalAiModel.providerLabel;
-  _DownloadableModel _selectedModel = _recommendedLocalAiModel;
+  bool _showAdvancedLocalAi = false;
+  String _localAiMode = localAiModeRulesOnly;
+  String _localAiProvider = _defaultLocalAiModel.providerLabel;
+  _DownloadableModel _selectedModel = _defaultLocalAiModel;
+  String? _downloadedModelId;
   String? _downloadedModelName;
   double _imageQuality = 0.85;
   double _aiContextItems = 24;
@@ -103,7 +156,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
     text: defaultLocalAiModel,
   );
 
-  bool get _hasDownloadedModel => _downloadedModelName != null;
+  bool get _hasDownloadedModel =>
+      _downloadedModelId != null || _downloadedModelName != null;
+
+  bool get _usesOnDeviceAi => _localAiMode == localAiModeOnDevice;
+
+  bool get _usesExternalServer => _localAiMode == localAiModeExternalServer;
+
+  List<_DownloadableModel> get _availableLocalAiModels =>
+      _downloadableLocalAiModels
+          .where((model) => model.supportsCurrentPlatform)
+          .toList();
+
+  List<_DownloadableModel> get _visibleLocalAiModels {
+    return _availableLocalAiModels.isEmpty
+        ? [_defaultLocalAiModel]
+        : _availableLocalAiModels;
+  }
+
+  _DownloadableModel get _effectiveSelectedModel {
+    final models = _visibleLocalAiModels;
+    return models.contains(_selectedModel) ? _selectedModel : models.first;
+  }
 
   @override
   void initState() {
@@ -115,16 +189,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
 
+    final selectedModelId = prefs.getString(
+      LocalAiSettingsKeys.selectedModelId,
+    );
     final selectedModelName = prefs.getString(
       LocalAiSettingsKeys.selectedModelName,
     );
     _DownloadableModel? selectedModel;
     for (final model in _downloadableLocalAiModels) {
-      if (model.name == selectedModelName) {
+      if (model.id == selectedModelId || model.name == selectedModelName) {
         selectedModel = model;
         break;
       }
     }
+    final legacyProvider = prefs.getString(LocalAiSettingsKeys.localAiProvider);
+    final savedMode =
+        prefs.getString(LocalAiSettingsKeys.localAiMode) ??
+        _modeFromLegacyProvider(legacyProvider);
 
     setState(() {
       _immersiveReader =
@@ -140,13 +221,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
           prefs.getBool(LocalAiSettingsKeys.enableMotionEffects) ??
           _enableMotionEffects;
       _useLocalAi =
-          prefs.getBool(LocalAiSettingsKeys.useLocalAi) ?? _useLocalAi;
+          prefs.getBool(LocalAiSettingsKeys.useLocalAi) ??
+          (savedMode == localAiModeOnDevice ||
+              savedMode == localAiModeExternalServer);
       _useAiForSearch =
           prefs.getBool(LocalAiSettingsKeys.useAiForSearch) ?? _useAiForSearch;
+      _localAiMode = savedMode;
+      if (_localAiMode == localAiModeRulesOnly) {
+        _useLocalAi = false;
+      }
       _localAiProvider =
-          prefs.getString(LocalAiSettingsKeys.localAiProvider) ??
-          _localAiProvider;
+          legacyProvider ?? selectedModel?.providerLabel ?? _localAiProvider;
       _selectedModel = selectedModel ?? _selectedModel;
+      _downloadedModelId = prefs.getString(
+        LocalAiSettingsKeys.downloadedModelId,
+      );
       _downloadedModelName = prefs.getString(
         LocalAiSettingsKeys.downloadedModelName,
       );
@@ -162,6 +251,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           prefs.getString(LocalAiSettingsKeys.localServerModel) ??
           _localServerModelController.text;
     });
+  }
+
+  String _modeFromLegacyProvider(String? provider) {
+    return switch (provider) {
+      externalLocalAiProvider => localAiModeExternalServer,
+      fallbackRulesProvider => localAiModeRulesOnly,
+      null => localAiModeRulesOnly,
+      _ => localAiModeOnDevice,
+    };
   }
 
   Future<void> _saveBool(String key, bool value) async {
@@ -181,8 +279,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _saveDownloadedModel(_DownloadableModel model) async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(LocalAiSettingsKeys.downloadedModelId, model.id);
     await prefs.setString(LocalAiSettingsKeys.downloadedModelName, model.name);
+    await prefs.setString(LocalAiSettingsKeys.selectedModelId, model.id);
+    await prefs.setString(LocalAiSettingsKeys.selectedModelName, model.name);
     await prefs.setBool(LocalAiSettingsKeys.useLocalAi, true);
+    await prefs.setString(LocalAiSettingsKeys.localAiMode, localAiModeOnDevice);
     await prefs.setString(
       LocalAiSettingsKeys.localAiProvider,
       model.providerLabel,
@@ -199,7 +301,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       await FlutterGemma.initialize();
-      final modelToDownload = _selectedModel;
+      final modelToDownload = _effectiveSelectedModel;
       final installation =
           await FlutterGemma.installModel(
             modelType: modelToDownload.modelType,
@@ -210,8 +312,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       if (!mounted) return;
       setState(() {
+        _downloadedModelId = modelToDownload.id;
         _downloadedModelName = modelToDownload.name;
         _useLocalAi = true;
+        _localAiMode = localAiModeOnDevice;
         _localAiProvider = modelToDownload.providerLabel;
         _downloadProgress = 1;
       });
@@ -236,6 +340,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _localEndpointController.dispose();
     _localServerModelController.dispose();
     super.dispose();
+  }
+
+  String _currentLocalAiStatus() {
+    if (_localAiMode == localAiModeRulesOnly || !_useLocalAi) {
+      return 'Deterministic rules only; no model is required.';
+    }
+    if (_localAiMode == localAiModeExternalServer) {
+      return 'External local server will handle AI requests.';
+    }
+    if (_hasDownloadedModel) {
+      return '${_downloadedModelName ?? 'On-device model'} is active for AI requests.';
+    }
+    return 'On-device AI will activate after a public text model is installed.';
   }
 
   @override
@@ -435,99 +552,139 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   'Model controls for local-only profile summaries and search interpretation.',
               children: [
                 _OptionRow(
-                  icon: Icons.hub_rounded,
-                  title: 'Provider',
-                  subtitle:
-                      'Saved preference for local AI controls and downloads.',
-                  value: _localAiProvider,
+                  icon: Icons.route_rounded,
+                  title: 'AI mode',
+                  subtitle: 'Choose how Majika handles local reasoning.',
+                  value: _localAiMode,
                   options: const [
-                    'FunctionGemma',
-                    'Qwen',
-                    'Phi',
-                    externalLocalAiProvider,
-                    fallbackRulesProvider,
+                    localAiModeOnDevice,
+                    localAiModeExternalServer,
+                    localAiModeRulesOnly,
                   ],
                   onChanged: (value) {
                     if (value == null) return;
                     setState(() {
-                      _localAiProvider = value;
-                      if (value == externalLocalAiProvider) {
-                        _useLocalAi = true;
-                      }
-                      if (value == fallbackRulesProvider) {
-                        _useLocalAi = false;
-                      }
+                      _localAiMode = value;
+                      _useLocalAi = value != localAiModeRulesOnly;
+                      _localAiProvider = value == localAiModeOnDevice
+                          ? _selectedModel.providerLabel
+                          : value;
                     });
-                    _saveString(LocalAiSettingsKeys.localAiProvider, value);
-                    if (value == externalLocalAiProvider) {
-                      _saveBool(LocalAiSettingsKeys.useLocalAi, true);
-                    }
-                    if (value == fallbackRulesProvider) {
-                      _saveBool(LocalAiSettingsKeys.useLocalAi, false);
-                    }
-                    showInfoToast(context, 'Local AI provider set to $value.');
-                  },
-                ),
-                _ModelDownloadCard(
-                  models: _downloadableLocalAiModels,
-                  selectedModel: _selectedModel,
-                  isDownloading: _isDownloadingModel,
-                  progress: _downloadProgress,
-                  downloadedName: _downloadedModelName,
-                  onModelSelected: (model) {
-                    setState(() {
-                      _selectedModel = model;
-                      _localAiProvider = model.providerLabel;
-                    });
-                    _saveString(
-                      LocalAiSettingsKeys.selectedModelName,
-                      model.name,
-                    );
+                    _saveString(LocalAiSettingsKeys.localAiMode, value);
                     _saveString(
                       LocalAiSettingsKeys.localAiProvider,
-                      model.providerLabel,
+                      value == localAiModeOnDevice
+                          ? _selectedModel.providerLabel
+                          : value,
                     );
-                  },
-                  onDownload: _downloadRecommendedModel,
-                ),
-                _TextFieldRow(
-                  fieldKey: const ValueKey('local-ai-endpoint'),
-                  icon: Icons.dns_rounded,
-                  title: 'Local server endpoint',
-                  subtitle: 'OpenAI-compatible /v1/chat/completions endpoint.',
-                  controller: _localEndpointController,
-                  hintText: defaultLocalAiEndpoint,
-                  onChanged: (value) =>
-                      _saveString(LocalAiSettingsKeys.localEndpoint, value),
-                ),
-                _TextFieldRow(
-                  fieldKey: const ValueKey('local-ai-server-model'),
-                  icon: Icons.smart_toy_rounded,
-                  title: 'Local server model',
-                  subtitle:
-                      'Model name sent in OpenAI-compatible requests, such as gemma3:4b.',
-                  controller: _localServerModelController,
-                  hintText: defaultLocalAiModel,
-                  onChanged: (value) =>
-                      _saveString(LocalAiSettingsKeys.localServerModel, value),
-                ),
-                _SwitchRow(
-                  icon: Icons.memory_rounded,
-                  title: 'Use local model when available',
-                  subtitle:
-                      'Saved preference; active only after a Gemma model downloads.',
-                  value: _useLocalAi,
-                  onChanged: (value) {
-                    setState(() => _useLocalAi = value);
-                    _saveBool(LocalAiSettingsKeys.useLocalAi, value);
-                    showInfoToast(
-                      context,
-                      value
-                          ? 'Local AI will be used once a model is configured.'
-                          : 'Majika will use deterministic local rules.',
+                    _saveBool(
+                      LocalAiSettingsKeys.useLocalAi,
+                      value != localAiModeRulesOnly,
                     );
+                    showInfoToast(context, 'Local AI mode set to $value.');
                   },
                 ),
+                if (_usesOnDeviceAi)
+                  _ModelDownloadCard(
+                    models: _visibleLocalAiModels,
+                    selectedModel: _effectiveSelectedModel,
+                    isDownloading: _isDownloadingModel,
+                    progress: _downloadProgress,
+                    downloadedId: _downloadedModelId,
+                    downloadedName: _downloadedModelName,
+                    onModelSelected: (model) {
+                      setState(() {
+                        _selectedModel = model;
+                        _localAiProvider = model.providerLabel;
+                        _localAiMode = localAiModeOnDevice;
+                        _useLocalAi = true;
+                      });
+                      _saveString(
+                        LocalAiSettingsKeys.selectedModelId,
+                        model.id,
+                      );
+                      _saveString(
+                        LocalAiSettingsKeys.selectedModelName,
+                        model.name,
+                      );
+                      _saveString(
+                        LocalAiSettingsKeys.localAiMode,
+                        localAiModeOnDevice,
+                      );
+                      _saveString(
+                        LocalAiSettingsKeys.localAiProvider,
+                        model.providerLabel,
+                      );
+                    },
+                    onDownload: _downloadRecommendedModel,
+                  ),
+                if (_usesOnDeviceAi)
+                  _SwitchRow(
+                    icon: Icons.tune_rounded,
+                    title: 'Advanced model choice',
+                    subtitle: 'Show custom import controls.',
+                    value: _showAdvancedLocalAi,
+                    onChanged: (value) =>
+                        setState(() => _showAdvancedLocalAi = value),
+                  ),
+                if (_usesOnDeviceAi && _showAdvancedLocalAi)
+                  _ActionRow(
+                    icon: Icons.file_open_rounded,
+                    title: 'Import custom model file',
+                    subtitle:
+                        'Advanced: bring a downloaded .litertlm or .task file from Hugging Face.',
+                    onTap: () =>
+                        showFeatureComingSoon(context, 'Custom model import'),
+                  ),
+                if (_usesExternalServer)
+                  _TextFieldRow(
+                    fieldKey: const ValueKey('local-ai-endpoint'),
+                    icon: Icons.dns_rounded,
+                    title: 'Local server endpoint',
+                    subtitle:
+                        'OpenAI-compatible /v1/chat/completions endpoint.',
+                    controller: _localEndpointController,
+                    hintText: defaultLocalAiEndpoint,
+                    onChanged: (value) =>
+                        _saveString(LocalAiSettingsKeys.localEndpoint, value),
+                  ),
+                if (_usesExternalServer)
+                  _OptionRow(
+                    icon: Icons.memory_rounded,
+                    title: 'Server model preset',
+                    subtitle:
+                        'Common Ollama model names; edit the field below for LM Studio or custom names.',
+                    value:
+                        _externalLocalServerModelPresets.contains(
+                          _localServerModelController.text,
+                        )
+                        ? _localServerModelController.text
+                        : defaultLocalAiModel,
+                    options: _externalLocalServerModelPresets,
+                    onChanged: (value) {
+                      if (value == null) return;
+                      _localServerModelController.text = value;
+                      _saveString(LocalAiSettingsKeys.localServerModel, value);
+                      showInfoToast(
+                        context,
+                        'Local server model set to $value.',
+                      );
+                    },
+                  ),
+                if (_usesExternalServer)
+                  _TextFieldRow(
+                    fieldKey: const ValueKey('local-ai-server-model'),
+                    icon: Icons.smart_toy_rounded,
+                    title: 'Local server model',
+                    subtitle:
+                        'Model name sent in OpenAI-compatible requests, such as gemma3:4b.',
+                    controller: _localServerModelController,
+                    hintText: defaultLocalAiModel,
+                    onChanged: (value) => _saveString(
+                      LocalAiSettingsKeys.localServerModel,
+                      value,
+                    ),
+                  ),
                 _SwitchRow(
                   icon: Icons.manage_search_rounded,
                   title: 'AI search interpretation',
@@ -565,20 +722,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     );
                   },
                 ),
-                _ActionRow(
-                  icon: Icons.file_open_rounded,
-                  title: 'Import Gemma model',
-                  subtitle:
-                      'Planned: choose a .litertlm model file for flutter_gemma.',
-                  onTap: () =>
-                      showFeatureComingSoon(context, 'Local model import'),
-                ),
                 _InfoRow(
                   icon: Icons.offline_bolt_rounded,
-                  title: 'Current provider',
-                  subtitle: _useLocalAi && _hasDownloadedModel
-                      ? '${_downloadedModelName ?? 'Local model'} is active for search interpretation'
-                      : 'Deterministic fallback rules until a model is configured',
+                  title: 'Current AI path',
+                  subtitle: _currentLocalAiStatus(),
                 ),
               ],
             ),
@@ -662,33 +809,52 @@ class _SettingsSection extends StatelessWidget {
 }
 
 class _DownloadableModel {
+  final String id;
   final String name;
   final String sizeLabel;
   final String providerLabel;
+  final String resourceLabel;
   final String mobileUrl;
-  final String desktopUrl;
+  final String? desktopUrl;
   final String description;
   final ModelType modelType;
   final ModelFileType fileType;
+  final bool isAdvanced;
 
   const _DownloadableModel({
+    required this.id,
     required this.name,
     required this.sizeLabel,
     required this.providerLabel,
+    required this.resourceLabel,
     required this.mobileUrl,
-    required this.desktopUrl,
+    this.desktopUrl,
     required this.description,
     required this.modelType,
     this.fileType = ModelFileType.task,
+    this.isAdvanced = false,
   });
 
   String get url {
-    final isDesktop =
-        !kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.linux ||
-            defaultTargetPlatform == TargetPlatform.macOS ||
-            defaultTargetPlatform == TargetPlatform.windows);
-    return isDesktop ? desktopUrl : mobileUrl;
+    final desktop = desktopUrl;
+    if (isDesktop && desktop != null) return desktop;
+    return mobileUrl;
+  }
+
+  bool get isDesktop =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.linux ||
+          defaultTargetPlatform == TargetPlatform.macOS ||
+          defaultTargetPlatform == TargetPlatform.windows);
+
+  bool get supportsCurrentPlatform {
+    if (isDesktop) return desktopUrl != null;
+    return mobileUrl.isNotEmpty;
+  }
+
+  String get platformNote {
+    if (supportsCurrentPlatform) return description;
+    return '$description This model is not available for this platform.';
   }
 }
 
@@ -697,6 +863,7 @@ class _ModelDownloadCard extends StatelessWidget {
   final _DownloadableModel selectedModel;
   final bool isDownloading;
   final double? progress;
+  final String? downloadedId;
   final String? downloadedName;
   final ValueChanged<_DownloadableModel> onModelSelected;
   final VoidCallback onDownload;
@@ -706,6 +873,7 @@ class _ModelDownloadCard extends StatelessWidget {
     required this.selectedModel,
     required this.isDownloading,
     required this.progress,
+    required this.downloadedId,
     required this.downloadedName,
     required this.onModelSelected,
     required this.onDownload,
@@ -714,7 +882,9 @@ class _ModelDownloadCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDownloaded = downloadedName == selectedModel.name;
+    final isDownloaded =
+        downloadedId == selectedModel.id ||
+        downloadedName == selectedModel.name;
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
@@ -771,7 +941,7 @@ class _ModelDownloadCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${selectedModel.sizeLabel} · ${selectedModel.providerLabel}',
+                      '${selectedModel.sizeLabel} · ${selectedModel.resourceLabel}',
                       style: const TextStyle(color: Colors.white70),
                     ),
                   ],

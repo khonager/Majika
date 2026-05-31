@@ -71,11 +71,11 @@ The desired search flow is:
 4. Local AI can then choose the lead recommendation from the ranked candidate set and rewrite the reason for that pick.
 5. If no local model is configured, Majika falls back to small deterministic hints and the local ranker so the prototype still returns useful results. These hints are not meant to replace the AI interpreter.
 
-Recommended direction:
-
-- Settings currently offers local model downloads including FunctionGemma 270M, Qwen3 0.6B, Qwen 2.5 1.5B Instruct, and Phi-4 Mini Instruct. FunctionGemma is the smallest beginner option; larger models are available for better reasoning when the device can handle them.
-- Start with a Gemma 4 E2B `.litertlm` model as the recommended default once a polished model import UX is added.
-- Settings expose the intended knobs: provider target, model download choice, optional local-server endpoint, search-interpretation toggle, and context-item budget.
+- Settings offers a single AI mode choice: Automatic on-device, External local server, or Rules only. On-device mode exposes platform-supported public no-token text model downloads; external mode exposes OpenAI-compatible endpoint fields and Gemma/Ollama model presets.
+- The default on-device model should be chosen only after the benchmark harness validates initialization, JSON reliability, latency, and prompt quality for the current candidate set. Current public on-device candidates include Qwen3 0.6B, FunctionGemma 270M, DeepSeek R1 Distill Qwen 1.5B, Qwen 2.5 1.5B Instruct, SmolLM 135M, and Phi-4 Mini where supported by the current platform.
+- FunctionGemma is a tiny function-calling foundation model, not a general JSON chat model. Keep it advanced unless Majika adds real tool declarations or task-specific fine-tuning for recommendation filters.
+- Do not add Hugging Face token UX for standard users. Advanced users can import a model file they downloaded themselves once custom import is wired.
+- Vision models such as FastVLM are intentionally excluded until Majika has an image-understanding workflow.
 - Keep deterministic summaries as fallback when no model is configured.
 - Use local AI to turn natural-language searches like `romance movie about time travel` into structured tags/formats such as `Romance`, `Time Manipulation`, and `MOVIE`. Do not rely on a large synonym table as the main product path; deterministic parsing is only the no-model safety net.
 - Let the app fetch current releases and service data itself, then pass structured context to the local model for summaries and recommendation explanations.
@@ -109,6 +109,13 @@ flutter analyze
 flutter test
 flutter build linux --debug
 flutter build apk --debug
+```
+
+Local AI model benchmark on Linux desktop:
+
+```bash
+flutter build linux --debug
+flutter pub run scripts/local_ai_benchmark.dart
 ```
 
 ## Known Limitations

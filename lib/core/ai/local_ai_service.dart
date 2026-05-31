@@ -105,9 +105,9 @@ class FlutterGemmaLocalAiService implements LocalAiService {
         '''
 Summarize this AniList taste profile in one concise sentence.
 Favorite tags: ${profile.favoriteGenres.join(', ')}
-Favorite characters: ${profile.favoriteCharacters.take(8).join(', ')}
-Favorite studios: ${profile.favoriteStudios.take(8).join(', ')}
-High rated examples: ${profile.highRatedItems.map((item) => item.title).take(8).join(', ')}
+Favorite characters: ${profile.favoriteCharacters.take(settings.contextItemLimit).join(', ')}
+Favorite studios: ${profile.favoriteStudios.take(settings.contextItemLimit).join(', ')}
+High rated examples: ${profile.highRatedItems.map((item) => item.title).take(settings.contextItemLimit).join(', ')}
 ''';
 
     try {
@@ -137,16 +137,21 @@ High rated examples: ${profile.highRatedItems.map((item) => item.title).take(8).
       );
     }
 
-    final tagList = availableTags.take(260).join(', ');
+    final tagList = _promptTagList(
+      query: query,
+      availableTags: availableTags,
+      limit: settings.contextItemLimit,
+    ).join(', ');
     final prompt =
         '''
 You turn recommendation search text into structured AniList filters.
 Return JSON only. No markdown. No explanation.
+Return one object with exactly these keys: tags, formats, mediaTypes, includeAdult, searchText.
+Use empty arrays when no allowed tag, format, or media type clearly matches.
+Keep leftover natural-language terms in searchText.
 Allowed mediaTypes: ${RecommendationQuery.allMediaTypes.join(', ')}
 Allowed formats: ${RecommendationQuery.allFormats.join(', ')}
 Allowed tags: $tagList
-Schema:
-{"tags":["Romance"],"formats":["MOVIE"],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"optional leftover search terms"}
 User request: ${query.request}
 Currently selected tags: ${query.selectedTags.join(', ')}
 Previously AI selected tags: ${query.aiSelectedTags.join(', ')}
@@ -158,7 +163,7 @@ Adult content selected: ${query.includeAdult}
     try {
       final response = await _generateText(
         prompt,
-        maxTokens: 768,
+        maxTokens: 1024,
         settings: settings,
       );
       final interpreted = _queryFromModelJson(
@@ -196,11 +201,11 @@ Adult content selected: ${query.includeAdult}
 Explain in one short sentence why this recommendation fits.
 Profile: ${profile.primaryTaste}
 Favorite tags: ${profile.favoriteGenres.join(', ')}
-Favorite characters: ${profile.favoriteCharacters.take(6).join(', ')}
-Favorite studios: ${profile.favoriteStudios.take(6).join(', ')}
+Favorite characters: ${profile.favoriteCharacters.take(settings.contextItemLimit).join(', ')}
+Favorite studios: ${profile.favoriteStudios.take(settings.contextItemLimit).join(', ')}
 Recommendation: ${recommendation.item.title}
-Tags: ${recommendation.item.tags.join(', ')}
-Signals: ${recommendation.signals.join(', ')}
+Tags: ${recommendation.item.tags.take(settings.contextItemLimit).join(', ')}
+Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
 ''';
 
     try {
@@ -334,11 +339,13 @@ Signals: ${recommendation.signals.join(', ')}
     required RecommendationQuery original,
     required Iterable<String> availableTags,
   }) {
-    final jsonText = _extractJsonObject(response);
-    if (jsonText == null) return null;
-
-    final decoded = jsonDecode(jsonText);
-    if (decoded is! Map<String, dynamic>) return null;
+    Map<String, dynamic>? decoded;
+    for (final candidate in _jsonObjects(response)) {
+      if (_looksLikeQueryJson(candidate)) {
+        decoded = candidate;
+      }
+    }
+    if (decoded == null) return null;
 
     final availableTagSet = availableTags.toSet();
     final tags = _stringList(
@@ -364,19 +371,87 @@ Signals: ${recommendation.signals.join(', ')}
     );
   }
 
-  String? _extractJsonObject(String text) {
-    final start = text.indexOf('{');
-    final end = text.lastIndexOf('}');
-    if (start == -1 || end <= start) return null;
-    return text.substring(start, end + 1);
-  }
-
   List<String> _stringList(Object? value) {
     if (value is! List) return const [];
     return [
       for (final item in value)
         if (item != null) item.toString().trim(),
     ].where((item) => item.isNotEmpty).toList();
+  }
+
+  List<String> _promptTagList({
+    required RecommendationQuery query,
+    required Iterable<String> availableTags,
+    required int limit,
+  }) {
+    final tags = <String>{
+      ...query.selectedTags,
+      ...query.aiSelectedTags,
+      ...query.inferredTags(availableTags),
+      ...RecommendationQuery.browsableTags,
+    };
+
+    for (final tag in availableTags) {
+      if (tags.length >= limit) break;
+      tags.add(tag);
+    }
+
+    return tags.take(limit).toList();
+  }
+
+  bool _looksLikeQueryJson(Map<String, dynamic> decoded) {
+    return decoded.containsKey('tags') ||
+        decoded.containsKey('formats') ||
+        decoded.containsKey('mediaTypes') ||
+        decoded.containsKey('includeAdult') ||
+        decoded.containsKey('searchText');
+  }
+
+  Iterable<Map<String, dynamic>> _jsonObjects(String text) sync* {
+    var depth = 0;
+    var start = -1;
+    var inString = false;
+    var escaped = false;
+
+    for (var index = 0; index < text.length; index++) {
+      final char = text[index];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char == '\\') {
+          escaped = true;
+        } else if (char == '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char == '"') {
+        inString = true;
+        continue;
+      }
+
+      if (char == '{') {
+        if (depth == 0) start = index;
+        depth++;
+        continue;
+      }
+
+      if (char == '}' && depth > 0) {
+        depth--;
+        if (depth == 0 && start != -1) {
+          final jsonText = text.substring(start, index + 1);
+          try {
+            final decoded = jsonDecode(jsonText);
+            if (decoded is Map<String, dynamic>) yield decoded;
+          } catch (_) {
+            // Keep scanning; small local models may emit several fragments.
+          }
+          start = -1;
+        }
+      }
+    }
   }
 
   @override
@@ -395,25 +470,28 @@ Signals: ${recommendation.signals.join(', ')}
       );
     }
 
-    final options = recommendations.take(8).map((recommendation) {
+    final optionLimit = (settings.contextItemLimit / 4).round().clamp(3, 6);
+    final tagLimit = (settings.contextItemLimit / 3).round().clamp(4, 8);
+    final signalLimit = (settings.contextItemLimit / 6).round().clamp(2, 4);
+    final options = recommendations.take(optionLimit).map((recommendation) {
       final item = recommendation.item;
       return {
         'id': item.id,
         'title': item.title,
         'score': recommendation.matchScore.round(),
-        'tags': item.tags.take(8).toList(),
+        'tags': item.tags.take(tagLimit).toList(),
         'format': item.format,
-        'signals': recommendation.signals.take(6).toList(),
+        'signals': recommendation.signals.take(signalLimit).toList(),
       };
     }).toList();
     final prompt =
         '''
 Pick the single best recommendation for this user from the options.
-Return JSON only with this schema: {"id":"anilist_123","reason":"short reason"}
+Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
 User taste: ${profile.primaryTaste}
-Favorite tags: ${profile.favoriteGenres.join(', ')}
-Favorite characters: ${profile.favoriteCharacters.take(8).join(', ')}
-Favorite studios: ${profile.favoriteStudios.take(8).join(', ')}
+Favorite tags: ${profile.favoriteGenres.take(settings.contextItemLimit).join(', ')}
+Favorite characters: ${profile.favoriteCharacters.take(signalLimit).join(', ')}
+Favorite studios: ${profile.favoriteStudios.take(signalLimit).join(', ')}
 Search request: ${query.request}
 User-selected tags: ${query.selectedTags.join(', ')}
 AI-selected tags: ${query.aiSelectedTags.join(', ')}
@@ -423,19 +501,21 @@ Options: ${jsonEncode(options)}
     try {
       final response = await _generateText(
         prompt,
-        maxTokens: 512,
+        maxTokens: 1024,
         settings: settings,
       );
-      final jsonText = _extractJsonObject(response);
-      if (jsonText == null) return recommendations.first;
-      final decoded = jsonDecode(jsonText);
-      if (decoded is! Map<String, dynamic>) return recommendations.first;
-      final id = decoded['id']?.toString();
-      final reason = decoded['reason']?.toString().trim();
       Recommendation? chosen;
-      for (final recommendation in recommendations) {
-        if (recommendation.item.id == id) {
-          chosen = recommendation;
+      String? reason;
+      for (final candidate in _jsonObjects(response)) {
+        final id = candidate['id']?.toString();
+        for (final recommendation in recommendations) {
+          if (recommendation.item.id == id) {
+            chosen = recommendation;
+            reason = candidate['reason']?.toString().trim();
+            break;
+          }
+        }
+        if (chosen != null) {
           break;
         }
       }
