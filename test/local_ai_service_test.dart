@@ -100,6 +100,8 @@ void main() {
     late String capturedPrompt;
     late int capturedMaxTokens;
     final availableTags = [
+      'Magic',
+      'School',
       for (var index = 0; index < 80; index++) 'Generated Tag $index',
     ];
     final service = FlutterGemmaLocalAiService(
@@ -127,6 +129,8 @@ void main() {
     expect(capturedMaxTokens, 1024);
     expect(capturedPrompt, contains('Allowed tags:'));
     expect(capturedPrompt, contains('Fantasy'));
+    expect(capturedPrompt, contains('Magic'));
+    expect(capturedPrompt, contains('School'));
     expect(capturedPrompt, isNot(contains('{"tags":["Romance"]')));
     expect(capturedPrompt, contains('Use empty arrays'));
     expect(capturedPrompt, isNot(contains('Generated Tag 40')));
@@ -234,6 +238,45 @@ void main() {
     expect(capturedPrompt, contains('anilist_2'));
     expect(capturedPrompt, isNot(contains('anilist_3')));
   });
+
+  test('local AI top-pick prompt emphasizes request fit', () async {
+    late String capturedPrompt;
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        mode: localAiModeOnDevice,
+        provider: 'Qwen',
+        endpoint: defaultLocalAiEndpoint,
+        serverModel: defaultLocalAiModel,
+        contextItems: 24,
+      ),
+      textGenerator: (prompt, maxTokens) async {
+        capturedPrompt = prompt;
+        return '{"id":"anilist_wistoria","reason":"Best request fit."}';
+      },
+    );
+
+    await service.chooseTopRecommendation(_profile(), [
+      _recommendation(
+        'anilist_slime',
+        'Tensei Shitara Slime Datta Ken 4th Season',
+        tags: const ['Action', 'Adventure', 'Fantasy', 'Magic'],
+      ),
+      _recommendation(
+        'anilist_wistoria',
+        'Tsue to Tsurugi no Wistoria Season 2',
+        tags: const ['Action', 'Adventure', 'Fantasy', 'Magic', 'School'],
+      ),
+    ], query: const RecommendationQuery(request: 'like harry potter'));
+
+    expect(capturedPrompt, contains('Prioritize the search request'));
+    expect(capturedPrompt, contains('Request-inferred tags:'));
+    expect(
+      capturedPrompt,
+      contains('"requestTags":["Fantasy","Magic","School"]'),
+    );
+  });
 }
 
 TasteProfile _profile() {
@@ -255,14 +298,13 @@ TasteProfile _profile() {
   );
 }
 
-Recommendation _recommendation(String id, String title) {
+Recommendation _recommendation(
+  String id,
+  String title, {
+  List<String> tags = const ['Mystery'],
+}) {
   return Recommendation(
-    item: MediaItem(
-      id: id,
-      title: title,
-      coverUrl: '',
-      tags: const ['Mystery'],
-    ),
+    item: MediaItem(id: id, title: title, coverUrl: '', tags: tags),
     matchScore: 80,
     reason: 'Reason',
     signals: const ['Mystery'],

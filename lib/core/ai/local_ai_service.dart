@@ -473,6 +473,15 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
     final optionLimit = (settings.contextItemLimit / 4).round().clamp(3, 6);
     final tagLimit = (settings.contextItemLimit / 3).round().clamp(4, 8);
     final signalLimit = (settings.contextItemLimit / 6).round().clamp(2, 4);
+    final optionTags = {
+      for (final recommendation in recommendations)
+        for (final tag in recommendation.item.tags) tag,
+    };
+    final requestTags = {
+      ...query.selectedTags,
+      ...query.aiSelectedTags,
+      ...query.inferredTags(optionTags),
+    };
     final options = recommendations.take(optionLimit).map((recommendation) {
       final item = recommendation.item;
       return {
@@ -480,6 +489,10 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
         'title': item.title,
         'score': recommendation.matchScore.round(),
         'tags': item.tags.take(tagLimit).toList(),
+        'requestTags': item.tags
+            .where(requestTags.contains)
+            .take(tagLimit)
+            .toList(),
         'format': item.format,
         'signals': recommendation.signals.take(signalLimit).toList(),
       };
@@ -487,6 +500,7 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
     final prompt =
         '''
 Pick the single best recommendation for this user from the options.
+Prioritize the search request and requestTags first; use user taste and score only to break close ties.
 Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
 User taste: ${profile.primaryTaste}
 Favorite tags: ${profile.favoriteGenres.take(settings.contextItemLimit).join(', ')}
@@ -495,6 +509,7 @@ Favorite studios: ${profile.favoriteStudios.take(signalLimit).join(', ')}
 Search request: ${query.request}
 User-selected tags: ${query.selectedTags.join(', ')}
 AI-selected tags: ${query.aiSelectedTags.join(', ')}
+Request-inferred tags: ${query.inferredTags(optionTags).join(', ')}
 Options: ${jsonEncode(options)}
 ''';
 

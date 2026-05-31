@@ -262,8 +262,99 @@ void main() {
 
       expect(obsessedCharacter.aiSelectedTags, contains('Yandere'));
       expect(obsessedCharacter.aiSelectedTags, contains('Thriller'));
+
+      final magicSchool = const RecommendationQuery(
+        request: 'like harry potter',
+      ).withInferredSelections(const ['Fantasy', 'Magic', 'School']);
+
+      expect(magicSchool.aiSelectedTags, contains('Fantasy'));
+      expect(magicSchool.aiSelectedTags, contains('Magic'));
+      expect(magicSchool.aiSelectedTags, contains('School'));
     },
   );
+
+  test('harry potter-like requests prefer magic school candidates', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile('tester', [
+      MediaItem(
+        id: 'anilist_1',
+        title: 'Seen Action Show',
+        coverUrl: '',
+        tags: const ['Action', 'Male Protagonist'],
+        rating: 9,
+        format: 'TV',
+        status: 'COMPLETED',
+      ),
+    ]);
+
+    final recommendations = engine.rankCandidates(
+      profile,
+      [
+        MediaItem(
+          id: 'anilist_2',
+          title: 'Tensei Shitara Slime Datta Ken 4th Season',
+          coverUrl: '',
+          tags: const [
+            'Action',
+            'Adventure',
+            'Comedy',
+            'Fantasy',
+            'Isekai',
+            'Magic',
+            'Male Protagonist',
+          ],
+          rating: 8.8,
+          format: 'TV',
+          mediaType: 'ANIME',
+        ),
+        MediaItem(
+          id: 'anilist_3',
+          title: 'Tsue to Tsurugi no Wistoria Season 2',
+          coverUrl: '',
+          tags: const [
+            'Action',
+            'Adventure',
+            'Drama',
+            'Fantasy',
+            'Magic',
+            'School',
+            'Swordplay',
+            'Male Protagonist',
+          ],
+          rating: 8.3,
+          format: 'TV',
+          mediaType: 'ANIME',
+        ),
+        MediaItem(
+          id: 'anilist_4',
+          title: 'MASHLE: MAGIC AND MUSCLES',
+          coverUrl: '',
+          tags: const [
+            'Action',
+            'Comedy',
+            'Fantasy',
+            'Magic',
+            'School',
+            'Super Power',
+            'Male Protagonist',
+          ],
+          rating: 8.1,
+          format: 'TV',
+          mediaType: 'ANIME',
+        ),
+      ],
+      query: const RecommendationQuery(
+        request: 'like harry potter',
+        aiSelectedTags: {'Drama', 'Adventure'},
+      ),
+    );
+
+    expect(recommendations.first.item.title, isNot(contains('Slime')));
+    expect(
+      recommendations.first.item.tags,
+      containsAll(<String>['Magic', 'School']),
+    );
+  });
 
   test(
     'new searches clear stale AI selected tags while keeping pinned tags',
