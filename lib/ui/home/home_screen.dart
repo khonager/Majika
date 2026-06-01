@@ -374,7 +374,7 @@ class _ContentShell extends StatelessWidget {
   Widget build(BuildContext context) {
     final borderRadius = BorderRadius.circular(isMobileSurface ? 0 : 34);
     final shellPadding = isMobileSurface
-        ? const EdgeInsets.fromLTRB(52, 16, 14, 0)
+        ? const EdgeInsets.fromLTRB(14, 16, 14, 0)
         : const EdgeInsets.fromLTRB(18, 18, 18, 0);
     final shell = Container(
       decoration: BoxDecoration(
@@ -478,7 +478,7 @@ class _MobileLiquidShell extends StatelessWidget {
       children: [
         Positioned.fill(child: child),
         Positioned(
-          top: 16,
+          top: 58,
           bottom: 16,
           left: 6,
           child: _MobileLiquidRail(
@@ -702,6 +702,7 @@ class _RecommendationState extends StatelessWidget {
   Widget build(BuildContext context) {
     final topPick = recommendations.isEmpty ? null : recommendations.first;
     final otherPicks = recommendations.skip(1).take(18).toList();
+    final readableInset = EdgeInsets.only(left: isMobileSurface ? 54 : 0);
 
     return Stack(
       children: [
@@ -711,25 +712,40 @@ class _RecommendationState extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _TasteSummary(profile: profile),
+                  Padding(
+                    padding: readableInset,
+                    child: _TasteSummary(profile: profile),
+                  ),
                   const SizedBox(height: 14),
-                  _RecommendationSearchPanel(
-                    query: query,
-                    isRefreshing: isRefreshing,
-                    availableTags: availableTags,
-                    onQueryChanged: onQueryChanged,
+                  Padding(
+                    padding: readableInset,
+                    child: _RecommendationSearchPanel(
+                      query: query,
+                      isRefreshing: isRefreshing,
+                      availableTags: availableTags,
+                      onQueryChanged: onQueryChanged,
+                    ),
                   ),
                   const SizedBox(height: 14),
                   if (topPick == null)
-                    _EmptyRecommendations(profile: profile, query: query)
+                    Padding(
+                      padding: readableInset,
+                      child: _EmptyRecommendations(
+                        profile: profile,
+                        query: query,
+                      ),
+                    )
                   else
                     _TopRecommendationCard(recommendation: topPick),
                   const SizedBox(height: 18),
-                  Text(
-                    'More for this profile',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
+                  Padding(
+                    padding: readableInset,
+                    child: Text(
+                      'More for this profile',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -751,7 +767,7 @@ class _RecommendationState extends StatelessWidget {
           ],
         ),
         Positioned(
-          left: 0,
+          left: isMobileSurface ? 60 : 0,
           right: 0,
           bottom: isMobileSurface ? 14 : 12,
           child: _CurrentActivityBar(
