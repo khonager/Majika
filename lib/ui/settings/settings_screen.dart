@@ -1023,12 +1023,15 @@ class _SwitchRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: Colors.white70),
-      title: Text(title, style: const TextStyle(color: Colors.white)),
-      subtitle: Text(subtitle, style: const TextStyle(color: Colors.white70)),
-      trailing: Switch.adaptive(value: value, onChanged: onChanged),
+    return Material(
+      type: MaterialType.transparency,
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(icon, color: Colors.white70),
+        title: Text(title, style: const TextStyle(color: Colors.white)),
+        subtitle: Text(subtitle, style: const TextStyle(color: Colors.white70)),
+        trailing: Switch.adaptive(value: value, onChanged: onChanged),
+      ),
     );
   }
 }
@@ -1057,13 +1060,16 @@ class _OptionRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(icon, color: Colors.white70),
-            title: Text(title, style: const TextStyle(color: Colors.white)),
-            subtitle: Text(
-              subtitle,
-              style: const TextStyle(color: Colors.white70),
+          Material(
+            type: MaterialType.transparency,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(icon, color: Colors.white70),
+              title: Text(title, style: const TextStyle(color: Colors.white)),
+              subtitle: Text(
+                subtitle,
+                style: const TextStyle(color: Colors.white70),
+              ),
             ),
           ),
           DropdownButtonFormField<String>(
@@ -1110,13 +1116,16 @@ class _TextFieldRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(icon, color: Colors.white70),
-            title: Text(title, style: const TextStyle(color: Colors.white)),
-            subtitle: Text(
-              subtitle,
-              style: const TextStyle(color: Colors.white70),
+          Material(
+            type: MaterialType.transparency,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(icon, color: Colors.white70),
+              title: Text(title, style: const TextStyle(color: Colors.white)),
+              subtitle: Text(
+                subtitle,
+                style: const TextStyle(color: Colors.white70),
+              ),
             ),
           ),
           TextField(
@@ -1165,17 +1174,20 @@ class _SliderRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
         children: [
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(icon, color: Colors.white70),
-            title: Text(title, style: const TextStyle(color: Colors.white)),
-            subtitle: Text(
-              subtitle,
-              style: const TextStyle(color: Colors.white70),
-            ),
-            trailing: Text(
-              valueText ?? '${(100 * value).round()}%',
-              style: const TextStyle(color: Colors.white),
+          Material(
+            type: MaterialType.transparency,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(icon, color: Colors.white70),
+              title: Text(title, style: const TextStyle(color: Colors.white)),
+              subtitle: Text(
+                subtitle,
+                style: const TextStyle(color: Colors.white70),
+              ),
+              trailing: Text(
+                valueText ?? '${(100 * value).round()}%',
+                style: const TextStyle(color: Colors.white),
+              ),
             ),
           ),
           Slider(
@@ -1208,13 +1220,19 @@ class _ActionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: Colors.white70),
-      title: Text(title, style: const TextStyle(color: Colors.white)),
-      subtitle: Text(subtitle, style: const TextStyle(color: Colors.white70)),
-      trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white54),
-      onTap: onTap,
+    return Material(
+      type: MaterialType.transparency,
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(icon, color: Colors.white70),
+        title: Text(title, style: const TextStyle(color: Colors.white)),
+        subtitle: Text(subtitle, style: const TextStyle(color: Colors.white70)),
+        trailing: const Icon(
+          Icons.chevron_right_rounded,
+          color: Colors.white54,
+        ),
+        onTap: onTap,
+      ),
     );
   }
 }
@@ -1250,11 +1268,14 @@ class _InfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: Colors.white70),
-      title: Text(title, style: const TextStyle(color: Colors.white)),
-      subtitle: Text(subtitle, style: const TextStyle(color: Colors.white70)),
+    return Material(
+      type: MaterialType.transparency,
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(icon, color: Colors.white70),
+        title: Text(title, style: const TextStyle(color: Colors.white)),
+        subtitle: Text(subtitle, style: const TextStyle(color: Colors.white70)),
+      ),
     );
   }
 }
