@@ -16,7 +16,6 @@ class FirebaseBootstrap {
     if (_attempted) return Firebase.apps.isNotEmpty;
 
     _attempted = true;
-    if (!DefaultFirebaseOptions.hasRequiredOptions) return false;
 
     try {
       await Firebase.initializeApp(

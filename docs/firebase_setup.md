@@ -10,7 +10,7 @@ In the Firebase Console for your project:
 2. Enable **Cloud Firestore** in production mode.
 3. Enable **Cloud Functions**. The `steamApi` function uses Node.js 20 and the `us-central1` region.
 
-## 2. Connect the Flutter app
+## 2. Firebase project connection
 
 If you are using the Nix dev shell, enter it first:
 
@@ -20,34 +20,32 @@ nix develop
 
 The shell makes `flutterfire`, `firebase`, Node.js 20, Flutter, and Android tooling available. On first entry it may install `flutterfire_cli` into your Dart pub cache and `firebase-tools` into `.dart_tool/npm-global`.
 
-Recommended path:
+This repo is connected to the Firebase project `majika-ai-recommendation` through `.firebaserc`, `firebase.json`, `lib/firebase_options.dart`, and `android/app/google-services.json`.
+
+If you need to regenerate the Firebase app config, run:
 
 ```sh
 firebase login
-flutterfire configure
+flutterfire configure \
+  --project=majika-ai-recommendation \
+  --platforms=android,ios,macos,web,windows \
+  --android-package-name=com.majika.majika \
+  --ios-bundle-id=com.majika.majika \
+  --macos-bundle-id=com.majika.majika \
+  --out=lib/firebase_options.dart \
+  --android-out=android/app/google-services.json \
+  --yes \
+  --overwrite-firebase-options
 ```
 
-Choose your existing Firebase project and the platforms you want to build. If you let FlutterFire overwrite `lib/firebase_options.dart`, keep the class name `DefaultFirebaseOptions`; the app already imports it.
-
-Alternative path without FlutterFire:
-
-```sh
-flutter run \
-  --dart-define=FIREBASE_PROJECT_ID=your-project-id \
-  --dart-define=FIREBASE_MESSAGING_SENDER_ID=1234567890 \
-  --dart-define=FIREBASE_STORAGE_BUCKET=your-project-id.appspot.com \
-  --dart-define=FIREBASE_ANDROID_API_KEY=... \
-  --dart-define=FIREBASE_ANDROID_APP_ID=...
-```
-
-Use the matching `FIREBASE_WEB_*`, `FIREBASE_IOS_*`, `FIREBASE_MACOS_*`, `FIREBASE_WINDOWS_*`, or `FIREBASE_LINUX_*` values for other platforms.
+FlutterFire currently generates config for Android, iOS, macOS, web, and Windows in this project. Linux runs with Firebase disabled unless the FlutterFire CLI adds Linux support later.
 
 ## 3. Store the Steam key as a Functions secret
 
 From the repo root:
 
 ```sh
-firebase use your-project-id
+firebase use majika-ai-recommendation
 firebase functions:secrets:set STEAM_WEB_API_KEY
 ```
 
