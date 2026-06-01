@@ -179,8 +179,8 @@ jobs:
           path: "*.zip"
           if-no-files-found: error
 
-  build-apple:
-    name: Build Apple Apps
+  build-macos:
+    name: Build macOS
     needs: analyze
     runs-on: macos-latest
 
@@ -212,22 +212,11 @@ jobs:
           fi
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-macos.zip"
 
-      - name: Build iOS unsigned
-        run: flutter build ios --release --no-codesign
-
-      - name: Package iOS unsigned IPA
-        run: |
-          mkdir -p Payload
-          cp -R build/ios/iphoneos/Runner.app Payload/
-          zip -r "${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-ios-unsigned.ipa" Payload
-
-      - name: Upload Apple artifacts
+      - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: majika-stable-apple
-          path: |
-            *.zip
-            *.ipa
+          name: majika-stable-macos
+          path: "*.zip"
           if-no-files-found: error
 
   build-web:
@@ -267,7 +256,7 @@ jobs:
       - build-android
       - build-linux
       - build-windows
-      - build-apple
+      - build-macos
       - build-web
     runs-on: ubuntu-latest
     concurrency:
