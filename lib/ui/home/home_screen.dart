@@ -550,7 +550,7 @@ class _MobileLiquidShell extends StatelessWidget {
       children: [
         Positioned.fill(child: child),
         Positioned(
-          top: 88,
+          top: 132,
           bottom: 16,
           left: 6,
           child: _MobileLiquidRail(
@@ -2031,18 +2031,6 @@ class _LiquidGlassPod extends StatelessWidget {
                       ],
                       stops: const [0, 0.42, 1],
                     ),
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 2,
-                left: 8,
-                right: 8,
-                height: 1.2,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.34),
-                    borderRadius: BorderRadius.circular(999),
                   ),
                 ),
               ),
