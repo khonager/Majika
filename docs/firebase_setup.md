@@ -74,7 +74,7 @@ This repo includes `codemagic.yaml` with two iOS workflows:
 
 In Codemagic, create these environment groups:
 
-1. `app_store_credentials` with `APP_STORE_CONNECT_PRIVATE_KEY`, `APP_STORE_CONNECT_KEY_IDENTIFIER`, and `APP_STORE_CONNECT_ISSUER_ID`.
+1. `app_store_credentials` with `APP_STORE_CONNECT_PRIVATE_KEY`, `APP_STORE_CONNECT_KEY_IDENTIFIER`, `APP_STORE_CONNECT_ISSUER_ID`, and `CERTIFICATE_PRIVATE_KEY`.
 2. `firebase_credentials` with optional `GOOGLE_SERVICE_INFO_PLIST_BASE64` if you do not commit `ios/Runner/GoogleService-Info.plist`.
 
 To create the Firebase plist secret:
@@ -84,3 +84,5 @@ base64 -i ios/Runner/GoogleService-Info.plist | pbcopy
 ```
 
 The iOS bundle id used by Codemagic is `de.khonager.majika`.
+
+For the first TestFlight build, make sure Apple Developer/App Store Connect has an app identifier and app record for `de.khonager.majika`. The Codemagic workflow runs `app-store-connect fetch-signing-files --create`, so it can create/fetch the App Store provisioning profile, but the bundle id and App Store app still need to exist under your Apple team.
