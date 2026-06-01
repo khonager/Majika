@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/user_taste_signals.dart';
@@ -527,6 +528,35 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Current AI path'), findsOneWidget);
+  });
+
+  testWidgets('settings local model card fits on phone widths', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      LocalAiSettingsKeys.localAiMode: localAiModeOnDevice,
+      LocalAiSettingsKeys.useLocalAi: true,
+    });
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+
+    await tester.scrollUntilVisible(
+      find.text('AI mode'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Gemma 3 1B IT'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('download-recommended-ai-model')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('settings shows local server fields only for external mode', (

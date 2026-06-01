@@ -925,6 +925,80 @@ class _ModelDownloadCard extends StatelessWidget {
     final isDownloaded =
         downloadedId == selectedModel.id ||
         downloadedName == selectedModel.name;
+    Widget modelIcon() {
+      return Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: theme.colorScheme.secondary.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          Icons.download_for_offline_rounded,
+          color: theme.colorScheme.secondary,
+        ),
+      );
+    }
+
+    Widget modelDetails() {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          DropdownButtonHideUnderline(
+            child: DropdownButton<_DownloadableModel>(
+              value: selectedModel,
+              isExpanded: true,
+              padding: EdgeInsets.zero,
+              dropdownColor: const Color(0xFF1A1F27),
+              iconEnabledColor: Colors.white70,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
+              items: [
+                for (final model in models)
+                  DropdownMenuItem(
+                    value: model,
+                    child: Text(
+                      model.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: isDownloading
+                  ? null
+                  : (model) {
+                      if (model != null) onModelSelected(model);
+                    },
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '${selectedModel.sizeLabel} · ${selectedModel.resourceLabel}',
+            style: const TextStyle(color: Colors.white70),
+          ),
+        ],
+      );
+    }
+
+    Widget downloadButton() {
+      return FilledButton.icon(
+        key: const ValueKey('download-recommended-ai-model'),
+        onPressed: isDownloading ? null : onDownload,
+        icon: isDownloading
+            ? const SizedBox.square(
+                dimension: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Icon(
+                isDownloaded
+                    ? Icons.download_done_rounded
+                    : Icons.download_rounded,
+              ),
+        label: Text(isDownloaded ? 'Downloaded' : 'Download'),
+      );
+    }
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
@@ -937,72 +1011,38 @@ class _ModelDownloadCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.secondary.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  Icons.download_for_offline_rounded,
-                  color: theme.colorScheme.secondary,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth < 390) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    DropdownButtonHideUnderline(
-                      child: DropdownButton<_DownloadableModel>(
-                        value: selectedModel,
-                        dropdownColor: const Color(0xFF1A1F27),
-                        iconEnabledColor: Colors.white70,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                        ),
-                        items: [
-                          for (final model in models)
-                            DropdownMenuItem(
-                              value: model,
-                              child: Text(model.name),
-                            ),
-                        ],
-                        onChanged: isDownloading
-                            ? null
-                            : (model) {
-                                if (model != null) onModelSelected(model);
-                              },
-                      ),
+                    Row(
+                      children: [
+                        modelIcon(),
+                        const SizedBox(width: 12),
+                        Expanded(child: modelDetails()),
+                      ],
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${selectedModel.sizeLabel} · ${selectedModel.resourceLabel}',
-                      style: const TextStyle(color: Colors.white70),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: downloadButton(),
                     ),
                   ],
-                ),
-              ),
-              FilledButton.icon(
-                key: const ValueKey('download-recommended-ai-model'),
-                onPressed: isDownloading ? null : onDownload,
-                icon: isDownloading
-                    ? const SizedBox.square(
-                        dimension: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(
-                        isDownloaded
-                            ? Icons.download_done_rounded
-                            : Icons.download_rounded,
-                      ),
-                label: Text(isDownloaded ? 'Downloaded' : 'Download'),
-              ),
-            ],
+                );
+              }
+
+              return Row(
+                children: [
+                  modelIcon(),
+                  const SizedBox(width: 12),
+                  Expanded(child: modelDetails()),
+                  const SizedBox(width: 12),
+                  downloadButton(),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 10),
           Text(
@@ -1028,6 +1068,7 @@ class _StatChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      constraints: const BoxConstraints(maxWidth: 280),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.08),
@@ -1039,7 +1080,14 @@ class _StatChip extends StatelessWidget {
         children: [
           Icon(icon, size: 16, color: Theme.of(context).colorScheme.secondary),
           const SizedBox(width: 8),
-          Text(label, style: const TextStyle(color: Colors.white)),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white),
+            ),
+          ),
         ],
       ),
     );
@@ -1114,13 +1162,21 @@ class _OptionRow extends StatelessWidget {
           ),
           DropdownButtonFormField<String>(
             initialValue: value,
+            isExpanded: true,
             dropdownColor: const Color(0xFF1A1F27),
             iconEnabledColor: Colors.white70,
             style: const TextStyle(color: Colors.white),
             decoration: _fieldDecoration(context),
             items: [
               for (final option in options)
-                DropdownMenuItem(value: option, child: Text(option)),
+                DropdownMenuItem(
+                  value: option,
+                  child: Text(
+                    option,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
             ],
             onChanged: onChanged,
           ),

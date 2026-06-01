@@ -1,0 +1,4 @@
+{
+  "dart.flutterSdkPath": ".nix-flutter-sdk",
+  "dart.sdkPath": ".nix-flutter-sdk/bin/cache/dart-sdk"
+}
