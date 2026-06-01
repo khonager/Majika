@@ -1910,64 +1910,79 @@ class _MobileLiquidRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final primaryPod = _LiquidGlassPod(
+      borderRadius: BorderRadius.circular(26),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 3),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _LiquidRailButton(
+            icon: Icons.home_rounded,
+            label: 'Home',
+            isActive: true,
+            onTap: () {},
+          ),
+          for (final service in services)
+            _LiquidRailButton(
+              icon: _serviceIcon(service),
+              label: service.displayName,
+              isActive: activeServiceId == service.id,
+              onTap: () => onServiceTap(service),
+            ),
+          _LiquidRailButton(
+            icon: Icons.local_movies_rounded,
+            label: 'Movies/TV',
+            onTap: () => onUnavailableTap('Movies and TV'),
+          ),
+          _LiquidRailButton(
+            icon: Icons.add_rounded,
+            label: 'Add service',
+            onTap: () => onUnavailableTap('Add service'),
+          ),
+        ],
+      ),
+    );
+    final secondaryPod = _LiquidGlassPod(
+      borderRadius: BorderRadius.circular(24),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 3),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _LiquidRailButton(
+            icon: Icons.settings_rounded,
+            label: 'Settings',
+            onTap: onSettingsTap,
+          ),
+          _LiquidRailButton(
+            icon: Icons.person_rounded,
+            label: 'Profile',
+            onTap: onProfileTap,
+          ),
+        ],
+      ),
+    );
+
     return SizedBox(
       key: const ValueKey('mobile-liquid-rail'),
       width: 50,
-      child: Column(
-        children: [
-          _LiquidGlassPod(
-            borderRadius: BorderRadius.circular(26),
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 3),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _LiquidRailButton(
-                  icon: Icons.home_rounded,
-                  label: 'Home',
-                  isActive: true,
-                  onTap: () {},
-                ),
-                for (final service in services)
-                  _LiquidRailButton(
-                    icon: _serviceIcon(service),
-                    label: service.displayName,
-                    isActive: activeServiceId == service.id,
-                    onTap: () => onServiceTap(service),
-                  ),
-                _LiquidRailButton(
-                  icon: Icons.local_movies_rounded,
-                  label: 'Movies/TV',
-                  onTap: () => onUnavailableTap('Movies and TV'),
-                ),
-                _LiquidRailButton(
-                  icon: Icons.add_rounded,
-                  label: 'Add service',
-                  onTap: () => onUnavailableTap('Add service'),
-                ),
-              ],
-            ),
-          ),
-          const Spacer(),
-          _LiquidGlassPod(
-            borderRadius: BorderRadius.circular(24),
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 3),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _LiquidRailButton(
-                  icon: Icons.settings_rounded,
-                  label: 'Settings',
-                  onTap: onSettingsTap,
-                ),
-                _LiquidRailButton(
-                  icon: Icons.person_rounded,
-                  label: 'Profile',
-                  onTap: onProfileTap,
-                ),
-              ],
-            ),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const compactRailHeight = 372.0;
+          if (constraints.maxHeight < compactRailHeight) {
+            return SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  primaryPod,
+                  const SizedBox(height: 10),
+                  secondaryPod,
+                ],
+              ),
+            );
+          }
+
+          return Column(children: [primaryPod, const Spacer(), secondaryPod]);
+        },
       ),
     );
   }

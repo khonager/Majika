@@ -79,7 +79,7 @@
 
           shellHook = ''
             export NPM_CONFIG_PREFIX="$PWD/.dart_tool/npm-global"
-            export PATH="$PATH:$ANDROID_HOME/tools:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/8.0/bin:$HOME/.pub-cache/bin:$NPM_CONFIG_PREFIX/bin"
+            export PATH="${pkgs.flutter}/bin/cache/dart-sdk/bin:$PATH:$ANDROID_HOME/tools:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/8.0/bin:$HOME/.pub-cache/bin:$NPM_CONFIG_PREFIX/bin"
 
             if [ -d "android" ]; then
               echo "sdk.dir=$ANDROID_HOME" > android/local.properties

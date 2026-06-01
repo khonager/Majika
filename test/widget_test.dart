@@ -100,6 +100,32 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('mobile rail stays within short viewports', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 560);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          mediaServices: [_FakeMediaService(), _FakeSteamMediaService()],
+          mediaService: _FakeMediaService(),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('mobile-liquid-rail')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('search request and chips refill recommendations', (
     WidgetTester tester,
   ) async {
