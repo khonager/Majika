@@ -63,6 +63,10 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  # Flutter 3.44 defaults Apple builds to Swift Package Manager, but the
+  # current Firebase Firestore plugin stack fails there on macOS. Use CocoaPods.
+  config:
+    enable-swift-package-manager: false
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
