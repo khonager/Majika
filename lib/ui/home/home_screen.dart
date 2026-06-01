@@ -236,6 +236,7 @@ class _HomeScreenState extends State<HomeScreen> {
             builder: (context, constraints) {
               final isDesktop = constraints.maxWidth >= 900;
               final shell = _ContentShell(
+                isMobileSurface: !isDesktop,
                 profile: _profile,
                 recommendations: _recommendations,
                 isLoading: _isLoading,
@@ -273,20 +274,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               }
 
-              return Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    _ServiceDock(
-                      isDesktop: false,
-                      onSettingsTap: _openSettings,
-                      onUnavailableTap: (label) =>
-                          showFeatureComingSoon(context, label),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(child: shell),
-                  ],
-                ),
+              return _MobileLiquidShell(
+                onSettingsTap: _openSettings,
+                onUnavailableTap: (label) =>
+                    showFeatureComingSoon(context, label),
+                child: shell,
               );
             },
           ),
@@ -346,6 +338,7 @@ Future<void> _openMediaOnAniList(BuildContext context, MediaItem item) async {
 }
 
 class _ContentShell extends StatelessWidget {
+  final bool isMobileSurface;
   final TasteProfile? profile;
   final List<Recommendation> recommendations;
   final bool isLoading;
@@ -361,6 +354,7 @@ class _ContentShell extends StatelessWidget {
   final ValueChanged<RecommendationQuery> onQueryChanged;
 
   const _ContentShell({
+    this.isMobileSurface = false,
     required this.profile,
     required this.recommendations,
     required this.isLoading,
@@ -378,73 +372,121 @@ class _ContentShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(34),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.055),
-            borderRadius: BorderRadius.circular(34),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-          ),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: RadialGradient(
-                      center: Alignment.topRight,
-                      radius: 1.2,
-                      colors: [
-                        const Color(0xFF89D6B3).withValues(alpha: 0.09),
-                        Colors.transparent,
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 18, 18, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _ShellHeader(
-                      profile: profile,
-                      aiService: aiService,
-                      onSignOut: onSignOut,
-                      onSwitchUser: onSwitchUser,
-                    ),
-                    const SizedBox(height: 14),
-                    Expanded(
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 220),
-                        child: profile == null
-                            ? _ConnectState(
-                                key: const ValueKey('connect'),
-                                isLoading: isLoading,
-                                error: error,
-                                controller: userNameController,
-                                onImport: onImport,
-                              )
-                            : _RecommendationState(
-                                key: const ValueKey('recommendations'),
-                                profile: profile!,
-                                recommendations: recommendations,
-                                query: query,
-                                isRefreshing: isRefreshingRecommendations,
-                                availableTags: availableTags,
-                                onQueryChanged: onQueryChanged,
-                              ),
-                      ),
-                    ),
+    final borderRadius = BorderRadius.circular(isMobileSurface ? 0 : 34);
+    final shellPadding = isMobileSurface
+        ? const EdgeInsets.fromLTRB(52, 16, 14, 0)
+        : const EdgeInsets.fromLTRB(18, 18, 18, 0);
+    final shell = Container(
+      decoration: BoxDecoration(
+        color: isMobileSurface
+            ? Colors.transparent
+            : Colors.white.withValues(alpha: 0.055),
+        borderRadius: borderRadius,
+        border: isMobileSurface
+            ? null
+            : Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment.topRight,
+                  radius: 1.2,
+                  colors: [
+                    const Color(
+                      0xFF89D6B3,
+                    ).withValues(alpha: isMobileSurface ? 0.14 : 0.09),
+                    Colors.transparent,
                   ],
                 ),
               ),
-            ],
+            ),
+          ),
+          Padding(
+            padding: shellPadding,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _ShellHeader(
+                  profile: profile,
+                  aiService: aiService,
+                  onSignOut: onSignOut,
+                  onSwitchUser: onSwitchUser,
+                ),
+                const SizedBox(height: 14),
+                Expanded(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    child: profile == null
+                        ? _ConnectState(
+                            key: const ValueKey('connect'),
+                            isLoading: isLoading,
+                            error: error,
+                            controller: userNameController,
+                            onImport: onImport,
+                          )
+                        : _RecommendationState(
+                            key: const ValueKey('recommendations'),
+                            profile: profile!,
+                            recommendations: recommendations,
+                            query: query,
+                            isRefreshing: isRefreshingRecommendations,
+                            availableTags: availableTags,
+                            isMobileSurface: isMobileSurface,
+                            onQueryChanged: onQueryChanged,
+                          ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (isMobileSurface) {
+      return shell;
+    }
+
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+        child: shell,
+      ),
+    );
+  }
+}
+
+class _MobileLiquidShell extends StatelessWidget {
+  final Widget child;
+  final VoidCallback onSettingsTap;
+  final ValueChanged<String> onUnavailableTap;
+
+  const _MobileLiquidShell({
+    required this.child,
+    required this.onSettingsTap,
+    required this.onUnavailableTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Positioned.fill(child: child),
+        Positioned(
+          top: 16,
+          bottom: 16,
+          left: 6,
+          child: _MobileLiquidRail(
+            onSettingsTap: onSettingsTap,
+            onUnavailableTap: onUnavailableTap,
           ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -642,6 +684,7 @@ class _RecommendationState extends StatelessWidget {
   final RecommendationQuery query;
   final bool isRefreshing;
   final List<String> availableTags;
+  final bool isMobileSurface;
   final ValueChanged<RecommendationQuery> onQueryChanged;
 
   const _RecommendationState({
@@ -651,6 +694,7 @@ class _RecommendationState extends StatelessWidget {
     required this.query,
     required this.isRefreshing,
     required this.availableTags,
+    required this.isMobileSurface,
     required this.onQueryChanged,
   });
 
@@ -709,8 +753,11 @@ class _RecommendationState extends StatelessWidget {
         Positioned(
           left: 0,
           right: 0,
-          bottom: 12,
-          child: _CurrentActivityBar(item: profile.recentActivity),
+          bottom: isMobileSurface ? 14 : 12,
+          child: _CurrentActivityBar(
+            item: profile.recentActivity,
+            isFloating: isMobileSurface,
+          ),
         ),
       ],
     );
@@ -1484,55 +1531,71 @@ class _OpenableRecommendation extends StatelessWidget {
 
 class _CurrentActivityBar extends StatelessWidget {
   final MediaItem? item;
+  final bool isFloating;
 
-  const _CurrentActivityBar({required this.item});
+  const _CurrentActivityBar({required this.item, this.isFloating = false});
 
   @override
   Widget build(BuildContext context) {
-    return _GlassCard(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: const Color(0xFF89D6B3).withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(Icons.play_arrow_rounded, color: Colors.white),
+    final content = Row(
+      children: [
+        Container(
+          width: isFloating ? 42 : 44,
+          height: isFloating ? 42 : 44,
+          decoration: BoxDecoration(
+            color: const Color(0xFF89D6B3).withValues(alpha: 0.18),
+            borderRadius: BorderRadius.circular(isFloating ? 18 : 14),
+            border: isFloating
+                ? Border.all(color: Colors.white.withValues(alpha: 0.2))
+                : null,
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  item == null
-                      ? 'No current activity found'
-                      : 'Current / latest',
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.5),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
+          child: const Icon(Icons.play_arrow_rounded, color: Colors.white),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                item == null ? 'No current activity found' : 'Current / latest',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.54),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
                 ),
-                Text(
-                  item?.title ?? 'Import a profile with current list entries.',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                  ),
+              ),
+              Text(
+                item?.title ?? 'Import a profile with current list entries.',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-          const Icon(Icons.graphic_eq_rounded, color: Colors.white70),
-        ],
-      ),
+        ),
+        Icon(
+          isFloating ? Icons.equalizer_rounded : Icons.graphic_eq_rounded,
+          color: Colors.white70,
+        ),
+      ],
+    );
+
+    if (!isFloating) {
+      return _GlassCard(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: content,
+      );
+    }
+
+    return _LiquidGlassPod(
+      key: const ValueKey('mobile-current-activity-glass'),
+      borderRadius: BorderRadius.circular(30),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      child: content,
     );
   }
 }
@@ -1565,6 +1628,210 @@ class _EmptyRecommendations extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MobileLiquidRail extends StatelessWidget {
+  final VoidCallback onSettingsTap;
+  final ValueChanged<String> onUnavailableTap;
+
+  const _MobileLiquidRail({
+    required this.onSettingsTap,
+    required this.onUnavailableTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      key: const ValueKey('mobile-liquid-rail'),
+      width: 50,
+      child: Column(
+        children: [
+          _LiquidGlassPod(
+            borderRadius: BorderRadius.circular(26),
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 3),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _LiquidRailButton(
+                  icon: Icons.home_rounded,
+                  label: 'Home',
+                  isActive: true,
+                  onTap: () {},
+                ),
+                _LiquidRailButton(
+                  icon: Icons.animation_rounded,
+                  label: 'AniList',
+                  onTap: () => onUnavailableTap('AniList OAuth'),
+                ),
+                _LiquidRailButton(
+                  icon: Icons.sports_esports_rounded,
+                  label: 'Steam',
+                  onTap: () => onUnavailableTap('Steam'),
+                ),
+                _LiquidRailButton(
+                  icon: Icons.local_movies_rounded,
+                  label: 'Movies/TV',
+                  onTap: () => onUnavailableTap('Movies and TV'),
+                ),
+                _LiquidRailButton(
+                  icon: Icons.add_rounded,
+                  label: 'Add service',
+                  onTap: () => onUnavailableTap('Add service'),
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+          _LiquidGlassPod(
+            borderRadius: BorderRadius.circular(24),
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 3),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _LiquidRailButton(
+                  icon: Icons.settings_rounded,
+                  label: 'Settings',
+                  onTap: onSettingsTap,
+                ),
+                _LiquidRailButton(
+                  icon: Icons.person_rounded,
+                  label: 'Profile',
+                  onTap: () => onUnavailableTap('Profile'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LiquidGlassPod extends StatelessWidget {
+  final Widget child;
+  final BorderRadius borderRadius;
+  final EdgeInsetsGeometry padding;
+
+  const _LiquidGlassPod({
+    super.key,
+    required this.child,
+    required this.borderRadius,
+    required this.padding,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.14),
+            borderRadius: borderRadius,
+            border: Border.all(color: Colors.white.withValues(alpha: 0.26)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.36),
+                blurRadius: 34,
+                offset: const Offset(0, 18),
+              ),
+              BoxShadow(
+                color: Colors.white.withValues(alpha: 0.08),
+                blurRadius: 16,
+                offset: const Offset(-6, -8),
+              ),
+            ],
+          ),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: borderRadius,
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Colors.white.withValues(alpha: 0.28),
+                        Colors.white.withValues(alpha: 0.07),
+                        Colors.black.withValues(alpha: 0.08),
+                      ],
+                      stops: const [0, 0.42, 1],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 2,
+                left: 8,
+                right: 8,
+                height: 1.2,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.42),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              Padding(padding: padding, child: child),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LiquidRailButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  const _LiquidRailButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.isActive = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final activeColor = Theme.of(context).colorScheme.secondary;
+    final iconColor = isActive
+        ? const Color(0xFF0F1713)
+        : Colors.white.withValues(alpha: 0.72);
+
+    return Tooltip(
+      message: label,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: IconButton(
+          onPressed: onTap,
+          icon: Icon(icon, color: iconColor, size: 21),
+          style: IconButton.styleFrom(
+            backgroundColor: isActive
+                ? activeColor.withValues(alpha: 0.92)
+                : Colors.white.withValues(alpha: 0.03),
+            fixedSize: const Size(40, 40),
+            minimumSize: const Size(40, 40),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: const CircleBorder(),
+            side: BorderSide(
+              color: isActive
+                  ? Colors.white.withValues(alpha: 0.34)
+                  : Colors.white.withValues(alpha: 0.06),
+            ),
+            shadowColor: isActive
+                ? activeColor.withValues(alpha: 0.7)
+                : Colors.transparent,
+            elevation: isActive ? 10 : 0,
+          ),
+        ),
       ),
     );
   }
