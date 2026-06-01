@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:majika/ui/profile/profile_screen.dart';
 import 'package:majika/ui/settings/settings_screen.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
 
@@ -108,7 +109,12 @@ class SideDrawer extends StatelessWidget {
                 }),
                 _buildMenuItem(Icons.person_outline_rounded, 'Account', () {
                   Navigator.pop(context);
-                  showFeatureComingSoon(context, 'Account');
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ProfileScreen(),
+                    ),
+                  );
                 }),
                 _buildMenuItem(Icons.download_outlined, 'Downloads', () {
                   Navigator.pop(context);

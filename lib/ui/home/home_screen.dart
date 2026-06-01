@@ -9,9 +9,11 @@ import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/taste_profile.dart';
 import 'package:majika/core/recommendations/taste_engine.dart';
 import 'package:majika/core/services/anilist_service.dart';
+import 'package:majika/core/services/firebase_steam_backend.dart';
 import 'package:majika/core/services/media_service.dart';
 import 'package:majika/core/services/steam_service.dart';
 import 'package:majika/ui/settings/settings_screen.dart';
+import 'package:majika/ui/profile/profile_screen.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -56,7 +58,10 @@ class _HomeScreenState extends State<HomeScreen> {
     _mediaServices =
         widget.mediaServices ??
         (widget.mediaService == null
-            ? [AniListService(), SteamService()]
+            ? [
+                AniListService(),
+                SteamService(protectedApi: FirebaseSteamProtectedApi()),
+              ]
             : [widget.mediaService!]);
     _mediaService = _mediaServices.first;
     _tasteEngine = widget.tasteEngine ?? TasteEngine();
@@ -225,6 +230,13 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _openProfile() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const ProfileScreen()),
+    );
+  }
+
   Future<List<Recommendation>> _withChosenTopRecommendation(
     TasteProfile profile,
     List<Recommendation> recommendations,
@@ -297,6 +309,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         activeServiceId: _mediaService.id,
                         onServiceTap: _selectService,
                         onSettingsTap: _openSettings,
+                        onProfileTap: _openProfile,
                         onUnavailableTap: (label) =>
                             showFeatureComingSoon(context, label),
                       ),
@@ -312,6 +325,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onServiceTap: _selectService,
                 onUnavailableTap: (label) =>
                     showFeatureComingSoon(context, label),
+                onProfileTap: _openProfile,
                 child: shell,
               );
             },
@@ -516,6 +530,7 @@ class _MobileLiquidShell extends StatelessWidget {
   final String activeServiceId;
   final ValueChanged<MediaService> onServiceTap;
   final VoidCallback onSettingsTap;
+  final VoidCallback onProfileTap;
   final ValueChanged<String> onUnavailableTap;
 
   const _MobileLiquidShell({
@@ -524,6 +539,7 @@ class _MobileLiquidShell extends StatelessWidget {
     required this.activeServiceId,
     required this.onServiceTap,
     required this.onSettingsTap,
+    required this.onProfileTap,
     required this.onUnavailableTap,
   });
 
@@ -542,6 +558,7 @@ class _MobileLiquidShell extends StatelessWidget {
             activeServiceId: activeServiceId,
             onServiceTap: onServiceTap,
             onSettingsTap: onSettingsTap,
+            onProfileTap: onProfileTap,
             onUnavailableTap: onUnavailableTap,
           ),
         ),
@@ -1879,6 +1896,7 @@ class _MobileLiquidRail extends StatelessWidget {
   final String activeServiceId;
   final ValueChanged<MediaService> onServiceTap;
   final VoidCallback onSettingsTap;
+  final VoidCallback onProfileTap;
   final ValueChanged<String> onUnavailableTap;
 
   const _MobileLiquidRail({
@@ -1886,6 +1904,7 @@ class _MobileLiquidRail extends StatelessWidget {
     required this.activeServiceId,
     required this.onServiceTap,
     required this.onSettingsTap,
+    required this.onProfileTap,
     required this.onUnavailableTap,
   });
 
@@ -1943,7 +1962,7 @@ class _MobileLiquidRail extends StatelessWidget {
                 _LiquidRailButton(
                   icon: Icons.person_rounded,
                   label: 'Profile',
-                  onTap: () => onUnavailableTap('Profile'),
+                  onTap: onProfileTap,
                 ),
               ],
             ),
@@ -2093,6 +2112,7 @@ class _ServiceDock extends StatelessWidget {
   final String activeServiceId;
   final ValueChanged<MediaService> onServiceTap;
   final VoidCallback onSettingsTap;
+  final VoidCallback onProfileTap;
   final ValueChanged<String> onUnavailableTap;
 
   const _ServiceDock({
@@ -2101,6 +2121,7 @@ class _ServiceDock extends StatelessWidget {
     required this.activeServiceId,
     required this.onServiceTap,
     required this.onSettingsTap,
+    required this.onProfileTap,
     required this.onUnavailableTap,
   });
 
@@ -2141,7 +2162,7 @@ class _ServiceDock extends StatelessWidget {
       _DockButton(
         icon: Icons.person_rounded,
         label: 'Profile',
-        onTap: () => onUnavailableTap('Profile'),
+        onTap: onProfileTap,
       ),
     ];
     final children = [...primaryChildren, ...secondaryChildren];

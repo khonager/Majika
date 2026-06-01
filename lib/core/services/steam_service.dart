@@ -11,10 +11,24 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 typedef SteamApiKeyProvider = Future<String?> Function();
 
+abstract class SteamProtectedApi {
+  Future<Map<String, dynamic>> resolveVanityUrl(String vanity);
+
+  Future<Map<String, dynamic>> getPlayerSummaries(String steamId);
+
+  Future<Map<String, dynamic>> getOwnedGames(String steamId);
+
+  Future<Map<String, dynamic>> getRecentlyPlayedGames(String steamId);
+}
+
 class SteamService implements MediaService {
-  SteamService({http.Client? client, SteamApiKeyProvider? apiKeyProvider})
-    : _client = client ?? http.Client(),
-      _apiKeyProvider = apiKeyProvider ?? _savedApiKey;
+  SteamService({
+    http.Client? client,
+    SteamApiKeyProvider? apiKeyProvider,
+    SteamProtectedApi? protectedApi,
+  }) : _client = client ?? http.Client(),
+       _apiKeyProvider = apiKeyProvider ?? _savedApiKey,
+       _protectedApi = protectedApi;
 
   static const sourceId = 'com.majika.service.steam';
   static const _steamApi = 'https://api.steampowered.com';
@@ -49,6 +63,7 @@ class SteamService implements MediaService {
 
   final http.Client _client;
   final SteamApiKeyProvider _apiKeyProvider;
+  final SteamProtectedApi? _protectedApi;
 
   @override
   String get id => sourceId;
@@ -90,37 +105,18 @@ class SteamService implements MediaService {
   @override
   Future<ServiceUserProfile?> fetchUserProfile(String userName) async {
     final steamId = await resolveSteamId(userName);
-    final key = await _requiredApiKey();
-    final uri = Uri.parse(
-      '$_steamApi/ISteamUser/GetPlayerSummaries/v2/',
-    ).replace(queryParameters: {'key': key, 'steamids': steamId});
-    final decoded = await _getJson(uri);
+    final decoded = await _protectedSteamApi().getPlayerSummaries(steamId);
     return parseUserProfile(decoded, fallbackUserName: userName);
   }
 
   @override
   Future<List<MediaItem>> fetchUserLibrary(String userName) async {
     final steamId = await resolveSteamId(userName);
-    final key = await _requiredApiKey();
-    final ownedUri = Uri.parse('$_steamApi/IPlayerService/GetOwnedGames/v1/')
-        .replace(
-          queryParameters: {
-            'key': key,
-            'steamid': steamId,
-            'include_appinfo': 'true',
-            'include_played_free_games': 'true',
-            'format': 'json',
-          },
-        );
-    final recentUri =
-        Uri.parse(
-          '$_steamApi/IPlayerService/GetRecentlyPlayedGames/v1/',
-        ).replace(
-          queryParameters: {'key': key, 'steamid': steamId, 'format': 'json'},
-        );
-
-    final owned = parseOwnedGames(await _getJson(ownedUri));
-    final recent = parseRecentGames(await _getJson(recentUri));
+    final steamApi = _protectedSteamApi();
+    final owned = parseOwnedGames(await steamApi.getOwnedGames(steamId));
+    final recent = parseRecentGames(
+      await steamApi.getRecentlyPlayedGames(steamId),
+    );
     final merged = _mergeRecentPlay(owned, recent);
     if (merged.isEmpty) return merged;
 
@@ -212,11 +208,13 @@ class SteamService implements MediaService {
       );
     }
 
-    final key = await _requiredApiKey();
-    final uri = Uri.parse(
-      '$_steamApi/ISteamUser/ResolveVanityURL/v1/',
-    ).replace(queryParameters: {'key': key, 'vanityurl': vanity});
-    return parseResolveVanity(await _getJson(uri));
+    return parseResolveVanity(
+      await _protectedSteamApi().resolveVanityUrl(vanity),
+    );
+  }
+
+  SteamProtectedApi _protectedSteamApi() {
+    return _protectedApi ?? _DirectSteamProtectedApi(this);
   }
 
   Future<Map<int, MediaItem>> _fetchAppDetails(Iterable<int> appIds) async {
@@ -555,6 +553,60 @@ class SteamService implements MediaService {
       for (final item in items)
         if (seen.add(item.id)) item,
     ];
+  }
+}
+
+class _DirectSteamProtectedApi implements SteamProtectedApi {
+  final SteamService _service;
+
+  const _DirectSteamProtectedApi(this._service);
+
+  @override
+  Future<Map<String, dynamic>> resolveVanityUrl(String vanity) async {
+    final key = await _service._requiredApiKey();
+    final uri = Uri.parse(
+      '${SteamService._steamApi}/ISteamUser/ResolveVanityURL/v1/',
+    ).replace(queryParameters: {'key': key, 'vanityurl': vanity});
+    return _service._getJson(uri);
+  }
+
+  @override
+  Future<Map<String, dynamic>> getPlayerSummaries(String steamId) async {
+    final key = await _service._requiredApiKey();
+    final uri = Uri.parse(
+      '${SteamService._steamApi}/ISteamUser/GetPlayerSummaries/v2/',
+    ).replace(queryParameters: {'key': key, 'steamids': steamId});
+    return _service._getJson(uri);
+  }
+
+  @override
+  Future<Map<String, dynamic>> getOwnedGames(String steamId) async {
+    final key = await _service._requiredApiKey();
+    final uri =
+        Uri.parse(
+          '${SteamService._steamApi}/IPlayerService/GetOwnedGames/v1/',
+        ).replace(
+          queryParameters: {
+            'key': key,
+            'steamid': steamId,
+            'include_appinfo': 'true',
+            'include_played_free_games': 'true',
+            'format': 'json',
+          },
+        );
+    return _service._getJson(uri);
+  }
+
+  @override
+  Future<Map<String, dynamic>> getRecentlyPlayedGames(String steamId) async {
+    final key = await _service._requiredApiKey();
+    final uri =
+        Uri.parse(
+          '${SteamService._steamApi}/IPlayerService/GetRecentlyPlayedGames/v1/',
+        ).replace(
+          queryParameters: {'key': key, 'steamid': steamId, 'format': 'json'},
+        );
+    return _service._getJson(uri);
   }
 }
 

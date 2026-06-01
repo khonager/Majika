@@ -410,25 +410,21 @@ void main() {
     expect(find.text(savedContextItems!.round().toString()), findsOneWidget);
   });
 
-  testWidgets('settings persists Steam API key locally', (
+  testWidgets('settings points Steam API key storage to Firebase Functions', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
-      find.text('Steam Web API key'),
+      find.text('Steam key location'),
       500,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byKey(const ValueKey('steam-api-key')), 'abc');
-    await tester.tap(find.text('Save key'));
-    await tester.pumpAndSettle();
-
-    final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getString('settings.steamApiKey'), 'abc');
+    expect(find.textContaining('STEAM_WEB_API_KEY'), findsOneWidget);
+    expect(find.byKey(const ValueKey('steam-api-key')), findsNothing);
   });
 }
 

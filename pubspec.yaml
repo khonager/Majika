@@ -42,6 +42,10 @@ dependencies:
   path_provider: ^2.1.5
   shared_preferences: ^2.5.5
   flutter_gemma: ^0.12.6
+  firebase_core: ^4.9.0
+  firebase_auth: ^6.5.1
+  cloud_firestore: ^6.4.1
+  cloud_functions: ^6.3.1
 
 dev_dependencies:
   flutter_test:

@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:majika/core/ai/local_ai_settings.dart';
+import 'package:majika/ui/profile/profile_screen.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
 import 'package:majika/ui/shared/glass_panel.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 const _downloadableLocalAiModels = [
   _DownloadableModel(
@@ -156,7 +156,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _localServerModelController = TextEditingController(
     text: defaultLocalAiModel,
   );
-  final _steamApiKeyController = TextEditingController();
 
   bool get _hasDownloadedModel =>
       _downloadedModelId != null || _downloadedModelName != null;
@@ -252,8 +251,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _localServerModelController.text =
           prefs.getString(LocalAiSettingsKeys.localServerModel) ??
           _localServerModelController.text;
-      _steamApiKeyController.text =
-          prefs.getString(LocalAiSettingsKeys.steamApiKey) ?? '';
     });
   }
 
@@ -343,7 +340,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     _localEndpointController.dispose();
     _localServerModelController.dispose();
-    _steamApiKeyController.dispose();
     super.dispose();
   }
 
@@ -553,61 +549,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 18),
             _SettingsSection(
               title: 'Services',
-              subtitle: 'Local credentials for public service imports.',
+              subtitle: 'Backend-backed service imports and account links.',
               children: [
-                _TextFieldRow(
-                  fieldKey: const ValueKey('steam-api-key'),
-                  icon: Icons.key_rounded,
-                  title: 'Steam Web API key',
+                const _InfoRow(
+                  icon: Icons.cloud_done_rounded,
+                  title: 'Steam key location',
                   subtitle:
-                      'Stored on this device and used only for Steam public profile/library imports.',
-                  controller: _steamApiKeyController,
-                  hintText: 'Steam API key',
-                  obscureText: true,
-                  onChanged: (value) =>
-                      _saveString(LocalAiSettingsKeys.steamApiKey, value),
+                      'The app now expects STEAM_WEB_API_KEY to live in Firebase Functions secrets, not in the frontend.',
                 ),
-                Row(
-                  children: [
-                    TextButton.icon(
-                      onPressed: () async {
-                        await _saveString(
-                          LocalAiSettingsKeys.steamApiKey,
-                          _steamApiKeyController.text.trim(),
-                        );
-                        if (!context.mounted) return;
-                        showInfoToast(context, 'Steam API key saved.');
-                      },
-                      icon: const Icon(Icons.save_rounded),
-                      label: const Text('Save key'),
-                    ),
-                    const SizedBox(width: 8),
-                    TextButton.icon(
-                      onPressed: () async {
-                        _steamApiKeyController.clear();
-                        final prefs = await SharedPreferences.getInstance();
-                        await prefs.remove(LocalAiSettingsKeys.steamApiKey);
-                        if (!context.mounted) return;
-                        showInfoToast(context, 'Steam API key cleared.');
-                      },
-                      icon: const Icon(Icons.delete_outline_rounded),
-                      label: const Text('Clear'),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      tooltip: 'Open Steam API key page',
-                      onPressed: () async {
-                        final uri = Uri.parse(
-                          'https://steamcommunity.com/dev/apikey',
-                        );
-                        await launchUrl(
-                          uri,
-                          mode: LaunchMode.externalApplication,
-                        );
-                      },
-                      icon: const Icon(Icons.open_in_new_rounded),
-                    ),
-                  ],
+                _ActionRow(
+                  icon: Icons.person_rounded,
+                  title: 'Manage profile links',
+                  subtitle:
+                      'Open Profile to sign in and save a public Steam profile identifier.',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const ProfileScreen(),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
@@ -1164,7 +1126,6 @@ class _TextFieldRow extends StatelessWidget {
   final TextEditingController controller;
   final String hintText;
   final ValueChanged<String>? onChanged;
-  final bool obscureText;
 
   const _TextFieldRow({
     this.fieldKey,
@@ -1174,7 +1135,6 @@ class _TextFieldRow extends StatelessWidget {
     required this.controller,
     required this.hintText,
     this.onChanged,
-    this.obscureText = false,
   });
 
   @override
@@ -1200,7 +1160,6 @@ class _TextFieldRow extends StatelessWidget {
             key: fieldKey,
             controller: controller,
             onChanged: onChanged,
-            obscureText: obscureText,
             style: const TextStyle(color: Colors.white),
             decoration: _fieldDecoration(context).copyWith(hintText: hintText),
           ),
