@@ -64,3 +64,23 @@ firebase deploy --only functions,firestore:rules
 ## 5. Run the app
 
 Start the app, open **Profile**, create an email/password account, then import Steam from the home screen. Steam profiles must have public library visibility for owned games to import.
+
+## 6. Codemagic iOS builds
+
+This repo includes `codemagic.yaml` with two iOS workflows:
+
+1. `ios-testflight` builds and publishes an App Store signed IPA to App Store Connect.
+2. `ios-development` builds an unsigned iOS app on pushes to `develop`.
+
+In Codemagic, create these environment groups:
+
+1. `app_store_credentials` with `APP_STORE_CONNECT_PRIVATE_KEY`, `APP_STORE_CONNECT_KEY_IDENTIFIER`, and `APP_STORE_CONNECT_ISSUER_ID`.
+2. `firebase_credentials` with optional `GOOGLE_SERVICE_INFO_PLIST_BASE64` if you do not commit `ios/Runner/GoogleService-Info.plist`.
+
+To create the Firebase plist secret:
+
+```sh
+base64 -i ios/Runner/GoogleService-Info.plist | pbcopy
+```
+
+Also set `APP_STORE_APP_ID` in `codemagic.yaml` or in Codemagic after the Majika app exists in App Store Connect. The iOS bundle id is `de.khonager.majika`.
