@@ -29,9 +29,9 @@ firebase login
 flutterfire configure \
   --project=majika-ai-recommendation \
   --platforms=android,ios,macos,web,windows \
-  --android-package-name=com.majika.majika \
-  --ios-bundle-id=com.majika.majika \
-  --macos-bundle-id=com.majika.majika \
+  --android-package-name=de.khonager.majika \
+  --ios-bundle-id=de.khonager.majika \
+  --macos-bundle-id=de.khonager.majika \
   --out=lib/firebase_options.dart \
   --android-out=android/app/google-services.json \
   --yes \

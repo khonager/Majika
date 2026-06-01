@@ -52,7 +52,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyDRFfScWLBDhrJ7lOLc5Wt6q2ocOKZajJo',
-    appId: '1:666859019528:android:22120d568fd89c251da0bd',
+    appId: '1:666859019528:android:0e792942d89b8bd31da0bd',
     messagingSenderId: '666859019528',
     projectId: 'majika-ai-recommendation',
     storageBucket: 'majika-ai-recommendation.firebasestorage.app',
@@ -60,20 +60,20 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyA39eb5rA6hwZ5cODIrlbdhqDMbWdGw6pM',
-    appId: '1:666859019528:ios:a703da987af4195f1da0bd',
+    appId: '1:666859019528:ios:31cabe7d74d1a8461da0bd',
     messagingSenderId: '666859019528',
     projectId: 'majika-ai-recommendation',
     storageBucket: 'majika-ai-recommendation.firebasestorage.app',
-    iosBundleId: 'com.majika.majika',
+    iosBundleId: 'de.khonager.majika',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyA39eb5rA6hwZ5cODIrlbdhqDMbWdGw6pM',
-    appId: '1:666859019528:ios:a703da987af4195f1da0bd',
+    appId: '1:666859019528:ios:31cabe7d74d1a8461da0bd',
     messagingSenderId: '666859019528',
     projectId: 'majika-ai-recommendation',
     storageBucket: 'majika-ai-recommendation.firebasestorage.app',
-    iosBundleId: 'com.majika.majika',
+    iosBundleId: 'de.khonager.majika',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
@@ -85,4 +85,5 @@ class DefaultFirebaseOptions {
     storageBucket: 'majika-ai-recommendation.firebasestorage.app',
     measurementId: 'G-4NM4P8EVP9',
   );
+
 }

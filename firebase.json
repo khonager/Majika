@@ -15,7 +15,7 @@
         "buildConfigurations": {
           ".": {
             "projectId": "majika-ai-recommendation",
-            "appId": "1:666859019528:android:22120d568fd89c251da0bd",
+            "appId": "1:666859019528:android:0e792942d89b8bd31da0bd",
             "fileOutput": "android/app/google-services.json"
           }
         }
@@ -24,9 +24,9 @@
         "lib/firebase_options.dart": {
           "projectId": "majika-ai-recommendation",
           "configurations": {
-            "android": "1:666859019528:android:22120d568fd89c251da0bd",
-            "ios": "1:666859019528:ios:a703da987af4195f1da0bd",
-            "macos": "1:666859019528:ios:a703da987af4195f1da0bd",
+            "android": "1:666859019528:android:0e792942d89b8bd31da0bd",
+            "ios": "1:666859019528:ios:31cabe7d74d1a8461da0bd",
+            "macos": "1:666859019528:ios:31cabe7d74d1a8461da0bd",
             "web": "1:666859019528:web:2469a5468e377aaf1da0bd",
             "windows": "1:666859019528:web:387bbd7447ec0b6e1da0bd"
           }

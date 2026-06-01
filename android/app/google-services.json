@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:666859019528:android:22120d568fd89c251da0bd",
+        "mobilesdk_app_id": "1:666859019528:android:0e792942d89b8bd31da0bd",
         "android_client_info": {
-          "package_name": "com.majika.majika"
+          "package_name": "de.khonager.majika"
         }
       },
       "oauth_client": [],
