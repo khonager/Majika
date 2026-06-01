@@ -11,6 +11,11 @@ class TasteEngine {
     String userName,
     List<MediaItem> library, {
     UserTasteSignals signals = UserTasteSignals.empty,
+    String serviceId = 'com.majika.service.anilist',
+    String serviceName = 'AniList',
+    String? displayName,
+    String avatarUrl = '',
+    String profileUrl = '',
   }) {
     final genreWeights = <String, double>{};
     final formatWeights = <String, double>{};
@@ -20,7 +25,9 @@ class TasteEngine {
 
     for (final item in library) {
       final status = item.status ?? '';
+      if (status == 'OWNED') completedCount += 1;
       if (status == 'COMPLETED') completedCount += 1;
+      if (status == 'RECENTLY_PLAYED') currentCount += 1;
       if (status == 'CURRENT' || status == 'REPEATING') currentCount += 1;
 
       formatCounts.update(item.format, (count) => count + 1, ifAbsent: () => 1);
@@ -64,6 +71,11 @@ class TasteEngine {
       completedCount: completedCount,
       currentCount: currentCount,
       importedAt: DateTime.now(),
+      serviceId: serviceId,
+      serviceName: serviceName,
+      displayName: displayName,
+      avatarUrl: avatarUrl,
+      profileUrl: profileUrl,
     );
   }
 
@@ -99,7 +111,7 @@ class TasteEngine {
         continue;
       }
       if (requestedFormats.isNotEmpty &&
-          !requestedFormats.contains(candidate.format)) {
+          !_matchesAnyFormat(candidate, requestedFormats)) {
         continue;
       }
       if (requestedTags.isNotEmpty &&
@@ -131,6 +143,10 @@ class TasteEngine {
 
       if (candidate.rating != null) {
         score += max(0, candidate.rating! - 6) * 0.85;
+      }
+
+      if (profile.serviceName == 'Steam') {
+        score += _steamCandidateScore(candidate);
       }
 
       final characterMatches = candidate.characters
@@ -173,7 +189,7 @@ class TasteEngine {
         signals.addAll(requestedGenreMatches.map((tag) => 'wanted $tag'));
       }
 
-      if (requestedFormats.contains(candidate.format)) {
+      if (_matchesAnyFormat(candidate, requestedFormats)) {
         score += 3.2;
         signals.add('wanted ${candidate.format.replaceAll('_', ' ')}');
       }
@@ -224,12 +240,21 @@ class TasteEngine {
 
   MediaItem? _recentActivity(List<MediaItem> library) {
     final current = library
-        .where((item) => item.status == 'CURRENT' || item.status == 'REPEATING')
+        .where(
+          (item) =>
+              item.status == 'CURRENT' ||
+              item.status == 'REPEATING' ||
+              item.status == 'RECENTLY_PLAYED',
+        )
         .toList();
     final candidates = current.isNotEmpty ? current : [...library];
     if (candidates.isEmpty) return null;
 
-    candidates.sort((a, b) => (b.updatedAt ?? 0).compareTo(a.updatedAt ?? 0));
+    candidates.sort((a, b) {
+      final bTime = b.lastPlayedAt ?? b.updatedAt ?? 0;
+      final aTime = a.lastPlayedAt ?? a.updatedAt ?? 0;
+      return bTime.compareTo(aTime);
+    });
     return candidates.first;
   }
 
@@ -256,18 +281,18 @@ class TasteEngine {
     }
 
     if (characterMatches.isNotEmpty) {
-      return 'Includes character signals you have favorited on AniList.';
+      return 'Includes character signals you have favorited on ${profile.serviceName}.';
     }
 
     if (studioMatches.isNotEmpty) {
-      return 'Comes from a studio you have favorited on AniList.';
+      return 'Comes from a creator signal you have favorited on ${profile.serviceName}.';
     }
 
     if (candidate.rating != null && candidate.rating! >= 8) {
       return 'A strong community signal that still fits your broader AniList pattern.';
     }
 
-    return 'Recommended from your AniList profile and current popular releases.';
+    return 'Recommended from your ${profile.serviceName} profile and current popular releases.';
   }
 
   List<String> _uniqueSignals(List<String> signals) {
@@ -302,7 +327,16 @@ class TasteEngine {
 
   double _libraryItemWeight(MediaItem item) {
     final rating = item.rating;
-    final ratingWeight = rating == null ? 0.8 : max(0.15, rating / 7.2);
+    final playtimeHours = (item.playtimeMinutes ?? 0) / 60;
+    final playtimeWeight = playtimeHours <= 0
+        ? 0.0
+        : min(log(playtimeHours + 1) / log(10), 2.2);
+    final recentPlaytimeWeight = (item.recentPlaytimeMinutes ?? 0) > 0
+        ? 0.45
+        : 0.0;
+    final ratingWeight = rating == null
+        ? 0.8 + playtimeWeight + recentPlaytimeWeight
+        : max(0.15, rating / 7.2) + playtimeWeight + recentPlaytimeWeight;
     final status = item.status ?? '';
     final statusWeight = switch (status) {
       'CURRENT' => 1.25,
@@ -311,9 +345,11 @@ class TasteEngine {
       'PAUSED' => 0.7,
       'DROPPED' => 0.35,
       'PLANNING' => 0.45,
+      'OWNED' => 0.95,
+      'RECENTLY_PLAYED' => 1.28,
       _ => 0.85,
     };
-    final updatedAt = item.updatedAt;
+    final updatedAt = item.lastPlayedAt ?? item.updatedAt;
     final recentWeight = updatedAt == null
         ? 1.0
         : DateTime.fromMillisecondsSinceEpoch(
@@ -323,6 +359,36 @@ class TasteEngine {
         : 1.0;
 
     return ratingWeight * statusWeight * recentWeight;
+  }
+
+  bool _matchesAnyFormat(MediaItem item, Set<String> requestedFormats) {
+    if (requestedFormats.isEmpty) return true;
+    if (requestedFormats.contains(item.format)) return true;
+    final normalizedTags = item.tags
+        .map((tag) => tag.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ''))
+        .toSet();
+    for (final format in requestedFormats) {
+      final normalized = format
+          .toLowerCase()
+          .replaceAll('single_player', 'singleplayer')
+          .replaceAll('online_co_op', 'onlinecoop')
+          .replaceAll('co_op', 'coop')
+          .replaceAll('steam_deck', 'steamdeck')
+          .replaceAll('controller', 'controllersupport')
+          .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+      if (normalizedTags.contains(normalized)) return true;
+    }
+    return false;
+  }
+
+  double _steamCandidateScore(MediaItem candidate) {
+    var score = 0.0;
+    if ((candidate.popularity ?? 0) > 0) {
+      score += min(log(candidate.popularity! + 1) / log(10), 5) * 0.4;
+    }
+    if (candidate.tags.contains('Steam Deck')) score += 0.35;
+    if (candidate.tags.contains('Controller Support')) score += 0.25;
+    return score;
   }
 
   List<Recommendation> _calibrateScores(

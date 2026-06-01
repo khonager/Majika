@@ -2,9 +2,35 @@ import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/user_taste_signals.dart';
 
+class ServiceUserProfile {
+  final String userName;
+  final String displayName;
+  final String avatarUrl;
+  final String profileUrl;
+
+  const ServiceUserProfile({
+    required this.userName,
+    String? displayName,
+    this.avatarUrl = '',
+    this.profileUrl = '',
+  }) : displayName = displayName ?? userName;
+}
+
 abstract class MediaService {
   String get id;
   String get displayName;
+  String get connectTitle;
+  String get connectDescription;
+  String get userNameHint;
+  String get userNameEmptyMessage;
+  String get importButtonLabel;
+  String get searchPlaceholder;
+  String get openTooltipLabel;
+  List<String> get supportedMediaTypes;
+  List<String> get supportedFormats;
+  bool get supportsAdultContent;
+
+  Future<ServiceUserProfile?> fetchUserProfile(String userName);
 
   Future<List<MediaItem>> fetchUserLibrary(String userName);
 

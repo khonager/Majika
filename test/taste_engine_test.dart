@@ -85,6 +85,64 @@ void main() {
     expect(recommendations.any((rec) => rec.item.title == 'Seen'), isFalse);
   });
 
+  test('Steam playtime boosts profile tags and game recommendations', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile(
+      '76561198000000000',
+      [
+        MediaItem(
+          id: 'steam_1',
+          title: 'Played RPG',
+          coverUrl: '',
+          tags: const ['RPG', 'Strategy'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          status: 'OWNED',
+          playtimeMinutes: 6000,
+          sourceId: 'com.majika.service.steam',
+        ),
+        MediaItem(
+          id: 'steam_2',
+          title: 'Barely Played Puzzle',
+          coverUrl: '',
+          tags: const ['Puzzle'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          status: 'OWNED',
+          playtimeMinutes: 20,
+          sourceId: 'com.majika.service.steam',
+        ),
+      ],
+      serviceId: 'com.majika.service.steam',
+      serviceName: 'Steam',
+    );
+
+    final recommendations = engine.rankCandidates(profile, [
+      MediaItem(
+        id: 'steam_3',
+        title: 'Strategy RPG Match',
+        coverUrl: '',
+        tags: const ['RPG', 'Strategy'],
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        sourceId: 'com.majika.service.steam',
+      ),
+      MediaItem(
+        id: 'steam_4',
+        title: 'Puzzle Match',
+        coverUrl: '',
+        tags: const ['Puzzle'],
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        sourceId: 'com.majika.service.steam',
+      ),
+    ]);
+
+    expect(profile.serviceName, 'Steam');
+    expect(profile.favoriteGenres.first, 'RPG');
+    expect(recommendations.first.item.title, 'Strategy RPG Match');
+  });
+
   test(
     'ratings and AniList favorites affect match scores without flat 99s',
     () {

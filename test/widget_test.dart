@@ -194,6 +194,34 @@ void main() {
     expect(find.byTooltip('Open on AniList'), findsWidgets);
   });
 
+  testWidgets('Steam service switch imports a game profile', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          mediaServices: [_FakeMediaService(), _FakeSteamMediaService()],
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('Steam'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Connect Steam'), findsOneWidget);
+    expect(find.text('Build game profile'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField).first, 'steamtester');
+    await tester.tap(find.text('Build game profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('@Steam Tester · RPG + Strategy'), findsOneWidget);
+    expect(find.text('Steam Tester'), findsWidgets);
+    expect(find.text('Strategy RPG Match'), findsOneWidget);
+    expect(find.byTooltip('Open on Steam'), findsWidgets);
+  });
+
   testWidgets(
     'switch user returns to the import form without layout overflow',
     (WidgetTester tester) async {
@@ -381,6 +409,27 @@ void main() {
 
     expect(find.text(savedContextItems!.round().toString()), findsOneWidget);
   });
+
+  testWidgets('settings persists Steam API key locally', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('Steam Web API key'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const ValueKey('steam-api-key')), 'abc');
+    await tester.tap(find.text('Save key'));
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('settings.steamApiKey'), 'abc');
+  });
 }
 
 class _FakeMediaService implements MediaService {
@@ -389,6 +438,41 @@ class _FakeMediaService implements MediaService {
 
   @override
   String get id => 'com.majika.service.anilist';
+
+  @override
+  String get connectTitle => 'Connect AniList';
+
+  @override
+  String get connectDescription => 'Enter a public AniList username.';
+
+  @override
+  String get userNameHint => 'AniList username';
+
+  @override
+  String get userNameEmptyMessage => 'Enter an AniList username first.';
+
+  @override
+  String get importButtonLabel => 'Build profile';
+
+  @override
+  String get searchPlaceholder => 'Search a vibe, tag, format, or request';
+
+  @override
+  String get openTooltipLabel => 'Open on AniList';
+
+  @override
+  List<String> get supportedMediaTypes => RecommendationQuery.aniListMediaTypes;
+
+  @override
+  List<String> get supportedFormats => RecommendationQuery.aniListFormats;
+
+  @override
+  bool get supportsAdultContent => true;
+
+  @override
+  Future<ServiceUserProfile?> fetchUserProfile(String userName) async {
+    return ServiceUserProfile(userName: userName);
+  }
 
   @override
   Future<List<MediaItem>> fetchRecommendationCandidates({
@@ -489,5 +573,111 @@ class _FakeMediaService implements MediaService {
         siteUrl: 'https://anilist.co/anime/1',
       ),
     ];
+  }
+}
+
+class _FakeSteamMediaService implements MediaService {
+  @override
+  String get displayName => 'Steam';
+
+  @override
+  String get id => 'com.majika.service.steam';
+
+  @override
+  String get connectTitle => 'Connect Steam';
+
+  @override
+  String get connectDescription => 'Enter a public Steam profile.';
+
+  @override
+  String get userNameHint => 'Steam profile, vanity name, or SteamID64';
+
+  @override
+  String get userNameEmptyMessage => 'Enter a Steam profile first.';
+
+  @override
+  String get importButtonLabel => 'Build game profile';
+
+  @override
+  String get searchPlaceholder => 'Search a genre, mode, game, or vibe';
+
+  @override
+  String get openTooltipLabel => 'Open on Steam';
+
+  @override
+  List<String> get supportedMediaTypes => RecommendationQuery.steamMediaTypes;
+
+  @override
+  List<String> get supportedFormats => RecommendationQuery.steamFormats;
+
+  @override
+  bool get supportsAdultContent => false;
+
+  @override
+  Future<ServiceUserProfile?> fetchUserProfile(String userName) async {
+    return const ServiceUserProfile(
+      userName: '76561198000000000',
+      displayName: 'Steam Tester',
+      avatarUrl: '',
+      profileUrl: 'https://steamcommunity.com/id/steamtester',
+    );
+  }
+
+  @override
+  Future<List<MediaItem>> fetchUserLibrary(String userName) async {
+    return [
+      MediaItem(
+        id: 'steam_1',
+        title: 'Played RPG',
+        coverUrl: '',
+        tags: const ['RPG', 'Strategy'],
+        rating: 9,
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        status: 'RECENTLY_PLAYED',
+        sourceId: id,
+        siteUrl: 'https://store.steampowered.com/app/1',
+        playtimeMinutes: 6000,
+        recentPlaytimeMinutes: 120,
+        lastPlayedAt: 200,
+      ),
+    ];
+  }
+
+  @override
+  Future<UserTasteSignals> fetchTasteSignals(String userName) async {
+    return UserTasteSignals.empty;
+  }
+
+  @override
+  Future<List<MediaItem>> fetchRecommendationCandidates({
+    bool includeAdult = false,
+  }) async {
+    return [
+      MediaItem(
+        id: 'steam_2',
+        title: 'Strategy RPG Match',
+        coverUrl: '',
+        tags: const ['RPG', 'Strategy', 'Single-player'],
+        rating: 8.8,
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        sourceId: id,
+        siteUrl: 'https://store.steampowered.com/app/2',
+        popularity: 90000,
+      ),
+    ];
+  }
+
+  @override
+  Future<List<MediaItem>> searchRecommendationCandidates(
+    RecommendationQuery query,
+  ) async {
+    return fetchRecommendationCandidates();
+  }
+
+  @override
+  Future<List<String>> fetchAvailableTags() async {
+    return const ['RPG', 'Strategy', 'Single-player', 'Controller Support'];
   }
 }

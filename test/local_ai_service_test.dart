@@ -35,6 +35,30 @@ void main() {
     },
   );
 
+  test('flutter gemma service can interpret Steam game filters', () async {
+    late String capturedPrompt;
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        capturedPrompt = prompt;
+        return '{"tags":["RPG"],"formats":["SINGLE_PLAYER"],"mediaTypes":["GAME"],"includeAdult":false,"searchText":"single player rpg"}';
+      },
+    );
+
+    final interpreted = await service.interpretRecommendationRequest(
+      const RecommendationQuery(request: 'single player rpg'),
+      availableTags: const ['RPG', 'Strategy'],
+      serviceName: 'Steam',
+      allowedMediaTypes: RecommendationQuery.steamMediaTypes,
+      allowedFormats: RecommendationQuery.steamFormats,
+    );
+
+    expect(capturedPrompt, contains('structured Steam filters'));
+    expect(capturedPrompt, contains('Allowed mediaTypes: GAME'));
+    expect(interpreted.mediaTypes, contains('GAME'));
+    expect(interpreted.formats, contains('SINGLE_PLAYER'));
+    expect(interpreted.aiSelectedTags, contains('RPG'));
+  });
+
   test(
     'flutter gemma service falls back when model output is malformed',
     () async {

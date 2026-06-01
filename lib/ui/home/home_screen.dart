@@ -10,18 +10,21 @@ import 'package:majika/core/models/taste_profile.dart';
 import 'package:majika/core/recommendations/taste_engine.dart';
 import 'package:majika/core/services/anilist_service.dart';
 import 'package:majika/core/services/media_service.dart';
+import 'package:majika/core/services/steam_service.dart';
 import 'package:majika/ui/settings/settings_screen.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class HomeScreen extends StatefulWidget {
   final MediaService? mediaService;
+  final List<MediaService>? mediaServices;
   final TasteEngine? tasteEngine;
   final LocalAiService? aiService;
 
   const HomeScreen({
     super.key,
     this.mediaService,
+    this.mediaServices,
     this.tasteEngine,
     this.aiService,
   });
@@ -31,7 +34,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  late final MediaService _mediaService;
+  late final List<MediaService> _mediaServices;
+  late MediaService _mediaService;
   late final TasteEngine _tasteEngine;
   late final LocalAiService _aiService;
   final TextEditingController _userNameController = TextEditingController();
@@ -49,7 +53,12 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _mediaService = widget.mediaService ?? AniListService();
+    _mediaServices =
+        widget.mediaServices ??
+        (widget.mediaService == null
+            ? [AniListService(), SteamService()]
+            : [widget.mediaService!]);
+    _mediaService = _mediaServices.first;
     _tasteEngine = widget.tasteEngine ?? TasteEngine();
     _aiService = widget.aiService ?? const FlutterGemmaLocalAiService();
   }
@@ -60,10 +69,10 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  Future<void> _importAniListProfile() async {
+  Future<void> _importProfile() async {
     final userName = _userNameController.text.trim();
     if (userName.isEmpty) {
-      showErrorToast(context, 'Enter an AniList username first.');
+      showErrorToast(context, _mediaService.userNameEmptyMessage);
       return;
     }
 
@@ -73,18 +82,25 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
+      final profileFuture = _mediaService.fetchUserProfile(userName);
       final libraryFuture = _mediaService.fetchUserLibrary(userName);
       final signalsFuture = _mediaService.fetchTasteSignals(userName);
       final candidatesFuture = _mediaService.fetchRecommendationCandidates();
       final serviceTagsFuture = _mediaService.fetchAvailableTags();
+      final serviceProfile = await profileFuture;
       final library = await libraryFuture;
       final signals = await signalsFuture;
       final candidates = await candidatesFuture;
       final serviceTags = await serviceTagsFuture;
       final profile = _tasteEngine.buildProfile(
-        userName,
+        serviceProfile?.userName ?? userName,
         library,
         signals: signals,
+        serviceId: _mediaService.id,
+        serviceName: _mediaService.displayName,
+        displayName: serviceProfile?.displayName,
+        avatarUrl: serviceProfile?.avatarUrl ?? '',
+        profileUrl: serviceProfile?.profileUrl ?? '',
       );
       final recommendations = await _withChosenTopRecommendation(
         profile,
@@ -132,6 +148,14 @@ class _HomeScreenState extends State<HomeScreen> {
     _userNameController.text = previousUser;
   }
 
+  void _selectService(MediaService service) {
+    if (service.id == _mediaService.id) return;
+    setState(() {
+      _mediaService = service;
+    });
+    _signOut();
+  }
+
   Future<void> _updateRecommendationQuery(RecommendationQuery rawQuery) async {
     final profile = _profile;
     if (profile == null) return;
@@ -145,6 +169,9 @@ class _HomeScreenState extends State<HomeScreen> {
       final query = await _aiService.interpretRecommendationRequest(
         rawQuery,
         availableTags: _availableTags,
+        serviceName: _mediaService.displayName,
+        allowedMediaTypes: _mediaService.supportedMediaTypes,
+        allowedFormats: _mediaService.supportedFormats,
       );
       var candidates = _candidates;
       final needsAdultCandidates =
@@ -243,7 +270,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 error: _error,
                 aiService: _aiService,
                 userNameController: _userNameController,
-                onImport: _importAniListProfile,
+                mediaService: _mediaService,
+                onImport: _importProfile,
                 onSignOut: _signOut,
                 onSwitchUser: _switchUser,
                 query: _recommendationQuery,
@@ -265,6 +293,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       padding: const EdgeInsets.fromLTRB(22, 0, 22, 18),
                       child: _ServiceDock(
                         isDesktop: true,
+                        services: _mediaServices,
+                        activeServiceId: _mediaService.id,
+                        onServiceTap: _selectService,
                         onSettingsTap: _openSettings,
                         onUnavailableTap: (label) =>
                             showFeatureComingSoon(context, label),
@@ -276,6 +307,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
               return _MobileLiquidShell(
                 onSettingsTap: _openSettings,
+                services: _mediaServices,
+                activeServiceId: _mediaService.id,
+                onServiceTap: _selectService,
                 onUnavailableTap: (label) =>
                     showFeatureComingSoon(context, label),
                 child: shell,
@@ -300,8 +334,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final entries = counts.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
+    final baseTags = _mediaService.displayName == 'Steam'
+        ? _serviceTags
+        : RecommendationQuery.browsableTags;
     return {
-      ...RecommendationQuery.browsableTags,
+      ...baseTags,
       ..._serviceTags,
       ...entries.map((entry) => entry.key),
     }.toList();
@@ -316,29 +353,38 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-Future<void> _openMediaOnAniList(BuildContext context, MediaItem item) async {
+Future<void> _openMedia(BuildContext context, MediaItem item) async {
   final fallbackId = item.id.startsWith('anilist_')
       ? item.id.replaceFirst('anilist_', '')
+      : '';
+  final steamFallbackId = item.id.startsWith('steam_')
+      ? item.id.replaceFirst('steam_', '')
       : '';
   final url = item.siteUrl.isNotEmpty
       ? item.siteUrl
       : fallbackId.isNotEmpty
       ? 'https://anilist.co/${item.mediaType.toLowerCase()}/$fallbackId'
+      : steamFallbackId.isNotEmpty
+      ? 'https://store.steampowered.com/app/$steamFallbackId'
       : '';
   final uri = Uri.tryParse(url);
   if (uri == null || url.isEmpty) {
-    showErrorToast(context, 'No AniList page is available for this item.');
+    showErrorToast(
+      context,
+      'No ${item.serviceLabel} page is available for this item.',
+    );
     return;
   }
 
   final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
   if (!launched && context.mounted) {
-    showErrorToast(context, 'Could not open AniList.');
+    showErrorToast(context, 'Could not open ${item.serviceLabel}.');
   }
 }
 
 class _ContentShell extends StatelessWidget {
   final bool isMobileSurface;
+  final MediaService mediaService;
   final TasteProfile? profile;
   final List<Recommendation> recommendations;
   final bool isLoading;
@@ -355,6 +401,7 @@ class _ContentShell extends StatelessWidget {
 
   const _ContentShell({
     this.isMobileSurface = false,
+    required this.mediaService,
     required this.profile,
     required this.recommendations,
     required this.isLoading,
@@ -412,6 +459,7 @@ class _ContentShell extends StatelessWidget {
                 _ShellHeader(
                   profile: profile,
                   aiService: aiService,
+                  serviceName: mediaService.displayName,
                   onSignOut: onSignOut,
                   onSwitchUser: onSwitchUser,
                 ),
@@ -425,6 +473,7 @@ class _ContentShell extends StatelessWidget {
                             isLoading: isLoading,
                             error: error,
                             controller: userNameController,
+                            mediaService: mediaService,
                             onImport: onImport,
                           )
                         : _RecommendationState(
@@ -434,6 +483,7 @@ class _ContentShell extends StatelessWidget {
                             query: query,
                             isRefreshing: isRefreshingRecommendations,
                             availableTags: availableTags,
+                            mediaService: mediaService,
                             isMobileSurface: isMobileSurface,
                             onQueryChanged: onQueryChanged,
                           ),
@@ -462,11 +512,17 @@ class _ContentShell extends StatelessWidget {
 
 class _MobileLiquidShell extends StatelessWidget {
   final Widget child;
+  final List<MediaService> services;
+  final String activeServiceId;
+  final ValueChanged<MediaService> onServiceTap;
   final VoidCallback onSettingsTap;
   final ValueChanged<String> onUnavailableTap;
 
   const _MobileLiquidShell({
     required this.child,
+    required this.services,
+    required this.activeServiceId,
+    required this.onServiceTap,
     required this.onSettingsTap,
     required this.onUnavailableTap,
   });
@@ -482,6 +538,9 @@ class _MobileLiquidShell extends StatelessWidget {
           bottom: 16,
           left: 6,
           child: _MobileLiquidRail(
+            services: services,
+            activeServiceId: activeServiceId,
+            onServiceTap: onServiceTap,
             onSettingsTap: onSettingsTap,
             onUnavailableTap: onUnavailableTap,
           ),
@@ -494,12 +553,14 @@ class _MobileLiquidShell extends StatelessWidget {
 class _ShellHeader extends StatelessWidget {
   final TasteProfile? profile;
   final LocalAiService aiService;
+  final String serviceName;
   final VoidCallback onSignOut;
   final VoidCallback onSwitchUser;
 
   const _ShellHeader({
     required this.profile,
     required this.aiService,
+    required this.serviceName,
     required this.onSignOut,
     required this.onSwitchUser,
   });
@@ -523,8 +584,8 @@ class _ShellHeader extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               profile == null
-                  ? 'Build a local taste profile from AniList.'
-                  : '@${profile!.userName} · ${profile!.primaryTaste}',
+                  ? 'Build a local taste profile from $serviceName.'
+                  : '@${profile!.displayName} · ${profile!.primaryTaste}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodyMedium?.copyWith(
@@ -579,6 +640,7 @@ class _ConnectState extends StatelessWidget {
   final bool isLoading;
   final String? error;
   final TextEditingController controller;
+  final MediaService mediaService;
   final VoidCallback onImport;
 
   const _ConnectState({
@@ -586,6 +648,7 @@ class _ConnectState extends StatelessWidget {
     required this.isLoading,
     required this.error,
     required this.controller,
+    required this.mediaService,
     required this.onImport,
   });
 
@@ -608,7 +671,7 @@ class _ConnectState extends StatelessWidget {
               ),
               const SizedBox(height: 18),
               Text(
-                'Connect AniList',
+                mediaService.connectTitle,
                 textAlign: TextAlign.center,
                 style: theme.textTheme.headlineMedium?.copyWith(
                   color: Colors.white,
@@ -617,7 +680,7 @@ class _ConnectState extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               Text(
-                'Enter a public AniList username. Majika will read anime and manga lists, build a local taste profile, then rank current releases against it.',
+                mediaService.connectDescription,
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: Colors.white.withValues(alpha: 0.72),
@@ -631,7 +694,7 @@ class _ConnectState extends StatelessWidget {
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) => onImport(),
                 decoration: InputDecoration(
-                  hintText: 'AniList username',
+                  hintText: mediaService.userNameHint,
                   prefixIcon: const Icon(Icons.person_search_rounded),
                   filled: true,
                   fillColor: Colors.black.withValues(alpha: 0.24),
@@ -660,11 +723,17 @@ class _ConnectState extends StatelessWidget {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.sync_rounded),
-                label: Text(isLoading ? 'Importing profile' : 'Build profile'),
+                label: Text(
+                  isLoading
+                      ? 'Importing profile'
+                      : mediaService.importButtonLabel,
+                ),
               ),
               const SizedBox(height: 14),
               Text(
-                'OAuth and Firebase sync are designed for later; this slice stays local-first.',
+                mediaService.displayName == 'Steam'
+                    ? 'Steam OpenID account linking is designed for later; this slice uses public data and a local API key.'
+                    : 'OAuth and Firebase sync are designed for later; this slice stays local-first.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: Colors.white.withValues(alpha: 0.48),
@@ -684,6 +753,7 @@ class _RecommendationState extends StatelessWidget {
   final RecommendationQuery query;
   final bool isRefreshing;
   final List<String> availableTags;
+  final MediaService mediaService;
   final bool isMobileSurface;
   final ValueChanged<RecommendationQuery> onQueryChanged;
 
@@ -694,6 +764,7 @@ class _RecommendationState extends StatelessWidget {
     required this.query,
     required this.isRefreshing,
     required this.availableTags,
+    required this.mediaService,
     required this.isMobileSurface,
     required this.onQueryChanged,
   });
@@ -714,7 +785,9 @@ class _RecommendationState extends StatelessWidget {
                 children: [
                   Padding(
                     padding: readableInset,
-                    child: _TasteSummary(profile: profile),
+                    child: mediaService.displayName == 'Steam'
+                        ? _SteamDashboardSummary(profile: profile)
+                        : _TasteSummary(profile: profile),
                   ),
                   const SizedBox(height: 14),
                   Padding(
@@ -723,6 +796,7 @@ class _RecommendationState extends StatelessWidget {
                       query: query,
                       isRefreshing: isRefreshing,
                       availableTags: availableTags,
+                      mediaService: mediaService,
                       onQueryChanged: onQueryChanged,
                     ),
                   ),
@@ -814,16 +888,153 @@ class _TasteSummary extends StatelessWidget {
   }
 }
 
+class _SteamDashboardSummary extends StatelessWidget {
+  final TasteProfile profile;
+
+  const _SteamDashboardSummary({required this.profile});
+
+  @override
+  Widget build(BuildContext context) {
+    final totalHours = profile.library.fold<int>(
+      0,
+      (total, item) => total + ((item.playtimeMinutes ?? 0) / 60).round(),
+    );
+    final mostPlayed = [...profile.library]
+      ..sort(
+        (a, b) => (b.playtimeMinutes ?? 0).compareTo(a.playtimeMinutes ?? 0),
+      );
+
+    return _GlassCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 28,
+                backgroundColor: Colors.white.withValues(alpha: 0.12),
+                backgroundImage: profile.avatarUrl.isEmpty
+                    ? null
+                    : NetworkImage(profile.avatarUrl),
+                child: profile.avatarUrl.isEmpty
+                    ? const Icon(Icons.sports_esports_rounded)
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      profile.displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      '${profile.library.length} games · $totalHours hours tracked',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.62),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final genre in profile.favoriteGenres.take(6))
+                _TextChip(label: genre),
+            ],
+          ),
+          if (mostPlayed.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              height: 86,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemBuilder: (context, index) {
+                  final item = mostPlayed[index];
+                  final hours = ((item.playtimeMinutes ?? 0) / 60).round();
+                  return Container(
+                    width: 190,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 58,
+                          height: 58,
+                          child: _CoverImage(item: item, borderRadius: 10),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                item.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '$hours h',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.62),
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                separatorBuilder: (context, index) => const SizedBox(width: 8),
+                itemCount: min(5, mostPlayed.length),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _RecommendationSearchPanel extends StatefulWidget {
   final RecommendationQuery query;
   final bool isRefreshing;
   final List<String> availableTags;
+  final MediaService mediaService;
   final ValueChanged<RecommendationQuery> onQueryChanged;
 
   const _RecommendationSearchPanel({
     required this.query,
     required this.isRefreshing,
     required this.availableTags,
+    required this.mediaService,
     required this.onQueryChanged,
   });
 
@@ -884,7 +1095,7 @@ class _RecommendationSearchPanelState
                   textInputAction: TextInputAction.search,
                   onSubmitted: (_) => _submitRequest(),
                   decoration: InputDecoration(
-                    hintText: 'Search a vibe, tag, format, or request',
+                    hintText: widget.mediaService.searchPlaceholder,
                     prefixIcon: const Icon(Icons.manage_search_rounded),
                     filled: true,
                     fillColor: Colors.black.withValues(alpha: 0.22),
@@ -916,30 +1127,29 @@ class _RecommendationSearchPanelState
           _FilterSection(
             label: 'Type',
             children: [
-              _FilterChipButton(
-                key: const ValueKey('filter-type-anime'),
-                label: 'Anime',
-                selected: widget.query.mediaTypes.contains('ANIME'),
-                onSelected: () => _toggleMediaType('ANIME'),
-              ),
-              _FilterChipButton(
-                key: const ValueKey('filter-type-manga'),
-                label: 'Manga',
-                selected: widget.query.mediaTypes.contains('MANGA'),
-                onSelected: () => _toggleMediaType('MANGA'),
-              ),
-              _FilterChipButton(
-                key: const ValueKey('filter-adult'),
-                label: 'Adult',
-                selected: widget.query.includeAdult || widget.query.infersAdult,
-                onSelected: _toggleAdult,
-              ),
+              for (final mediaType in widget.mediaService.supportedMediaTypes)
+                _FilterChipButton(
+                  key: ValueKey('filter-type-${mediaType.toLowerCase()}'),
+                  label: _mediaTypeLabel(mediaType),
+                  selected: widget.query.mediaTypes.contains(mediaType),
+                  onSelected: () => _toggleMediaType(mediaType),
+                ),
+              if (widget.mediaService.supportsAdultContent)
+                _FilterChipButton(
+                  key: const ValueKey('filter-adult'),
+                  label: 'Adult',
+                  selected:
+                      widget.query.includeAdult || widget.query.infersAdult,
+                  onSelected: _toggleAdult,
+                ),
             ],
           ),
           const SizedBox(height: 10),
           _FilterSection(
-            label: 'Format',
-            children: RecommendationQuery.allFormats.map((format) {
+            label: widget.mediaService.displayName == 'Steam'
+                ? 'Modes'
+                : 'Format',
+            children: widget.mediaService.supportedFormats.map((format) {
               return _FilterChipButton(
                 key: ValueKey('filter-format-${format.toLowerCase()}'),
                 label: _formatLabel(format),
@@ -989,7 +1199,22 @@ class _RecommendationSearchPanelState
       'NOVEL' => 'Novel',
       'SPECIAL' => 'Special',
       'ONE_SHOT' => 'One-shot',
+      'SINGLE_PLAYER' => 'Single-player',
+      'MULTIPLAYER' => 'Multiplayer',
+      'CO_OP' => 'Co-op',
+      'ONLINE_CO_OP' => 'Online co-op',
+      'CONTROLLER' => 'Controller',
+      'STEAM_DECK' => 'Steam Deck',
       _ => format[0] + format.substring(1).toLowerCase(),
+    };
+  }
+
+  String _mediaTypeLabel(String mediaType) {
+    return switch (mediaType) {
+      'ANIME' => 'Anime',
+      'MANGA' => 'Manga',
+      'GAME' => 'Games',
+      _ => mediaType,
     };
   }
 
@@ -1528,15 +1753,15 @@ class _OpenableRecommendation extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: 'Open on AniList',
+      message: 'Open on ${item.serviceLabel}',
       child: Semantics(
         button: true,
-        label: 'Open ${item.title} on AniList',
+        label: 'Open ${item.title} on ${item.serviceLabel}',
         child: MouseRegion(
           cursor: SystemMouseCursors.click,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: () => _openMediaOnAniList(context, item),
+            onTap: () => _openMedia(context, item),
             child: child,
           ),
         ),
@@ -1650,10 +1875,16 @@ class _EmptyRecommendations extends StatelessWidget {
 }
 
 class _MobileLiquidRail extends StatelessWidget {
+  final List<MediaService> services;
+  final String activeServiceId;
+  final ValueChanged<MediaService> onServiceTap;
   final VoidCallback onSettingsTap;
   final ValueChanged<String> onUnavailableTap;
 
   const _MobileLiquidRail({
+    required this.services,
+    required this.activeServiceId,
+    required this.onServiceTap,
     required this.onSettingsTap,
     required this.onUnavailableTap,
   });
@@ -1677,16 +1908,13 @@ class _MobileLiquidRail extends StatelessWidget {
                   isActive: true,
                   onTap: () {},
                 ),
-                _LiquidRailButton(
-                  icon: Icons.animation_rounded,
-                  label: 'AniList',
-                  onTap: () => onUnavailableTap('AniList OAuth'),
-                ),
-                _LiquidRailButton(
-                  icon: Icons.sports_esports_rounded,
-                  label: 'Steam',
-                  onTap: () => onUnavailableTap('Steam'),
-                ),
+                for (final service in services)
+                  _LiquidRailButton(
+                    icon: _serviceIcon(service),
+                    label: service.displayName,
+                    isActive: activeServiceId == service.id,
+                    onTap: () => onServiceTap(service),
+                  ),
                 _LiquidRailButton(
                   icon: Icons.local_movies_rounded,
                   label: 'Movies/TV',
@@ -1724,6 +1952,12 @@ class _MobileLiquidRail extends StatelessWidget {
       ),
     );
   }
+}
+
+IconData _serviceIcon(MediaService service) {
+  return service.displayName == 'Steam'
+      ? Icons.sports_esports_rounded
+      : Icons.animation_rounded;
 }
 
 class _LiquidGlassPod extends StatelessWidget {
@@ -1855,35 +2089,37 @@ class _LiquidRailButton extends StatelessWidget {
 
 class _ServiceDock extends StatelessWidget {
   final bool isDesktop;
+  final List<MediaService> services;
+  final String activeServiceId;
+  final ValueChanged<MediaService> onServiceTap;
   final VoidCallback onSettingsTap;
   final ValueChanged<String> onUnavailableTap;
 
   const _ServiceDock({
     required this.isDesktop,
+    required this.services,
+    required this.activeServiceId,
+    required this.onServiceTap,
     required this.onSettingsTap,
     required this.onUnavailableTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final children = [
+    final primaryChildren = [
       _DockButton(
         icon: Icons.home_rounded,
         label: 'Home',
         isActive: true,
         onTap: () {},
       ),
-      _DockButton(
-        icon: Icons.animation_rounded,
-        label: 'AniList',
-        isActive: true,
-        onTap: () => onUnavailableTap('AniList OAuth'),
-      ),
-      _DockButton(
-        icon: Icons.sports_esports_rounded,
-        label: 'Steam',
-        onTap: () => onUnavailableTap('Steam'),
-      ),
+      for (final service in services)
+        _DockButton(
+          icon: _serviceIcon(service),
+          label: service.displayName,
+          isActive: activeServiceId == service.id,
+          onTap: () => onServiceTap(service),
+        ),
       _DockButton(
         icon: Icons.local_movies_rounded,
         label: 'Movies/TV',
@@ -1894,6 +2130,8 @@ class _ServiceDock extends StatelessWidget {
         label: 'Add service',
         onTap: () => onUnavailableTap('Add service'),
       ),
+    ];
+    final secondaryChildren = [
       if (!isDesktop) const Spacer(),
       _DockButton(
         icon: Icons.settings_rounded,
@@ -1906,6 +2144,7 @@ class _ServiceDock extends StatelessWidget {
         onTap: () => onUnavailableTap('Profile'),
       ),
     ];
+    final children = [...primaryChildren, ...secondaryChildren];
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(28),
@@ -1927,9 +2166,9 @@ class _ServiceDock extends StatelessWidget {
               ? Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    ...children.take(5),
+                    ...primaryChildren,
                     const Spacer(),
-                    ...children.skip(5),
+                    ...secondaryChildren,
                   ],
                 )
               : Column(children: children),

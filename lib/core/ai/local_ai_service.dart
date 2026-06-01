@@ -15,6 +15,9 @@ abstract class LocalAiService {
   Future<RecommendationQuery> interpretRecommendationRequest(
     RecommendationQuery query, {
     required Iterable<String> availableTags,
+    String serviceName = 'AniList',
+    Iterable<String> allowedMediaTypes = RecommendationQuery.aniListMediaTypes,
+    Iterable<String> allowedFormats = RecommendationQuery.aniListFormats,
   });
 
   Future<String> explainRecommendation(
@@ -44,6 +47,9 @@ class DeterministicLocalAiService implements LocalAiService {
   Future<RecommendationQuery> interpretRecommendationRequest(
     RecommendationQuery query, {
     required Iterable<String> availableTags,
+    String serviceName = 'AniList',
+    Iterable<String> allowedMediaTypes = RecommendationQuery.aniListMediaTypes,
+    Iterable<String> allowedFormats = RecommendationQuery.aniListFormats,
   }) async {
     return query.withInferredSelections(availableTags);
   }
@@ -103,7 +109,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
 
     final prompt =
         '''
-Summarize this AniList taste profile in one concise sentence.
+Summarize this ${profile.serviceName} taste profile in one concise sentence.
 Favorite tags: ${profile.favoriteGenres.join(', ')}
 Favorite characters: ${profile.favoriteCharacters.take(settings.contextItemLimit).join(', ')}
 Favorite studios: ${profile.favoriteStudios.take(settings.contextItemLimit).join(', ')}
@@ -126,6 +132,9 @@ High rated examples: ${profile.highRatedItems.map((item) => item.title).take(set
   Future<RecommendationQuery> interpretRecommendationRequest(
     RecommendationQuery query, {
     required Iterable<String> availableTags,
+    String serviceName = 'AniList',
+    Iterable<String> allowedMediaTypes = RecommendationQuery.aniListMediaTypes,
+    Iterable<String> allowedFormats = RecommendationQuery.aniListFormats,
   }) async {
     final settings = await _runtimeSettings();
     if (!query.isActive ||
@@ -134,6 +143,9 @@ High rated examples: ${profile.highRatedItems.map((item) => item.title).take(set
       return fallback.interpretRecommendationRequest(
         query,
         availableTags: availableTags,
+        serviceName: serviceName,
+        allowedMediaTypes: allowedMediaTypes,
+        allowedFormats: allowedFormats,
       );
     }
 
@@ -144,13 +156,13 @@ High rated examples: ${profile.highRatedItems.map((item) => item.title).take(set
     ).join(', ');
     final prompt =
         '''
-You turn recommendation search text into structured AniList filters.
+You turn recommendation search text into structured $serviceName filters.
 Return JSON only. No markdown. No explanation.
 Return one object with exactly these keys: tags, formats, mediaTypes, includeAdult, searchText.
 Use empty arrays when no allowed tag, format, or media type clearly matches.
 Keep leftover natural-language terms in searchText.
-Allowed mediaTypes: ${RecommendationQuery.allMediaTypes.join(', ')}
-Allowed formats: ${RecommendationQuery.allFormats.join(', ')}
+Allowed mediaTypes: ${allowedMediaTypes.join(', ')}
+Allowed formats: ${allowedFormats.join(', ')}
 Allowed tags: $tagList
 User request: ${query.request}
 Currently selected tags: ${query.selectedTags.join(', ')}
@@ -170,11 +182,16 @@ Adult content selected: ${query.includeAdult}
         response,
         original: query,
         availableTags: availableTags,
+        allowedMediaTypes: allowedMediaTypes,
+        allowedFormats: allowedFormats,
       );
       if (interpreted == null) {
         return fallback.interpretRecommendationRequest(
           query,
           availableTags: availableTags,
+          serviceName: serviceName,
+          allowedMediaTypes: allowedMediaTypes,
+          allowedFormats: allowedFormats,
         );
       }
       return interpreted;
@@ -182,6 +199,9 @@ Adult content selected: ${query.includeAdult}
       return fallback.interpretRecommendationRequest(
         query,
         availableTags: availableTags,
+        serviceName: serviceName,
+        allowedMediaTypes: allowedMediaTypes,
+        allowedFormats: allowedFormats,
       );
     }
   }
@@ -338,6 +358,8 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
     String response, {
     required RecommendationQuery original,
     required Iterable<String> availableTags,
+    required Iterable<String> allowedMediaTypes,
+    required Iterable<String> allowedFormats,
   }) {
     Map<String, dynamic>? decoded;
     for (final candidate in _jsonObjects(response)) {
@@ -351,12 +373,14 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
     final tags = _stringList(
       decoded['tags'],
     ).where((tag) => availableTagSet.contains(tag)).toSet();
+    final allowedFormatSet = allowedFormats.toSet();
+    final allowedMediaTypeSet = allowedMediaTypes.toSet();
     final formats = _stringList(
       decoded['formats'],
-    ).where(RecommendationQuery.allFormats.contains).toSet();
+    ).where(allowedFormatSet.contains).toSet();
     final mediaTypes = _stringList(
       decoded['mediaTypes'],
-    ).where(RecommendationQuery.allMediaTypes.contains).toSet();
+    ).where(allowedMediaTypeSet.contains).toSet();
     final searchText = decoded['searchText']?.toString().trim();
 
     return original.copyWith(

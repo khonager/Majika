@@ -1,9 +1,11 @@
 import 'package:majika/core/models/media_item.dart';
 
 class RecommendationQuery {
-  static const allMediaTypes = ['ANIME', 'MANGA'];
+  static const aniListMediaTypes = ['ANIME', 'MANGA'];
+  static const steamMediaTypes = ['GAME'];
+  static const allMediaTypes = [...aniListMediaTypes, ...steamMediaTypes];
 
-  static const allFormats = [
+  static const aniListFormats = [
     'TV',
     'TV_SHORT',
     'MOVIE',
@@ -15,6 +17,17 @@ class RecommendationQuery {
     'NOVEL',
     'ONE_SHOT',
   ];
+
+  static const steamFormats = [
+    'SINGLE_PLAYER',
+    'MULTIPLAYER',
+    'CO_OP',
+    'ONLINE_CO_OP',
+    'CONTROLLER',
+    'STEAM_DECK',
+  ];
+
+  static const allFormats = [...aniListFormats, ...steamFormats];
 
   static const browsableTags = [
     'Action',
@@ -58,6 +71,22 @@ class RecommendationQuery {
     'Work',
     'School',
     'Hentai',
+    'RPG',
+    'Indie',
+    'Strategy',
+    'Simulation',
+    'Casual',
+    'Puzzle',
+    'Platformer',
+    'Shooter',
+    'Roguelike',
+    'Open World',
+    'Single-player',
+    'Multiplayer',
+    'Co-op',
+    'Online Co-op',
+    'Controller Support',
+    'Steam Deck',
   ];
 
   final String request;
@@ -188,6 +217,24 @@ class RecommendationQuery {
     if (_containsAny(text, ['one shot', 'oneshot', 'one-shot'])) {
       formats.add('ONE_SHOT');
     }
+    if (_containsAny(text, ['single player', 'single-player', 'solo'])) {
+      formats.add('SINGLE_PLAYER');
+    }
+    if (_containsAny(text, ['multiplayer', 'pvp'])) {
+      formats.add('MULTIPLAYER');
+    }
+    if (_containsAny(text, ['co op', 'co-op', 'coop'])) {
+      formats.add('CO_OP');
+    }
+    if (_containsAny(text, ['online co op', 'online co-op', 'online coop'])) {
+      formats.add('ONLINE_CO_OP');
+    }
+    if (_containsAny(text, ['controller', 'gamepad'])) {
+      formats.add('CONTROLLER');
+    }
+    if (_containsAny(text, ['steam deck', 'deck verified'])) {
+      formats.add('STEAM_DECK');
+    }
 
     return formats;
   }
@@ -210,6 +257,9 @@ class RecommendationQuery {
     }
     if (_containsAny(text, ['manga', 'comic', 'novel', 'light novel', 'ln'])) {
       types.add('MANGA');
+    }
+    if (_containsAny(text, ['game', 'games', 'steam', 'play', 'roguelike'])) {
+      types.add('GAME');
     }
 
     return types;
@@ -280,6 +330,10 @@ class RecommendationQuery {
       'nsfw',
       'ona',
       'ova',
+      'game',
+      'games',
+      'play',
+      'steam',
       'series',
       'show',
       'special',
@@ -335,6 +389,15 @@ class RecommendationQuery {
     'Hentai': ['hentai', 'explicit adult'],
     'Ecchi': ['ecchi', 'fanservice'],
     'Fantasy': ['fantasy', 'harry potter', 'wizard', 'witch', 'witchcraft'],
+    'RPG': ['role playing', 'role-playing', 'rpg'],
+    'Strategy': ['strategy', 'tactics', 'tactical'],
+    'Simulation': ['simulation', 'simulator', 'management'],
+    'Puzzle': ['puzzle', 'brain teaser'],
+    'Shooter': ['shooter', 'fps', 'third person shooter'],
+    'Roguelike': ['roguelike', 'roguelite', 'run based'],
+    'Open World': ['open world', 'sandbox'],
+    'Co-op': ['co op', 'co-op', 'coop'],
+    'Multiplayer': ['multiplayer', 'pvp'],
     'Magic': [
       'magic',
       'magical',

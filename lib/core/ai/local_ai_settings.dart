@@ -25,6 +25,7 @@ class LocalAiSettingsKeys {
   static const aiContextItems = 'settings.aiContextItems';
   static const localEndpoint = 'settings.localEndpoint';
   static const localServerModel = 'settings.localServerModel';
+  static const steamApiKey = 'settings.steamApiKey';
 }
 
 class LocalAiRuntimeSettings {

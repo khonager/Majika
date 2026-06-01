@@ -15,6 +15,11 @@ class TasteProfile {
   final int completedCount;
   final int currentCount;
   final DateTime importedAt;
+  final String serviceId;
+  final String serviceName;
+  final String displayName;
+  final String avatarUrl;
+  final String profileUrl;
 
   const TasteProfile({
     required this.userName,
@@ -31,7 +36,12 @@ class TasteProfile {
     required this.completedCount,
     required this.currentCount,
     required this.importedAt,
-  });
+    this.serviceId = 'com.majika.service.anilist',
+    this.serviceName = 'AniList',
+    String? displayName,
+    this.avatarUrl = '',
+    this.profileUrl = '',
+  }) : displayName = displayName ?? userName;
 
   bool get isEmpty => library.isEmpty;
 
@@ -54,6 +64,10 @@ class TasteProfile {
         ? '1 current title'
         : '$currentCount current titles';
 
-    return 'Built from ${library.length} AniList entries: $completed, $current, with strongest signals around $genres.';
+    if (serviceName == 'Steam') {
+      return 'Built from ${library.length} Steam games: $completed in library, $current recently active, with strongest signals around $genres.';
+    }
+
+    return 'Built from ${library.length} $serviceName entries: $completed, $current, with strongest signals around $genres.';
   }
 }

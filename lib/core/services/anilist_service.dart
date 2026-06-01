@@ -21,6 +21,45 @@ class AniListService implements MediaService {
   String get displayName => 'AniList';
 
   @override
+  String get connectTitle => 'Connect AniList';
+
+  @override
+  String get connectDescription =>
+      'Enter a public AniList username. Majika will read anime and manga lists, build a local taste profile, then rank current releases against it.';
+
+  @override
+  String get userNameHint => 'AniList username';
+
+  @override
+  String get userNameEmptyMessage => 'Enter an AniList username first.';
+
+  @override
+  String get importButtonLabel => 'Build profile';
+
+  @override
+  String get searchPlaceholder => 'Search a vibe, tag, format, or request';
+
+  @override
+  String get openTooltipLabel => 'Open on AniList';
+
+  @override
+  List<String> get supportedMediaTypes => RecommendationQuery.aniListMediaTypes;
+
+  @override
+  List<String> get supportedFormats => RecommendationQuery.aniListFormats;
+
+  @override
+  bool get supportsAdultContent => true;
+
+  @override
+  Future<ServiceUserProfile?> fetchUserProfile(String userName) async {
+    return ServiceUserProfile(
+      userName: userName,
+      profileUrl: 'https://anilist.co/user/$userName',
+    );
+  }
+
+  @override
   Future<List<MediaItem>> fetchUserLibrary(String userName) async {
     final anime = await _fetchUserCollection(userName, 'ANIME');
     final manga = await _fetchUserCollection(userName, 'MANGA');
@@ -50,8 +89,10 @@ class AniListService implements MediaService {
   ) async {
     final mediaTypes = query.effectiveMediaTypes();
     final typesToSearch = mediaTypes.isEmpty
-        ? RecommendationQuery.allMediaTypes
-        : mediaTypes.toList();
+        ? RecommendationQuery.aniListMediaTypes
+        : mediaTypes
+              .where(RecommendationQuery.aniListMediaTypes.contains)
+              .toList();
     final results = <MediaItem>[];
 
     for (final type in typesToSearch) {
