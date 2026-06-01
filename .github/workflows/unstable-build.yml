@@ -8,7 +8,7 @@ on:
 env:
   JAVA_VERSION: "17"
   APP_NAME: Majika
-  CHANNEL: unstable
+  RELEASE_CHANNEL: unstable
 
 permissions:
   contents: write
@@ -82,14 +82,14 @@ jobs:
       - name: Build APK
         run: |
           flutter build apk --release \
-            --build-name="$APP_VERSION-${CHANNEL}.${{ github.run_number }}" \
+            --build-name="$APP_VERSION-${RELEASE_CHANNEL}.${{ github.run_number }}" \
             --build-number="${{ github.run_number }}" \
             --dart-define=IS_DEV=true
 
       - name: Build App Bundle
         run: |
           flutter build appbundle --release \
-            --build-name="$APP_VERSION-${CHANNEL}.${{ github.run_number }}" \
+            --build-name="$APP_VERSION-${RELEASE_CHANNEL}.${{ github.run_number }}" \
             --build-number="${{ github.run_number }}" \
             --dart-define=IS_DEV=true
 
@@ -97,9 +97,9 @@ jobs:
         run: |
           mkdir -p release
           cp build/app/outputs/flutter-apk/app-release.apk \
-            "release/${APP_NAME}-${CHANNEL}-${{ github.run_number }}-android.apk"
+            "release/${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-android.apk"
           cp build/app/outputs/bundle/release/app-release.aab \
-            "release/${APP_NAME}-${CHANNEL}-${{ github.run_number }}-android.aab"
+            "release/${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-android.aab"
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
@@ -138,7 +138,7 @@ jobs:
         run: flutter build linux --release --dart-define=IS_DEV=true
 
       - name: Compress Linux build
-        run: tar -czf "${APP_NAME}-${CHANNEL}-${{ github.run_number }}-linux-x64.tar.gz" -C build/linux/x64/release/bundle .
+        run: tar -czf "${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-linux-x64.tar.gz" -C build/linux/x64/release/bundle .
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
@@ -172,7 +172,7 @@ jobs:
         run: flutter build windows --release --dart-define=IS_DEV=true
 
       - name: Compress Windows build
-        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "${{ env.APP_NAME }}-${{ env.CHANNEL }}-${{ github.run_number }}-windows-x64.zip"
+        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "${{ env.APP_NAME }}-${{ env.RELEASE_CHANNEL }}-${{ github.run_number }}-windows-x64.zip"
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
@@ -212,7 +212,7 @@ jobs:
             echo "::error::Could not find macOS .app bundle"
             exit 1
           fi
-          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "${APP_NAME}-${CHANNEL}-${{ github.run_number }}-macos.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-macos.zip"
 
       - name: Build iOS unsigned
         run: flutter build ios --release --no-codesign --dart-define=IS_DEV=true
@@ -221,7 +221,7 @@ jobs:
         run: |
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
-          zip -r "${APP_NAME}-${CHANNEL}-${{ github.run_number }}-ios-unsigned.ipa" Payload
+          zip -r "${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-ios-unsigned.ipa" Payload
 
       - name: Upload Apple artifacts
         uses: actions/upload-artifact@v4
@@ -254,7 +254,7 @@ jobs:
         run: flutter build web --release --dart-define=IS_DEV=true
 
       - name: Compress Web build
-        run: tar -czf "${APP_NAME}-${CHANNEL}-${{ github.run_number }}-web.tar.gz" -C build/web .
+        run: tar -czf "${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-web.tar.gz" -C build/web .
 
       - name: Upload Web artifact
         uses: actions/upload-artifact@v4
