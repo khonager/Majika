@@ -83,4 +83,4 @@ To create the Firebase plist secret:
 base64 -i ios/Runner/GoogleService-Info.plist | pbcopy
 ```
 
-Also set `APP_STORE_APP_ID` in `codemagic.yaml` or in Codemagic after the Majika app exists in App Store Connect. The iOS bundle id is `de.khonager.majika`.
+The iOS bundle id used by Codemagic is `de.khonager.majika`.

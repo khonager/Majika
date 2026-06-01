@@ -15,8 +15,6 @@ workflows:
 
       vars:
         BUNDLE_ID: "de.khonager.majika"
-        # Set this to Majika's App Store Connect app id in Codemagic.
-        APP_STORE_APP_ID: ""
 
       flutter: stable
       xcode: latest
