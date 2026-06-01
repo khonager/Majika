@@ -1,11 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:majika/core/ai/local_ai_settings.dart';
+import 'package:majika/core/firebase/firebase_profile_service.dart';
 import 'package:majika/ui/profile/profile_screen.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
 import 'package:majika/ui/shared/glass_panel.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 const _downloadableLocalAiModels = [
   _DownloadableModel(
@@ -22,6 +26,7 @@ const _downloadableLocalAiModels = [
         'Best current default for this SDK: compact enough for newer phones while staying stronger than tiny fallback models.',
     modelType: ModelType.gemmaIt,
     fileType: ModelFileType.task,
+    needsHuggingFaceToken: true,
   ),
   _DownloadableModel(
     id: 'gemma3n_e2b_it',
@@ -38,6 +43,7 @@ const _downloadableLocalAiModels = [
     modelType: ModelType.gemmaIt,
     fileType: ModelFileType.task,
     isAdvanced: true,
+    needsHuggingFaceToken: true,
   ),
   _DownloadableModel(
     id: 'gemma3n_e4b_it',
@@ -54,6 +60,7 @@ const _downloadableLocalAiModels = [
     modelType: ModelType.gemmaIt,
     fileType: ModelFileType.task,
     isAdvanced: true,
+    needsHuggingFaceToken: true,
   ),
   _DownloadableModel(
     id: 'qwen3_0_6b',
@@ -145,6 +152,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _localServerModelController = TextEditingController(
     text: defaultLocalAiModel,
   );
+  final _huggingFaceTokenController = TextEditingController();
+  Timer? _huggingFaceTokenSyncTimer;
 
   bool get _hasDownloadedModel =>
       _downloadedModelId != null || _downloadedModelName != null;
@@ -243,7 +252,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _localServerModelController.text =
           prefs.getString(LocalAiSettingsKeys.localServerModel) ??
           _localServerModelController.text;
+      _huggingFaceTokenController.text =
+          prefs.getString(LocalAiSettingsKeys.huggingFaceToken) ?? '';
     });
+    _loadProfileHuggingFaceTokenIfNeeded();
   }
 
   String _modeFromLegacyProvider(String? provider) {
@@ -284,6 +296,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> _loadProfileHuggingFaceTokenIfNeeded() async {
+    if (_huggingFaceTokenController.text.trim().isNotEmpty) return;
+    try {
+      final profile = await const FirebaseProfileService().fetchProfile();
+      final token = profile?.huggingFaceToken?.trim();
+      if (!mounted || token == null || token.isEmpty) return;
+      setState(() => _huggingFaceTokenController.text = token);
+      await _saveString(LocalAiSettingsKeys.huggingFaceToken, token);
+    } catch (_) {
+      // Profile sync is optional; local-only use should not be blocked.
+    }
+  }
+
+  Future<void> _saveHuggingFaceToken(String value) async {
+    await _saveString(LocalAiSettingsKeys.huggingFaceToken, value.trim());
+    _huggingFaceTokenSyncTimer?.cancel();
+    _huggingFaceTokenSyncTimer = Timer(const Duration(milliseconds: 700), () {
+      unawaited(_syncHuggingFaceTokenToProfile(value));
+    });
+  }
+
+  Future<void> _syncHuggingFaceTokenToProfile(String value) async {
+    try {
+      await const FirebaseProfileService().saveHuggingFaceTokenIfSignedIn(
+        value,
+      );
+    } catch (_) {
+      // Keep token local if profile sync is unavailable or the user is signed out.
+    }
+  }
+
   Future<void> _downloadRecommendedModel() async {
     if (_isDownloadingModel) return;
 
@@ -293,15 +336,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     try {
-      await FlutterGemma.initialize();
       final modelToDownload = _effectiveSelectedModel;
+      final huggingFaceToken = _huggingFaceTokenController.text.trim();
+      if (modelToDownload.needsHuggingFaceToken && huggingFaceToken.isEmpty) {
+        throw const _HuggingFaceTokenRequiredException();
+      }
+
+      await FlutterGemma.initialize(
+        huggingFaceToken: huggingFaceToken.isEmpty ? null : huggingFaceToken,
+      );
       final installation =
           await FlutterGemma.installModel(
-            modelType: modelToDownload.modelType,
-            fileType: modelToDownload.fileType,
-          ).fromNetwork(modelToDownload.url).withProgress((progress) {
-            if (mounted) setState(() => _downloadProgress = progress / 100);
-          }).install();
+                modelType: modelToDownload.modelType,
+                fileType: modelToDownload.fileType,
+              )
+              .fromNetwork(
+                modelToDownload.url,
+                token: modelToDownload.needsHuggingFaceToken
+                    ? huggingFaceToken
+                    : null,
+              )
+              .withProgress((progress) {
+                if (mounted) setState(() => _downloadProgress = progress / 100);
+              })
+              .install();
 
       if (!mounted) return;
       setState(() {
@@ -320,7 +378,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
     } catch (error) {
       if (!mounted) return;
-      showErrorToast(context, 'Could not download model: $error');
+      final message = error is _HuggingFaceTokenRequiredException
+          ? 'Add a Hugging Face token before downloading this gated model.'
+          : 'Could not download model: $error';
+      showErrorToast(context, message);
     } finally {
       if (mounted) {
         setState(() => _isDownloadingModel = false);
@@ -330,8 +391,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    _huggingFaceTokenSyncTimer?.cancel();
     _localEndpointController.dispose();
     _localServerModelController.dispose();
+    _huggingFaceTokenController.dispose();
     super.dispose();
   }
 
@@ -636,6 +699,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         model.providerLabel,
                       );
                     },
+                    huggingFaceTokenController: _huggingFaceTokenController,
+                    onHuggingFaceTokenChanged: _saveHuggingFaceToken,
                     onDownload: _downloadRecommendedModel,
                   ),
                 if (_usesOnDeviceAi)
@@ -860,6 +925,7 @@ class _DownloadableModel {
   final ModelType modelType;
   final ModelFileType fileType;
   final bool isAdvanced;
+  final bool needsHuggingFaceToken;
 
   const _DownloadableModel({
     required this.id,
@@ -873,6 +939,7 @@ class _DownloadableModel {
     required this.modelType,
     this.fileType = ModelFileType.task,
     this.isAdvanced = false,
+    this.needsHuggingFaceToken = false,
   });
 
   String get url {
@@ -898,6 +965,10 @@ class _DownloadableModel {
   }
 }
 
+class _HuggingFaceTokenRequiredException implements Exception {
+  const _HuggingFaceTokenRequiredException();
+}
+
 class _ModelDownloadCard extends StatelessWidget {
   final List<_DownloadableModel> models;
   final _DownloadableModel selectedModel;
@@ -906,6 +977,8 @@ class _ModelDownloadCard extends StatelessWidget {
   final String? downloadedId;
   final String? downloadedName;
   final ValueChanged<_DownloadableModel> onModelSelected;
+  final TextEditingController huggingFaceTokenController;
+  final ValueChanged<String> onHuggingFaceTokenChanged;
   final VoidCallback onDownload;
 
   const _ModelDownloadCard({
@@ -916,6 +989,8 @@ class _ModelDownloadCard extends StatelessWidget {
     required this.downloadedId,
     required this.downloadedName,
     required this.onModelSelected,
+    required this.huggingFaceTokenController,
+    required this.onHuggingFaceTokenChanged,
     required this.onDownload,
   });
 
@@ -1049,6 +1124,13 @@ class _ModelDownloadCard extends StatelessWidget {
             selectedModel.description,
             style: const TextStyle(color: Colors.white70, height: 1.35),
           ),
+          if (selectedModel.needsHuggingFaceToken) ...[
+            const SizedBox(height: 12),
+            _HuggingFaceTokenPanel(
+              controller: huggingFaceTokenController,
+              onChanged: onHuggingFaceTokenChanged,
+            ),
+          ],
           if (isDownloading || progress != null) ...[
             const SizedBox(height: 12),
             LinearProgressIndicator(value: progress),
@@ -1092,6 +1174,87 @@ class _StatChip extends StatelessWidget {
       ),
     );
   }
+}
+
+class _HuggingFaceTokenPanel extends StatelessWidget {
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  const _HuggingFaceTokenPanel({
+    required this.controller,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.key_rounded, color: Colors.white70, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Hugging Face token',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _openHuggingFaceTokens,
+                icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                label: const Text('Tokens'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            key: const ValueKey('hugging-face-token'),
+            controller: controller,
+            obscureText: true,
+            onChanged: onChanged,
+            decoration: InputDecoration(
+              hintText: 'hf_...',
+              prefixIcon: const Icon(Icons.lock_outline_rounded),
+              filled: true,
+              fillColor: Colors.black.withValues(alpha: 0.22),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 12,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Needed for gated Gemma downloads. Create a Hugging Face account, accept the model license, then create a fine-grained token with read access. Majika saves it locally and also adds it to your profile if you are signed in.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Colors.white70,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Future<void> _openHuggingFaceTokens() async {
+  final uri = Uri.parse('https://huggingface.co/settings/tokens');
+  await launchUrl(uri, mode: LaunchMode.externalApplication);
 }
 
 class _SwitchRow extends StatelessWidget {

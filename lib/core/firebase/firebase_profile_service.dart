@@ -36,6 +36,7 @@ class AppUserProfile {
   final String email;
   final String displayName;
   final String? steamProfile;
+  final String? huggingFaceToken;
   final DateTime? updatedAt;
 
   const AppUserProfile({
@@ -43,6 +44,7 @@ class AppUserProfile {
     required this.email,
     required this.displayName,
     this.steamProfile,
+    this.huggingFaceToken,
     this.updatedAt,
   });
 
@@ -60,6 +62,9 @@ class AppUserProfile {
           : displayName,
       steamProfile: json?['linkedAccounts'] is Map
           ? (json!['linkedAccounts'] as Map)['steam']?.toString()
+          : null,
+      huggingFaceToken: json?['tokens'] is Map
+          ? (json!['tokens'] as Map)['huggingFace']?.toString()
           : null,
       updatedAt: updatedAt is Timestamp
           ? updatedAt.toDate()
@@ -165,6 +170,22 @@ class FirebaseProfileService {
     if (displayName.trim().isNotEmpty) {
       await user.updateDisplayName(displayName.trim());
     }
+  }
+
+  Future<bool> saveHuggingFaceTokenIfSignedIn(String token) async {
+    final trimmed = token.trim();
+    if (_useRest) {
+      return _restClient.saveHuggingFaceTokenIfSignedIn(trimmed);
+    }
+    if (!isConfigured) return false;
+    final user = _auth.currentUser;
+    if (user == null) return false;
+
+    await _profileDoc(user.uid).set({
+      'tokens': {'huggingFace': trimmed},
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    return true;
   }
 
   Future<void> signOut() async {
@@ -279,6 +300,31 @@ class _FirebaseRestProfileClient {
     await _saveSession(
       session.copyWith(displayName: displayName.trim(), idToken: _sessionToken),
     );
+  }
+
+  Future<bool> saveHuggingFaceTokenIfSignedIn(String token) async {
+    final session = await _requireSessionOrNull();
+    if (session == null) return false;
+    final now = DateTime.now().toUtc();
+    final fields = {
+      'tokens': {
+        'mapValue': {
+          'fields': {'huggingFace': _firestoreString(token)},
+        },
+      },
+      'updatedAt': {'timestampValue': now.toIso8601String()},
+    };
+
+    final response = await http.patch(
+      _firestoreDocumentUri(session.uid),
+      headers: {
+        'Authorization': 'Bearer ${await currentIdToken()}',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'fields': fields}),
+    );
+    _throwForFirebaseError(response);
+    return true;
   }
 
   Future<void> signOut() async {

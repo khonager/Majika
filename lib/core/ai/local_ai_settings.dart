@@ -27,6 +27,7 @@ class LocalAiSettingsKeys {
   static const selectedModelName = 'settings.selectedModelName';
   static const downloadedModelId = 'settings.downloadedModelId';
   static const downloadedModelName = 'settings.downloadedModelName';
+  static const huggingFaceToken = 'settings.huggingFaceToken';
   static const imageQuality = 'settings.imageQuality';
   static const aiContextItems = 'settings.aiContextItems';
   static const localEndpoint = 'settings.localEndpoint';

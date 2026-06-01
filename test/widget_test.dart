@@ -479,6 +479,8 @@ void main() {
     expect(find.text('Gemma 3 1B IT'), findsOneWidget);
     expect(find.text('586 MB · Small Google text model'), findsOneWidget);
     expect(find.text('FunctionGemma 270M'), findsNothing);
+    expect(find.text('Hugging Face token'), findsOneWidget);
+    expect(find.byKey(const ValueKey('hugging-face-token')), findsOneWidget);
 
     expect(find.text('Use local model when available'), findsNothing);
     expect(find.text('AI search interpretation'), findsOneWidget);
@@ -508,6 +510,7 @@ void main() {
     await tester.tap(find.text('Qwen 2.5 1.5B Instruct').last);
     await tester.pumpAndSettle();
     expect(find.text('1.6 GB · Advanced public text model'), findsOneWidget);
+    expect(find.text('Hugging Face token'), findsNothing);
 
     await tester.scrollUntilVisible(
       find.text('Advanced model choice'),
@@ -557,6 +560,36 @@ void main() {
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('settings persists Hugging Face token locally', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+
+    await tester.scrollUntilVisible(
+      find.text('Local AI'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Fallback rules only'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Automatic on-device').last);
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('hugging-face-token')),
+      'hf_test_token',
+    );
+    await tester.pump(const Duration(milliseconds: 800));
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+      prefs.getString(LocalAiSettingsKeys.huggingFaceToken),
+      'hf_test_token',
+    );
   });
 
   testWidgets('settings shows local server fields only for external mode', (
