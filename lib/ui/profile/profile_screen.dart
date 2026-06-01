@@ -1,4 +1,3 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:majika/core/firebase/firebase_bootstrap.dart';
 import 'package:majika/core/firebase/firebase_profile_service.dart';
@@ -60,9 +59,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         context,
         _isCreatingAccount ? 'Account created.' : 'Signed in.',
       );
-    } on FirebaseAuthException catch (error) {
-      if (!mounted) return;
-      showErrorToast(context, error.message ?? error.code);
     } catch (error) {
       if (!mounted) return;
       showErrorToast(context, 'Could not sign in: $error');
@@ -142,7 +138,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             if (!_service.isConfigured)
               _SetupRequiredCard(error: FirebaseBootstrap.lastError)
             else
-              StreamBuilder<User?>(
+              StreamBuilder<AppAuthUser?>(
                 stream: _service.authStateChanges(),
                 builder: (context, snapshot) {
                   final user = snapshot.data;
@@ -156,10 +152,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         _steamProfileController.text =
                             profile.steamProfile ?? '';
                       } else {
-                        _displayNameController.text =
-                            user.displayName ??
-                            user.email?.split('@').first ??
-                            'Majika user';
+                        _displayNameController.text = user.fallbackDisplayName;
                       }
                       return _buildSignedInCard(user: user, profile: profile);
                     },
@@ -245,7 +238,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildSignedInCard({required User user, AppUserProfile? profile}) {
+  Widget _buildSignedInCard({
+    required AppAuthUser user,
+    AppUserProfile? profile,
+  }) {
     final theme = Theme.of(context);
     final updatedAt = profile?.updatedAt;
     return GlassPanel(
@@ -274,7 +270,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     Text(
                       profile?.displayName ??
                           user.displayName ??
-                          user.email ??
+                          (user.email.isEmpty ? null : user.email) ??
                           'Majika user',
                       style: theme.textTheme.titleLarge?.copyWith(
                         color: Colors.white,
@@ -282,7 +278,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                     Text(
-                      user.email ?? user.uid,
+                      user.email.isEmpty ? user.uid : user.email,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: Colors.white60,
                       ),

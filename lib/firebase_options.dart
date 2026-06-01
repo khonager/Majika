@@ -29,10 +29,7 @@ class DefaultFirebaseOptions {
       case TargetPlatform.windows:
         return windows;
       case TargetPlatform.linux:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for linux - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return linux;
       default:
         throw UnsupportedError(
           'DefaultFirebaseOptions are not supported for this platform.',
@@ -84,5 +81,15 @@ class DefaultFirebaseOptions {
     authDomain: 'majika-ai-recommendation.firebaseapp.com',
     storageBucket: 'majika-ai-recommendation.firebasestorage.app',
     measurementId: 'G-4NM4P8EVP9',
+  );
+
+  static const FirebaseOptions linux = FirebaseOptions(
+    apiKey: 'AIzaSyC5moPZPpe5LTTu5oub-gMPEgoVmb-ItDM',
+    appId: '1:666859019528:web:2469a5468e377aaf1da0bd',
+    messagingSenderId: '666859019528',
+    projectId: 'majika-ai-recommendation',
+    authDomain: 'majika-ai-recommendation.firebaseapp.com',
+    storageBucket: 'majika-ai-recommendation.firebasestorage.app',
+    measurementId: 'G-D9TXSQF1G8',
   );
 }
