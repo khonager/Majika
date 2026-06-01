@@ -85,5 +85,4 @@ class DefaultFirebaseOptions {
     storageBucket: 'majika-ai-recommendation.firebasestorage.app',
     measurementId: 'G-4NM4P8EVP9',
   );
-
 }
