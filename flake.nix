@@ -49,7 +49,6 @@
             flutter
             jdk17
             nodejs_20
-            firebase-tools
             androidSdk
             
             # Additional tools often needed for Flutter/Linux compilation
@@ -67,19 +66,23 @@
           CHROME_EXECUTABLE = "${pkgs.google-chrome}/bin/google-chrome-stable";
 
           shellHook = ''
-            export PATH="$PATH:$ANDROID_HOME/tools:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/8.0/bin:$HOME/.pub-cache/bin"
+            export NPM_CONFIG_PREFIX="$PWD/.dart_tool/npm-global"
+            export PATH="$PATH:$ANDROID_HOME/tools:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/8.0/bin:$HOME/.pub-cache/bin:$NPM_CONFIG_PREFIX/bin"
 
-            if ! command -v flutterfire >/dev/null 2>&1; then
-              echo "Installing flutterfire_cli into Dart pub cache..."
-              dart pub global activate flutterfire_cli >/dev/null
+            echo "Ensuring flutterfire_cli is available..."
+            dart pub global activate flutterfire_cli 1.3.2 >/dev/null
+
+            if ! command -v firebase >/dev/null 2>&1; then
+              echo "Installing firebase-tools into project npm cache..."
+              npm install --global firebase-tools@14.26.0 >/dev/null
             fi
 
             echo "📱 Flutter and Android Development Environment loaded!"
             echo "Environment variables set:"
             echo "  ANDROID_HOME=$ANDROID_HOME"
             echo "  JAVA_HOME=$JAVA_HOME"
-            echo "  Firebase CLI=$(firebase --version)"
-            echo "  FlutterFire CLI=$(flutterfire --version)"
+            echo "  Firebase CLI=$(command -v firebase)"
+            echo "  FlutterFire CLI=$(command -v flutterfire)"
             echo ""
             echo "Run 'flutter doctor' to verify the installation."
           '';

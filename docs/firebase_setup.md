@@ -12,10 +12,17 @@ In the Firebase Console for your project:
 
 ## 2. Connect the Flutter app
 
+If you are using the Nix dev shell, enter it first:
+
+```sh
+nix develop
+```
+
+The shell makes `flutterfire`, `firebase`, Node.js 20, Flutter, and Android tooling available. On first entry it may install `flutterfire_cli` into your Dart pub cache and `firebase-tools` into `.dart_tool/npm-global`.
+
 Recommended path:
 
 ```sh
-dart pub global activate flutterfire_cli
 firebase login
 flutterfire configure
 ```
