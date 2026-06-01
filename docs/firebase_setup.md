@@ -83,6 +83,6 @@ To create the Firebase plist secret:
 base64 -i ios/Runner/GoogleService-Info.plist | pbcopy
 ```
 
-The iOS bundle id used by Codemagic is `de.khonager.majika`.
+The iOS bundle id used by Codemagic is `de.khonager.majika`. The iOS deployment target is 16.0 because `flutter_gemma` depends on MediaPipe GenAI pods that require iOS 16.
 
 For the first TestFlight build, make sure Apple Developer/App Store Connect has an app identifier and app record for `de.khonager.majika`. The Codemagic workflow runs `app-store-connect fetch-signing-files --create`, so it can create/fetch the App Store provisioning profile, but the bundle id and App Store app still need to exist under your Apple team.

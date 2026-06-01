@@ -50,6 +50,7 @@ jobs:
     name: Build Android APK
     needs: analyze
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -84,6 +85,9 @@ jobs:
           flutter build apk --release \
             --build-name="$APP_VERSION" \
             --build-number="${{ github.run_number }}"
+
+      - name: Stop Gradle daemon
+        run: cd android && ./gradlew --stop
 
       - name: Build App Bundle
         run: |
