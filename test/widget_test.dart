@@ -47,6 +47,59 @@ void main() {
     },
   );
 
+  testWidgets('mobile home uses anchored liquid rail and mini player', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
+    );
+
+    expect(find.byKey(const ValueKey('mobile-liquid-rail')), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('mobile-liquid-rail')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('mobile-current-activity-glass')),
+      findsOneWidget,
+    );
+    expect(find.text('Seen Mystery'), findsOneWidget);
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -180));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Best Match'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('mobile rail settings button opens settings', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
+    );
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Settings'), findsOneWidget);
+    expect(find.text('Tune the reading space'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('search request and chips refill recommendations', (
     WidgetTester tester,
   ) async {
