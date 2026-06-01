@@ -105,6 +105,28 @@ class RecommendationQuery {
     this.includeAdult = false,
   });
 
+  factory RecommendationQuery.fromJson(Map<String, dynamic> json) {
+    return RecommendationQuery(
+      request: json['request'] as String? ?? '',
+      selectedTags: _jsonStringSet(json['selectedTags']),
+      aiSelectedTags: _jsonStringSet(json['aiSelectedTags']),
+      mediaTypes: _jsonStringSet(json['mediaTypes']),
+      formats: _jsonStringSet(json['formats']),
+      includeAdult: json['includeAdult'] as bool? ?? false,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'request': request,
+      'selectedTags': selectedTags.toList(),
+      'aiSelectedTags': aiSelectedTags.toList(),
+      'mediaTypes': mediaTypes.toList(),
+      'formats': formats.toList(),
+      'includeAdult': includeAdult,
+    };
+  }
+
   bool get isActive =>
       request.trim().isNotEmpty ||
       selectedTags.isNotEmpty ||
@@ -258,7 +280,15 @@ class RecommendationQuery {
     if (_containsAny(text, ['manga', 'comic', 'novel', 'light novel', 'ln'])) {
       types.add('MANGA');
     }
-    if (_containsAny(text, ['game', 'games', 'steam', 'play', 'roguelike'])) {
+    if (_containsAny(text, [
+      'computer',
+      'game',
+      'games',
+      'pc',
+      'steam',
+      'play',
+      'roguelike',
+    ])) {
       types.add('GAME');
     }
 
@@ -359,6 +389,15 @@ class RecommendationQuery {
     return value.toLowerCase().replaceAll(RegExp(r'[_-]+'), ' ').trim();
   }
 
+  static Set<String> _jsonStringSet(Object? value) {
+    if (value is! List) return {};
+    return {
+      for (final item in value)
+        if (item != null && item.toString().trim().isNotEmpty)
+          item.toString().trim(),
+    };
+  }
+
   static const Map<String, List<String>> _fallbackTagHints = {
     'Romance': ['romance', 'romantic', 'love story', 'relationship'],
     'Time Manipulation': [
@@ -385,7 +424,15 @@ class RecommendationQuery {
     'Sci-Fi': ['science fiction', 'sci fi', 'sci-fi', 'future tech'],
     'Slice of Life': ['slice of life', 'cozy', 'chill'],
     'Horror': ['horror', 'scary', 'creepy'],
-    'Comedy': ['funny', 'comedy', 'comedic'],
+    'Comedy': [
+      'entertaining',
+      'funny',
+      'comedy',
+      'comedic',
+      'laugh',
+      'laughing',
+      'laugh a lot',
+    ],
     'Hentai': ['hentai', 'explicit adult'],
     'Ecchi': ['ecchi', 'fanservice'],
     'Fantasy': ['fantasy', 'harry potter', 'wizard', 'witch', 'witchcraft'],

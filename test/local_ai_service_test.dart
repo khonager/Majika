@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:majika/core/ai/local_ai_settings.dart';
@@ -8,8 +9,13 @@ import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation.dart';
 import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/taste_profile.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   test(
     'flutter gemma service turns model JSON into query selections',
     () async {
@@ -301,6 +307,45 @@ void main() {
       contains('"requestTags":["Fantasy","Magic","School"]'),
     );
   });
+
+  test('local AI service can choose a home recommendation', () async {
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        expect(prompt, contains('across all services'));
+        expect(prompt, contains('"service":"Steam"'));
+        return '{"id":"steam_1","reason":"Best PC fit."}';
+      },
+    );
+
+    final chosen = await service.chooseHomeRecommendation(
+      [_profile()],
+      [
+        _recommendation('anilist_1', 'Anime Pick'),
+        _recommendation(
+          'steam_1',
+          'Game Pick',
+          tags: const ['Comedy'],
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+        ),
+      ],
+      query: const RecommendationQuery(request: 'funny game on pc'),
+    );
+
+    expect(chosen?.item.id, 'steam_1');
+    expect(chosen?.isAiPick, isTrue);
+    expect(chosen?.reason, 'Best PC fit.');
+  });
+
+  test('local AI runtime settings resolves backend preference', () async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(LocalAiSettingsKeys.localBackend, localAiBackendGpu);
+
+    final settings = await LocalAiRuntimeSettings.load();
+
+    expect(settings.backend, localAiBackendGpu);
+    expect(settings.preferredBackend, PreferredBackend.gpu);
+  });
 }
 
 TasteProfile _profile() {
@@ -326,9 +371,18 @@ Recommendation _recommendation(
   String id,
   String title, {
   List<String> tags = const ['Mystery'],
+  String mediaType = 'ANIME',
+  String sourceId = 'com.majika.service.anilist',
 }) {
   return Recommendation(
-    item: MediaItem(id: id, title: title, coverUrl: '', tags: tags),
+    item: MediaItem(
+      id: id,
+      title: title,
+      coverUrl: '',
+      tags: tags,
+      mediaType: mediaType,
+      sourceId: sourceId,
+    ),
     matchScore: 80,
     reason: 'Reason',
     signals: const ['Mystery'],

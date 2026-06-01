@@ -1,3 +1,4 @@
+import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const externalLocalAiProvider = 'External local server';
@@ -5,6 +6,10 @@ const fallbackRulesProvider = 'Fallback rules only';
 const localAiModeOnDevice = 'Automatic on-device';
 const localAiModeExternalServer = externalLocalAiProvider;
 const localAiModeRulesOnly = fallbackRulesProvider;
+const localAiBackendAuto = 'auto';
+const localAiBackendCpu = 'cpu';
+const localAiBackendGpu = 'gpu';
+const localAiBackendNpu = 'npu';
 const defaultLocalAiEndpoint = 'http://127.0.0.1:52625/v1/chat/completions';
 const defaultLocalAiModel = 'gemma3:4b';
 
@@ -16,6 +21,7 @@ class LocalAiSettingsKeys {
   static const useLocalAi = 'settings.useLocalAi';
   static const useAiForSearch = 'settings.useAiForSearch';
   static const localAiMode = 'settings.localAiMode';
+  static const localBackend = 'settings.localBackend';
   static const localAiProvider = 'settings.localAiProvider';
   static const selectedModelId = 'settings.selectedModelId';
   static const selectedModelName = 'settings.selectedModelName';
@@ -35,6 +41,7 @@ class LocalAiRuntimeSettings {
   final String provider;
   final String endpoint;
   final String serverModel;
+  final String backend;
   final double contextItems;
 
   const LocalAiRuntimeSettings({
@@ -44,6 +51,7 @@ class LocalAiRuntimeSettings {
     required this.provider,
     required this.endpoint,
     required this.serverModel,
+    this.backend = localAiBackendAuto,
     required this.contextItems,
   });
 
@@ -54,6 +62,7 @@ class LocalAiRuntimeSettings {
       provider = fallbackRulesProvider,
       endpoint = defaultLocalAiEndpoint,
       serverModel = defaultLocalAiModel,
+      backend = localAiBackendAuto,
       contextItems = 24;
 
   bool get usesExternalServer =>
@@ -65,6 +74,15 @@ class LocalAiRuntimeSettings {
       useLocalAi && mode == localAiModeOnDevice && !usesExternalServer;
 
   int get contextItemLimit => contextItems.round().clamp(8, 48);
+
+  PreferredBackend? get preferredBackend {
+    return switch (backend) {
+      localAiBackendCpu => PreferredBackend.cpu,
+      localAiBackendGpu => PreferredBackend.gpu,
+      localAiBackendNpu => PreferredBackend.npu,
+      _ => null,
+    };
+  }
 
   Uri get chatCompletionsUri {
     final parsed = Uri.parse(endpoint.trim());
@@ -104,6 +122,9 @@ class LocalAiRuntimeSettings {
       serverModel:
           prefs.getString(LocalAiSettingsKeys.localServerModel) ??
           defaultLocalAiModel,
+      backend:
+          prefs.getString(LocalAiSettingsKeys.localBackend) ??
+          localAiBackendAuto,
       contextItems: prefs.getDouble(LocalAiSettingsKeys.aiContextItems) ?? 24,
     );
   }

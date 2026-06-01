@@ -30,6 +30,12 @@ abstract class LocalAiService {
     List<Recommendation> recommendations, {
     required RecommendationQuery query,
   });
+
+  Future<Recommendation?> chooseHomeRecommendation(
+    List<TasteProfile> profiles,
+    List<Recommendation> recommendations, {
+    required RecommendationQuery query,
+  });
 }
 
 class DeterministicLocalAiService implements LocalAiService {
@@ -65,6 +71,15 @@ class DeterministicLocalAiService implements LocalAiService {
   @override
   Future<Recommendation?> chooseTopRecommendation(
     TasteProfile profile,
+    List<Recommendation> recommendations, {
+    required RecommendationQuery query,
+  }) async {
+    return recommendations.isEmpty ? null : recommendations.first;
+  }
+
+  @override
+  Future<Recommendation?> chooseHomeRecommendation(
+    List<TasteProfile> profiles,
     List<Recommendation> recommendations, {
     required RecommendationQuery query,
   }) async {
@@ -264,7 +279,7 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
 
     final model = await FlutterGemma.getActiveModel(
       maxTokens: maxTokens,
-      preferredBackend: PreferredBackend.cpu,
+      preferredBackend: settings.preferredBackend,
     );
     try {
       final chat = await model.createChat(
@@ -566,6 +581,87 @@ Options: ${jsonEncode(options)}
     } catch (_) {
       return fallback.chooseTopRecommendation(
         profile,
+        recommendations,
+        query: query,
+      );
+    }
+  }
+
+  @override
+  Future<Recommendation?> chooseHomeRecommendation(
+    List<TasteProfile> profiles,
+    List<Recommendation> recommendations, {
+    required RecommendationQuery query,
+  }) async {
+    if (recommendations.isEmpty) return null;
+    final settings = await _runtimeSettings();
+    if (!settings.useLocalAi && textGenerator == null) {
+      return fallback.chooseHomeRecommendation(
+        profiles,
+        recommendations,
+        query: query,
+      );
+    }
+
+    final optionLimit = (settings.contextItemLimit / 4).round().clamp(4, 8);
+    final tagLimit = (settings.contextItemLimit / 3).round().clamp(4, 8);
+    final profilesSummary = profiles
+        .map((profile) => '${profile.serviceName}: ${profile.primaryTaste}')
+        .join(' | ');
+    final options = recommendations.take(optionLimit).map((recommendation) {
+      final item = recommendation.item;
+      return {
+        'id': item.id,
+        'title': item.title,
+        'service': item.serviceLabel,
+        'score': recommendation.matchScore.round(),
+        'tags': item.tags.take(tagLimit).toList(),
+        'format': item.format,
+        'mediaType': item.mediaType,
+        'reason': recommendation.reason,
+      };
+    }).toList();
+    final prompt =
+        '''
+Pick the single best next recommendation across all services.
+Prioritize the user's search request first. Use service fit, tags, and score to break close ties.
+Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
+Profiles: $profilesSummary
+Search request: ${query.request}
+User-selected tags: ${query.selectedTags.join(', ')}
+AI-selected tags: ${query.aiSelectedTags.join(', ')}
+Requested formats: ${query.formats.join(', ')}
+Requested media types: ${query.mediaTypes.join(', ')}
+Options: ${jsonEncode(options)}
+''';
+
+    try {
+      final response = await _generateText(
+        prompt,
+        maxTokens: 1024,
+        settings: settings,
+      );
+      Recommendation? chosen;
+      String? reason;
+      for (final candidate in _jsonObjects(response)) {
+        final id = candidate['id']?.toString();
+        for (final recommendation in recommendations) {
+          if (recommendation.item.id == id) {
+            chosen = recommendation;
+            reason = candidate['reason']?.toString().trim();
+            break;
+          }
+        }
+        if (chosen != null) break;
+      }
+      if (chosen == null) return recommendations.first;
+      return chosen.copyWith(
+        reason: reason == null || reason.isEmpty ? chosen.reason : reason,
+        isAiPick: true,
+      );
+    } catch (_) {
+      return fallback.chooseHomeRecommendation(
+        profiles,
         recommendations,
         query: query,
       );

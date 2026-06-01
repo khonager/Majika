@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:ui';
 
@@ -12,10 +13,88 @@ import 'package:majika/core/services/anilist_service.dart';
 import 'package:majika/core/services/firebase_steam_backend.dart';
 import 'package:majika/core/services/media_service.dart';
 import 'package:majika/core/services/steam_service.dart';
+import 'package:majika/core/storage/local_profile_store.dart';
 import 'package:majika/ui/settings/settings_screen.dart';
 import 'package:majika/ui/profile/profile_screen.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+enum _ActiveSurface { home, service }
+
+class _ServiceWorkspace {
+  final MediaService service;
+  TasteProfile? profile;
+  List<MediaItem> candidates;
+  List<String> serviceTags;
+  List<Recommendation> recommendations;
+  RecommendationQuery query;
+  String? error;
+  bool isLoading;
+  bool isRefreshingRecommendations;
+  bool adultCandidatesLoaded;
+  String userNameDraft;
+
+  _ServiceWorkspace({required this.service})
+    : candidates = [],
+      serviceTags = [],
+      recommendations = [],
+      query = const RecommendationQuery(),
+      isLoading = false,
+      isRefreshingRecommendations = false,
+      adultCandidatesLoaded = false,
+      userNameDraft = '';
+
+  bool get hasProfile => profile != null;
+
+  LocalProfileSession? toLocalSession() {
+    final currentProfile = profile;
+    if (currentProfile == null) return null;
+    return LocalProfileSession(
+      serviceId: service.id,
+      profile: currentProfile,
+      candidates: candidates,
+      serviceTags: serviceTags,
+      query: query,
+      adultCandidatesLoaded: adultCandidatesLoaded,
+      userNameDraft: userNameDraft,
+    );
+  }
+
+  void restore(
+    LocalProfileSession session, {
+    required TasteEngine tasteEngine,
+  }) {
+    profile = session.profile;
+    candidates = session.candidates;
+    serviceTags = session.serviceTags;
+    query = session.query;
+    adultCandidatesLoaded = session.adultCandidatesLoaded;
+    userNameDraft = session.userNameDraft.isNotEmpty
+        ? session.userNameDraft
+        : session.profile.userName;
+    recommendations = tasteEngine.rankCandidates(
+      session.profile,
+      session.candidates,
+      query: session.query,
+    );
+    error = null;
+    isLoading = false;
+    isRefreshingRecommendations = false;
+  }
+
+  void clear({String draft = ''}) {
+    profile = null;
+    candidates = [];
+    serviceTags = [];
+    recommendations = [];
+    query = const RecommendationQuery();
+    error = null;
+    isLoading = false;
+    isRefreshingRecommendations = false;
+    adultCandidatesLoaded = false;
+    userNameDraft = draft;
+  }
+}
 
 class HomeScreen extends StatefulWidget {
   final MediaService? mediaService;
@@ -40,17 +119,16 @@ class _HomeScreenState extends State<HomeScreen> {
   late MediaService _mediaService;
   late final TasteEngine _tasteEngine;
   late final LocalAiService _aiService;
+  late final LocalProfileStore _profileStore;
+  late final Map<String, _ServiceWorkspace> _workspaces;
   final TextEditingController _userNameController = TextEditingController();
 
-  TasteProfile? _profile;
-  List<MediaItem> _candidates = [];
-  List<String> _serviceTags = [];
-  List<Recommendation> _recommendations = [];
-  RecommendationQuery _recommendationQuery = const RecommendationQuery();
-  String? _error;
-  bool _isLoading = false;
-  bool _isRefreshingRecommendations = false;
-  bool _adultCandidatesLoaded = false;
+  _ActiveSurface _activeSurface = _ActiveSurface.home;
+  RecommendationQuery _homeQuery = const RecommendationQuery();
+  List<Recommendation> _homeRecommendations = [];
+  Map<String, List<Recommendation>> _homeRecommendationsByService = {};
+  String? _homeError;
+  bool _isRefreshingHome = false;
 
   @override
   void initState() {
@@ -64,8 +142,17 @@ class _HomeScreenState extends State<HomeScreen> {
               ]
             : [widget.mediaService!]);
     _mediaService = _mediaServices.first;
+    _activeSurface = widget.mediaService == null
+        ? _ActiveSurface.home
+        : _ActiveSurface.service;
     _tasteEngine = widget.tasteEngine ?? TasteEngine();
     _aiService = widget.aiService ?? const FlutterGemmaLocalAiService();
+    _profileStore = const LocalProfileStore();
+    _workspaces = {
+      for (final service in _mediaServices)
+        service.id: _ServiceWorkspace(service: service),
+    };
+    _loadSavedSessions();
   }
 
   @override
@@ -75,23 +162,26 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _importProfile() async {
+    final workspace = _activeWorkspace;
     final userName = _userNameController.text.trim();
     if (userName.isEmpty) {
-      showErrorToast(context, _mediaService.userNameEmptyMessage);
+      showErrorToast(context, workspace.service.userNameEmptyMessage);
       return;
     }
 
     setState(() {
-      _isLoading = true;
-      _error = null;
+      workspace.isLoading = true;
+      workspace.error = null;
+      workspace.userNameDraft = userName;
     });
 
     try {
-      final profileFuture = _mediaService.fetchUserProfile(userName);
-      final libraryFuture = _mediaService.fetchUserLibrary(userName);
-      final signalsFuture = _mediaService.fetchTasteSignals(userName);
-      final candidatesFuture = _mediaService.fetchRecommendationCandidates();
-      final serviceTagsFuture = _mediaService.fetchAvailableTags();
+      final service = workspace.service;
+      final profileFuture = service.fetchUserProfile(userName);
+      final libraryFuture = service.fetchUserLibrary(userName);
+      final signalsFuture = service.fetchTasteSignals(userName);
+      final candidatesFuture = service.fetchRecommendationCandidates();
+      final serviceTagsFuture = service.fetchAvailableTags();
       final serviceProfile = await profileFuture;
       final library = await libraryFuture;
       final signals = await signalsFuture;
@@ -101,8 +191,8 @@ class _HomeScreenState extends State<HomeScreen> {
         serviceProfile?.userName ?? userName,
         library,
         signals: signals,
-        serviceId: _mediaService.id,
-        serviceName: _mediaService.displayName,
+        serviceId: service.id,
+        serviceName: service.displayName,
         displayName: serviceProfile?.displayName,
         avatarUrl: serviceProfile?.avatarUrl ?? '',
         profileUrl: serviceProfile?.profileUrl ?? '',
@@ -115,81 +205,91 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (!mounted) return;
       setState(() {
-        _profile = profile;
-        _candidates = candidates;
-        _serviceTags = serviceTags;
-        _recommendations = recommendations;
-        _recommendationQuery = const RecommendationQuery();
-        _adultCandidatesLoaded = false;
-        _isLoading = false;
+        workspace.profile = profile;
+        workspace.candidates = candidates;
+        workspace.serviceTags = serviceTags;
+        workspace.recommendations = recommendations;
+        workspace.query = const RecommendationQuery();
+        workspace.adultCandidatesLoaded = false;
+        workspace.isLoading = false;
+        workspace.userNameDraft = userName;
       });
+      unawaited(_persistWorkspace(workspace));
+      _rebuildHomeRecommendationsSync();
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _error = error.toString();
-        _isLoading = false;
+        workspace.error = error.toString();
+        workspace.isLoading = false;
       });
     }
   }
 
-  void _signOut() {
+  void _signOut({bool keepDraft = false}) {
+    final workspace = _activeWorkspace;
+    final draft = keepDraft
+        ? workspace.profile?.userName ?? _userNameController.text.trim()
+        : '';
     setState(() {
-      _profile = null;
-      _candidates = [];
-      _serviceTags = [];
-      _recommendations = [];
-      _recommendationQuery = const RecommendationQuery();
-      _error = null;
-      _isLoading = false;
-      _isRefreshingRecommendations = false;
-      _adultCandidatesLoaded = false;
-      _userNameController.clear();
+      workspace.clear(draft: draft);
+      _userNameController.text = draft;
     });
+    unawaited(_profileStore.removeSession(workspace.service.id));
+    _rebuildHomeRecommendationsSync();
   }
 
   void _switchUser() {
-    final previousUser = _profile?.userName ?? _userNameController.text.trim();
-    _signOut();
-    _userNameController.text = previousUser;
+    _signOut(keepDraft: true);
   }
 
   void _selectService(MediaService service) {
-    if (service.id == _mediaService.id) return;
+    _activeWorkspace.userNameDraft = _userNameController.text.trim();
     setState(() {
       _mediaService = service;
+      _activeSurface = _ActiveSurface.service;
+      final nextWorkspace = _activeWorkspace;
+      _userNameController.text = nextWorkspace.userNameDraft.isNotEmpty
+          ? nextWorkspace.userNameDraft
+          : nextWorkspace.profile?.userName ?? '';
     });
-    _signOut();
+  }
+
+  void _selectHome() {
+    _activeWorkspace.userNameDraft = _userNameController.text.trim();
+    setState(() => _activeSurface = _ActiveSurface.home);
   }
 
   Future<void> _updateRecommendationQuery(RecommendationQuery rawQuery) async {
-    final profile = _profile;
+    final workspace = _activeWorkspace;
+    final profile = workspace.profile;
     if (profile == null) return;
 
     setState(() {
-      _recommendationQuery = rawQuery;
-      _isRefreshingRecommendations = true;
+      workspace.query = rawQuery;
+      workspace.isRefreshingRecommendations = true;
     });
 
     try {
       final query = await _aiService.interpretRecommendationRequest(
         rawQuery,
         availableTags: _availableTags,
-        serviceName: _mediaService.displayName,
-        allowedMediaTypes: _mediaService.supportedMediaTypes,
-        allowedFormats: _mediaService.supportedFormats,
+        serviceName: workspace.service.displayName,
+        allowedMediaTypes: workspace.service.supportedMediaTypes,
+        allowedFormats: workspace.service.supportedFormats,
       );
-      var candidates = _candidates;
+      var candidates = workspace.candidates;
       final needsAdultCandidates =
-          (query.includeAdult || query.infersAdult) && !_adultCandidatesLoaded;
+          (query.includeAdult || query.infersAdult) &&
+          !workspace.adultCandidatesLoaded;
 
       if (query.isActive) {
-        final searchedCandidates = await _mediaService
+        final searchedCandidates = await workspace.service
             .searchRecommendationCandidates(query);
         candidates = _dedupeCandidates([...searchedCandidates, ...candidates]);
       }
 
       if (needsAdultCandidates) {
-        final adultCandidates = await _mediaService
+        final adultCandidates = await workspace.service
             .fetchRecommendationCandidates(includeAdult: true);
         candidates = _dedupeCandidates([...candidates, ...adultCandidates]);
       }
@@ -207,19 +307,113 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (!mounted) return;
       setState(() {
-        _recommendationQuery = query;
-        _candidates = candidates;
-        _recommendations = orderedRecommendations;
-        _adultCandidatesLoaded = _adultCandidatesLoaded || needsAdultCandidates;
-        _isRefreshingRecommendations = false;
+        workspace.query = query;
+        workspace.candidates = candidates;
+        workspace.recommendations = orderedRecommendations;
+        workspace.adultCandidatesLoaded =
+            workspace.adultCandidatesLoaded || needsAdultCandidates;
+        workspace.isRefreshingRecommendations = false;
+      });
+      unawaited(_persistWorkspace(workspace));
+      _rebuildHomeRecommendationsSync();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        workspace.error = error.toString();
+        workspace.isRefreshingRecommendations = false;
+      });
+      showErrorToast(context, 'Could not refresh recommendations: $error');
+    }
+  }
+
+  Future<void> _updateHomeRecommendationQuery(
+    RecommendationQuery rawQuery,
+  ) async {
+    final importedWorkspaces = _importedWorkspaces;
+    if (importedWorkspaces.isEmpty) {
+      setState(() => _homeQuery = rawQuery);
+      return;
+    }
+
+    setState(() {
+      _homeQuery = rawQuery;
+      _isRefreshingHome = true;
+      _homeError = null;
+    });
+
+    try {
+      final byService = <String, List<Recommendation>>{};
+      final merged = <Recommendation>[];
+
+      for (final workspace in importedWorkspaces) {
+        final profile = workspace.profile;
+        if (profile == null) continue;
+        final query = await _aiService.interpretRecommendationRequest(
+          rawQuery,
+          availableTags: _availableTagsFor(workspace),
+          serviceName: workspace.service.displayName,
+          allowedMediaTypes: workspace.service.supportedMediaTypes,
+          allowedFormats: workspace.service.supportedFormats,
+        );
+
+        var candidates = workspace.candidates;
+        final needsAdultCandidates =
+            (query.includeAdult || query.infersAdult) &&
+            !workspace.adultCandidatesLoaded;
+
+        if (query.isActive) {
+          final searchedCandidates = await workspace.service
+              .searchRecommendationCandidates(query);
+          candidates = _dedupeCandidates([
+            ...searchedCandidates,
+            ...candidates,
+          ]);
+        }
+
+        if (needsAdultCandidates) {
+          final adultCandidates = await workspace.service
+              .fetchRecommendationCandidates(includeAdult: true);
+          candidates = _dedupeCandidates([...candidates, ...adultCandidates]);
+        }
+
+        final recommendations = _tasteEngine.rankCandidates(
+          profile,
+          candidates,
+          query: query,
+        );
+        if (recommendations.isEmpty) continue;
+
+        workspace.candidates = candidates;
+        workspace.adultCandidatesLoaded =
+            workspace.adultCandidatesLoaded || needsAdultCandidates;
+        unawaited(_persistWorkspace(workspace));
+
+        byService[workspace.service.id] = recommendations;
+        merged.addAll(recommendations);
+      }
+
+      merged.sort((a, b) => b.matchScore.compareTo(a.matchScore));
+      final chosen = await _aiService.chooseHomeRecommendation(
+        importedWorkspaces.map((workspace) => workspace.profile!).toList(),
+        merged,
+        query: rawQuery,
+      );
+      final ordered = _promoteChosenRecommendation(merged, chosen);
+
+      if (!mounted) return;
+      setState(() {
+        _homeQuery = rawQuery;
+        _homeRecommendationsByService = byService;
+        _homeRecommendations = ordered;
+        _isRefreshingHome = false;
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _error = error.toString();
-        _isRefreshingRecommendations = false;
+        _homeError = error.toString();
+        _isRefreshingHome = false;
       });
-      showErrorToast(context, 'Could not refresh recommendations: $error');
+      showErrorToast(context, 'Could not refresh Home: $error');
     }
   }
 
@@ -259,6 +453,65 @@ class _HomeScreenState extends State<HomeScreen> {
     ];
   }
 
+  Future<void> _loadSavedSessions() async {
+    final sessions = await _profileStore.loadSessions();
+    if (!mounted || sessions.isEmpty) return;
+
+    setState(() {
+      for (final entry in sessions.entries) {
+        final workspace = _workspaces[entry.key];
+        if (workspace == null) continue;
+        workspace.restore(entry.value, tasteEngine: _tasteEngine);
+      }
+      final activeWorkspace = _activeWorkspace;
+      _userNameController.text = activeWorkspace.userNameDraft.isNotEmpty
+          ? activeWorkspace.userNameDraft
+          : activeWorkspace.profile?.userName ?? '';
+    });
+    _rebuildHomeRecommendationsSync();
+  }
+
+  Future<void> _persistWorkspace(_ServiceWorkspace workspace) async {
+    final session = workspace.toLocalSession();
+    if (session == null) return;
+    await _profileStore.saveSession(session);
+  }
+
+  void _rebuildHomeRecommendationsSync() {
+    final byService = <String, List<Recommendation>>{};
+    final merged = <Recommendation>[];
+    for (final workspace in _importedWorkspaces) {
+      final recommendations = workspace.recommendations;
+      if (recommendations.isEmpty) continue;
+      byService[workspace.service.id] = recommendations;
+      merged.addAll(recommendations);
+    }
+    merged.sort((a, b) => b.matchScore.compareTo(a.matchScore));
+    final ordered = _promoteChosenRecommendation(
+      merged,
+      merged.isEmpty ? null : merged.first,
+    );
+    if (!mounted) return;
+    setState(() {
+      _homeRecommendationsByService = byService;
+      _homeRecommendations = ordered;
+    });
+  }
+
+  List<Recommendation> _promoteChosenRecommendation(
+    List<Recommendation> recommendations,
+    Recommendation? chosen,
+  ) {
+    if (recommendations.isEmpty) return recommendations;
+    final top = chosen ?? recommendations.first;
+    return [
+      top.copyWith(isTopPick: true),
+      for (final recommendation in recommendations)
+        if (recommendation.item.id != top.item.id)
+          recommendation.copyWith(isTopPick: false),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -274,23 +527,39 @@ class _HomeScreenState extends State<HomeScreen> {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final isDesktop = constraints.maxWidth >= 900;
-              final shell = _ContentShell(
-                isMobileSurface: !isDesktop,
-                profile: _profile,
-                recommendations: _recommendations,
-                isLoading: _isLoading,
-                error: _error,
-                aiService: _aiService,
-                userNameController: _userNameController,
-                mediaService: _mediaService,
-                onImport: _importProfile,
-                onSignOut: _signOut,
-                onSwitchUser: _switchUser,
-                query: _recommendationQuery,
-                isRefreshingRecommendations: _isRefreshingRecommendations,
-                availableTags: _availableTags,
-                onQueryChanged: _updateRecommendationQuery,
-              );
+              final workspace = _activeWorkspace;
+              final shell = _activeSurface == _ActiveSurface.home
+                  ? _HomeContentShell(
+                      isMobileSurface: !isDesktop,
+                      services: _mediaServices,
+                      workspaces: _workspaces,
+                      query: _homeQuery,
+                      recommendations: _homeRecommendations,
+                      recommendationsByService: _homeRecommendationsByService,
+                      isRefreshing: _isRefreshingHome,
+                      error: _homeError,
+                      aiService: _aiService,
+                      onQueryChanged: _updateHomeRecommendationQuery,
+                      onConnectService: _selectService,
+                    )
+                  : _ContentShell(
+                      isMobileSurface: !isDesktop,
+                      profile: workspace.profile,
+                      recommendations: workspace.recommendations,
+                      isLoading: workspace.isLoading,
+                      error: workspace.error,
+                      aiService: _aiService,
+                      userNameController: _userNameController,
+                      mediaService: workspace.service,
+                      onImport: _importProfile,
+                      onSignOut: _signOut,
+                      onSwitchUser: _switchUser,
+                      query: workspace.query,
+                      isRefreshingRecommendations:
+                          workspace.isRefreshingRecommendations,
+                      availableTags: _availableTags,
+                      onQueryChanged: _updateRecommendationQuery,
+                    );
 
               if (isDesktop) {
                 return Column(
@@ -307,6 +576,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         isDesktop: true,
                         services: _mediaServices,
                         activeServiceId: _mediaService.id,
+                        isHomeActive: _activeSurface == _ActiveSurface.home,
+                        onHomeTap: _selectHome,
                         onServiceTap: _selectService,
                         onSettingsTap: _openSettings,
                         onProfileTap: _openProfile,
@@ -322,6 +593,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 onSettingsTap: _openSettings,
                 services: _mediaServices,
                 activeServiceId: _mediaService.id,
+                isHomeActive: _activeSurface == _ActiveSurface.home,
+                onHomeTap: _selectHome,
                 onServiceTap: _selectService,
                 onUnavailableTap: (label) =>
                     showFeatureComingSoon(context, label),
@@ -336,11 +609,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<String> get _availableTags {
+    return _availableTagsFor(_activeWorkspace);
+  }
+
+  List<String> _availableTagsFor(_ServiceWorkspace workspace) {
     final counts = <String, int>{};
-    for (final tag in _profile?.favoriteGenres ?? const <String>[]) {
+    for (final tag in workspace.profile?.favoriteGenres ?? const <String>[]) {
       counts.update(tag, (count) => count + 4, ifAbsent: () => 4);
     }
-    for (final item in _candidates) {
+    for (final item in workspace.candidates) {
       for (final tag in item.tags) {
         counts.update(tag, (count) => count + 1, ifAbsent: () => 1);
       }
@@ -348,14 +625,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final entries = counts.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
-    final baseTags = _mediaService.displayName == 'Steam'
-        ? _serviceTags
+    final baseTags = workspace.service.displayName == 'Steam'
+        ? workspace.serviceTags
         : RecommendationQuery.browsableTags;
     return {
       ...baseTags,
-      ..._serviceTags,
+      ...workspace.serviceTags,
       ...entries.map((entry) => entry.key),
     }.toList();
+  }
+
+  _ServiceWorkspace get _activeWorkspace => _workspaces[_mediaService.id]!;
+
+  List<_ServiceWorkspace> get _importedWorkspaces {
+    return [
+      for (final service in _mediaServices)
+        if (_workspaces[service.id]?.hasProfile ?? false)
+          _workspaces[service.id]!,
+    ];
   }
 
   List<MediaItem> _dedupeCandidates(List<MediaItem> candidates) {
@@ -393,6 +680,507 @@ Future<void> _openMedia(BuildContext context, MediaItem item) async {
   final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
   if (!launched && context.mounted) {
     showErrorToast(context, 'Could not open ${item.serviceLabel}.');
+  }
+}
+
+class _HomeContentShell extends StatelessWidget {
+  final bool isMobileSurface;
+  final List<MediaService> services;
+  final Map<String, _ServiceWorkspace> workspaces;
+  final RecommendationQuery query;
+  final List<Recommendation> recommendations;
+  final Map<String, List<Recommendation>> recommendationsByService;
+  final bool isRefreshing;
+  final String? error;
+  final LocalAiService aiService;
+  final ValueChanged<RecommendationQuery> onQueryChanged;
+  final ValueChanged<MediaService> onConnectService;
+
+  const _HomeContentShell({
+    required this.isMobileSurface,
+    required this.services,
+    required this.workspaces,
+    required this.query,
+    required this.recommendations,
+    required this.recommendationsByService,
+    required this.isRefreshing,
+    required this.error,
+    required this.aiService,
+    required this.onQueryChanged,
+    required this.onConnectService,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final borderRadius = BorderRadius.circular(isMobileSurface ? 0 : 34);
+    final shellPadding = isMobileSurface
+        ? const EdgeInsets.fromLTRB(14, 16, 14, 0)
+        : const EdgeInsets.fromLTRB(18, 18, 18, 0);
+    final imported = [
+      for (final service in services)
+        if (workspaces[service.id]?.profile != null) workspaces[service.id]!,
+    ];
+    final missing = [
+      for (final service in services)
+        if (workspaces[service.id]?.profile == null) service,
+    ];
+    final readableInset = EdgeInsets.only(left: isMobileSurface ? 54 : 0);
+
+    final shell = Container(
+      decoration: BoxDecoration(
+        color: isMobileSurface
+            ? Colors.transparent
+            : Colors.white.withValues(alpha: 0.055),
+        borderRadius: borderRadius,
+        border: isMobileSurface
+            ? null
+            : Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment.topRight,
+                  radius: 1.2,
+                  colors: [
+                    const Color(
+                      0xFF89D6B3,
+                    ).withValues(alpha: isMobileSurface ? 0.14 : 0.09),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: shellPadding,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _HomeHeader(aiService: aiService),
+                const SizedBox(height: 14),
+                Expanded(
+                  child: CustomScrollView(
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: readableInset,
+                          child: _HomeSearchPanel(
+                            query: query,
+                            isRefreshing: isRefreshing,
+                            onQueryChanged: onQueryChanged,
+                          ),
+                        ),
+                      ),
+                      if (error != null)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: readableInset.add(
+                              const EdgeInsets.only(top: 12),
+                            ),
+                            child: Text(
+                              error!,
+                              style: const TextStyle(color: Color(0xFFFF9AA8)),
+                            ),
+                          ),
+                        ),
+                      if (imported.isEmpty)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: readableInset.add(
+                              const EdgeInsets.only(top: 14),
+                            ),
+                            child: _HomeConnectGrid(
+                              services: services,
+                              onConnectService: onConnectService,
+                            ),
+                          ),
+                        )
+                      else ...[
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 14),
+                            child: recommendations.isEmpty
+                                ? Padding(
+                                    padding: readableInset,
+                                    child: _EmptyHomeRecommendations(
+                                      query: query,
+                                    ),
+                                  )
+                                : _TopRecommendationCard(
+                                    recommendation: recommendations.first,
+                                  ),
+                          ),
+                        ),
+                        if (missing.isNotEmpty)
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding: readableInset.add(
+                                const EdgeInsets.only(top: 14),
+                              ),
+                              child: _MissingServiceStrip(
+                                services: missing,
+                                onConnectService: onConnectService,
+                              ),
+                            ),
+                          ),
+                        for (final workspace in imported)
+                          _HomeServiceSection(
+                            workspace: workspace,
+                            recommendations:
+                                recommendationsByService[workspace
+                                    .service
+                                    .id] ??
+                                workspace.recommendations,
+                            readableInset: readableInset,
+                          ),
+                      ],
+                      const SliverToBoxAdapter(child: SizedBox(height: 96)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (isMobileSurface) return shell;
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+        child: shell,
+      ),
+    );
+  }
+}
+
+class _HomeHeader extends StatelessWidget {
+  final LocalAiService aiService;
+
+  const _HomeHeader({required this.aiService});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Majika',
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'One local feed across your imported services.',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.64),
+                ),
+              ),
+            ],
+          ),
+        ),
+        _StatusPill(
+          icon: Icons.auto_awesome_rounded,
+          label: aiService.isConfigured ? 'Local AI' : 'Local rules',
+        ),
+      ],
+    );
+  }
+}
+
+class _HomeSearchPanel extends StatefulWidget {
+  final RecommendationQuery query;
+  final bool isRefreshing;
+  final ValueChanged<RecommendationQuery> onQueryChanged;
+
+  const _HomeSearchPanel({
+    required this.query,
+    required this.isRefreshing,
+    required this.onQueryChanged,
+  });
+
+  @override
+  State<_HomeSearchPanel> createState() => _HomeSearchPanelState();
+}
+
+class _HomeSearchPanelState extends State<_HomeSearchPanel> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.query.request);
+  }
+
+  @override
+  void didUpdateWidget(covariant _HomeSearchPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.query.request != _controller.text) {
+      _controller.text = widget.query.request;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final request = _controller.text.trim();
+    final requestChanged = request != widget.query.request.trim();
+    widget.onQueryChanged(
+      widget.query.copyWith(
+        request: request,
+        aiSelectedTags: requestChanged
+            ? <String>{}
+            : widget.query.aiSelectedTags,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _GlassCard(
+      padding: const EdgeInsets.all(14),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              key: const ValueKey('home-recommendation-query'),
+              controller: _controller,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _submit(),
+              decoration: InputDecoration(
+                hintText: 'Ask for what you want next',
+                prefixIcon: const Icon(Icons.auto_awesome_rounded),
+                filled: true,
+                fillColor: Colors.black.withValues(alpha: 0.22),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton.filledTonal(
+            tooltip: 'Search Home recommendations',
+            onPressed: widget.isRefreshing ? null : _submit,
+            icon: widget.isRefreshing
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.arrow_forward_rounded),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeConnectGrid extends StatelessWidget {
+  final List<MediaService> services;
+  final ValueChanged<MediaService> onConnectService;
+
+  const _HomeConnectGrid({
+    required this.services,
+    required this.onConnectService,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 560;
+        return Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (final service in services)
+              SizedBox(
+                width: isNarrow ? constraints.maxWidth : 260,
+                child: _HomeConnectCard(
+                  service: service,
+                  onConnect: () => onConnectService(service),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _MissingServiceStrip extends StatelessWidget {
+  final List<MediaService> services;
+  final ValueChanged<MediaService> onConnectService;
+
+  const _MissingServiceStrip({
+    required this.services,
+    required this.onConnectService,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final service in services)
+          ActionChip(
+            avatar: Icon(_serviceIcon(service), size: 18),
+            label: Text('Connect ${service.displayName}'),
+            onPressed: () => onConnectService(service),
+            backgroundColor: Colors.white.withValues(alpha: 0.07),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+          ),
+      ],
+    );
+  }
+}
+
+class _HomeConnectCard extends StatelessWidget {
+  final MediaService service;
+  final VoidCallback onConnect;
+
+  const _HomeConnectCard({required this.service, required this.onConnect});
+
+  @override
+  Widget build(BuildContext context) {
+    return _GlassCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(_serviceIcon(service), color: Colors.white70),
+          const SizedBox(height: 10),
+          Text(
+            service.connectTitle,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            service.connectDescription,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Colors.white.withValues(alpha: 0.68),
+              height: 1.32,
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: onConnect,
+            icon: const Icon(Icons.login_rounded),
+            label: Text(service.importButtonLabel),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeServiceSection extends StatelessWidget {
+  final _ServiceWorkspace workspace;
+  final List<Recommendation> recommendations;
+  final EdgeInsets readableInset;
+
+  const _HomeServiceSection({
+    required this.workspace,
+    required this.recommendations,
+    required this.readableInset,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = recommendations.take(4).toList();
+    if (visible.isEmpty) return const SliverToBoxAdapter(child: SizedBox());
+
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.only(top: 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: readableInset,
+              child: Row(
+                children: [
+                  Icon(
+                    _serviceIcon(workspace.service),
+                    color: Colors.white.withValues(alpha: 0.7),
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    workspace.service.displayName,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            for (final recommendation in visible) ...[
+              _RecommendationTile(recommendation: recommendation),
+              const SizedBox(height: 10),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyHomeRecommendations extends StatelessWidget {
+  final RecommendationQuery query;
+
+  const _EmptyHomeRecommendations({required this.query});
+
+  @override
+  Widget build(BuildContext context) {
+    return _GlassCard(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.travel_explore_rounded,
+            color: Colors.white70,
+            size: 36,
+          ),
+          const SizedBox(height: 10),
+          Text(
+            query.isActive
+                ? 'No cross-service matches for this request yet.'
+                : 'Imported services are ready. Ask for a mood, format, or activity.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Colors.white.withValues(alpha: 0.72),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -528,6 +1316,8 @@ class _MobileLiquidShell extends StatelessWidget {
   final Widget child;
   final List<MediaService> services;
   final String activeServiceId;
+  final bool isHomeActive;
+  final VoidCallback onHomeTap;
   final ValueChanged<MediaService> onServiceTap;
   final VoidCallback onSettingsTap;
   final VoidCallback onProfileTap;
@@ -537,6 +1327,8 @@ class _MobileLiquidShell extends StatelessWidget {
     required this.child,
     required this.services,
     required this.activeServiceId,
+    required this.isHomeActive,
+    required this.onHomeTap,
     required this.onServiceTap,
     required this.onSettingsTap,
     required this.onProfileTap,
@@ -556,6 +1348,8 @@ class _MobileLiquidShell extends StatelessWidget {
           child: _MobileLiquidRail(
             services: services,
             activeServiceId: activeServiceId,
+            isHomeActive: isHomeActive,
+            onHomeTap: onHomeTap,
             onServiceTap: onServiceTap,
             onSettingsTap: onSettingsTap,
             onProfileTap: onProfileTap,
@@ -1894,6 +2688,8 @@ class _EmptyRecommendations extends StatelessWidget {
 class _MobileLiquidRail extends StatelessWidget {
   final List<MediaService> services;
   final String activeServiceId;
+  final bool isHomeActive;
+  final VoidCallback onHomeTap;
   final ValueChanged<MediaService> onServiceTap;
   final VoidCallback onSettingsTap;
   final VoidCallback onProfileTap;
@@ -1902,6 +2698,8 @@ class _MobileLiquidRail extends StatelessWidget {
   const _MobileLiquidRail({
     required this.services,
     required this.activeServiceId,
+    required this.isHomeActive,
+    required this.onHomeTap,
     required this.onServiceTap,
     required this.onSettingsTap,
     required this.onProfileTap,
@@ -1919,14 +2717,14 @@ class _MobileLiquidRail extends StatelessWidget {
           _LiquidRailButton(
             icon: Icons.home_rounded,
             label: 'Home',
-            isActive: true,
-            onTap: () {},
+            isActive: isHomeActive,
+            onTap: onHomeTap,
           ),
           for (final service in services)
             _LiquidRailButton(
               icon: _serviceIcon(service),
               label: service.displayName,
-              isActive: activeServiceId == service.id,
+              isActive: !isHomeActive && activeServiceId == service.id,
               onTap: () => onServiceTap(service),
             ),
           _LiquidRailButton(
@@ -2113,6 +2911,8 @@ class _ServiceDock extends StatelessWidget {
   final bool isDesktop;
   final List<MediaService> services;
   final String activeServiceId;
+  final bool isHomeActive;
+  final VoidCallback onHomeTap;
   final ValueChanged<MediaService> onServiceTap;
   final VoidCallback onSettingsTap;
   final VoidCallback onProfileTap;
@@ -2122,6 +2922,8 @@ class _ServiceDock extends StatelessWidget {
     required this.isDesktop,
     required this.services,
     required this.activeServiceId,
+    required this.isHomeActive,
+    required this.onHomeTap,
     required this.onServiceTap,
     required this.onSettingsTap,
     required this.onProfileTap,
@@ -2134,14 +2936,14 @@ class _ServiceDock extends StatelessWidget {
       _DockButton(
         icon: Icons.home_rounded,
         label: 'Home',
-        isActive: true,
-        onTap: () {},
+        isActive: isHomeActive,
+        onTap: onHomeTap,
       ),
       for (final service in services)
         _DockButton(
           icon: _serviceIcon(service),
           label: service.displayName,
-          isActive: activeServiceId == service.id,
+          isActive: !isHomeActive && activeServiceId == service.id,
           onTap: () => onServiceTap(service),
         ),
       _DockButton(

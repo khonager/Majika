@@ -9,6 +9,53 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const _downloadableLocalAiModels = [
   _DownloadableModel(
+    id: 'gemma3_1b_it',
+    name: 'Gemma 3 1B IT',
+    sizeLabel: '586 MB',
+    providerLabel: 'Gemma',
+    resourceLabel: 'Small Google text model',
+    mobileUrl:
+        'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task',
+    desktopUrl:
+        'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/Gemma3-1B-IT_multi-prefill-seq_q4_ekv4096.litertlm',
+    description:
+        'Best current default for this SDK: compact enough for newer phones while staying stronger than tiny fallback models.',
+    modelType: ModelType.gemmaIt,
+    fileType: ModelFileType.task,
+  ),
+  _DownloadableModel(
+    id: 'gemma3n_e2b_it',
+    name: 'Gemma 3n E2B IT',
+    sizeLabel: '3.1 GB',
+    providerLabel: 'Gemma',
+    resourceLabel: 'Advanced Google multimodal model',
+    mobileUrl:
+        'https://huggingface.co/google/gemma-3n-E2B-it-litert-preview/resolve/main/gemma-3n-E2B-it-int4.task',
+    desktopUrl:
+        'https://huggingface.co/google/gemma-3n-E2B-it-litert-lm/resolve/main/gemma-3n-E2B-it-int4.litertlm',
+    description:
+        'Higher-capability Google model for newer devices with enough memory.',
+    modelType: ModelType.gemmaIt,
+    fileType: ModelFileType.task,
+    isAdvanced: true,
+  ),
+  _DownloadableModel(
+    id: 'gemma3n_e4b_it',
+    name: 'Gemma 3n E4B IT',
+    sizeLabel: '6.5 GB',
+    providerLabel: 'Gemma',
+    resourceLabel: 'Large Google multimodal model',
+    mobileUrl:
+        'https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-3n-E4B-it-int4.task',
+    desktopUrl:
+        'https://huggingface.co/google/gemma-3n-E4B-it-litert-lm/resolve/main/gemma-3n-E4B-it-int4.litertlm',
+    description:
+        'Large model option for powerful devices; benchmark before making it your daily default.',
+    modelType: ModelType.gemmaIt,
+    fileType: ModelFileType.task,
+    isAdvanced: true,
+  ),
+  _DownloadableModel(
     id: 'qwen3_0_6b',
     name: 'Qwen3 0.6B',
     sizeLabel: '586 MB',
@@ -19,37 +66,8 @@ const _downloadableLocalAiModels = [
     desktopUrl:
         'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
     description:
-        'Primary candidate for the default recommendation after benchmark validation.',
+        'Small public alternative that is useful when Gemma model access is not available.',
     modelType: ModelType.qwen,
-    fileType: ModelFileType.task,
-  ),
-  _DownloadableModel(
-    id: 'qwen25_0_5b_instruct',
-    name: 'Qwen 2.5 0.5B Instruct',
-    sizeLabel: '0.5 GB',
-    providerLabel: 'Qwen',
-    resourceLabel: 'Small public text model',
-    mobileUrl:
-        'https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
-    description:
-        'Mobile-friendly candidate that is smaller than Qwen 2.5 1.5B but less capable.',
-    modelType: ModelType.qwen,
-    fileType: ModelFileType.task,
-    isAdvanced: true,
-  ),
-  _DownloadableModel(
-    id: 'functiongemma_270m',
-    name: 'FunctionGemma 270M',
-    sizeLabel: '284 MB',
-    providerLabel: 'FunctionGemma',
-    resourceLabel: 'Advanced function-calling model',
-    mobileUrl:
-        'https://huggingface.co/sasha-denisov/function-gemma-270M-it/resolve/main/functiongemma-270M-it.task',
-    desktopUrl:
-        'https://huggingface.co/sasha-denisov/function-gemma-270M-it/resolve/main/functiongemma-270M-it.litertlm',
-    description:
-        'Experimental: tiny function-calling base that likely needs task-specific tool wiring or fine-tuning.',
-    modelType: ModelType.functionGemma,
     fileType: ModelFileType.task,
     isAdvanced: true,
   ),
@@ -85,36 +103,6 @@ const _downloadableLocalAiModels = [
     fileType: ModelFileType.task,
     isAdvanced: true,
   ),
-  _DownloadableModel(
-    id: 'smollm_135m_instruct',
-    name: 'SmolLM 135M Instruct',
-    sizeLabel: '135 MB',
-    providerLabel: 'SmolLM',
-    resourceLabel: 'Tiny public text model',
-    mobileUrl:
-        'https://huggingface.co/litert-community/SmolLM-135M-Instruct/resolve/main/SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task',
-    description:
-        'Very small mobile candidate; likely only useful as a low-resource fallback after testing.',
-    modelType: ModelType.general,
-    fileType: ModelFileType.task,
-    isAdvanced: true,
-  ),
-  _DownloadableModel(
-    id: 'phi4_mini_instruct',
-    name: 'Phi-4 Mini Instruct',
-    sizeLabel: '3.9 GB',
-    providerLabel: 'Phi',
-    resourceLabel: 'Large public text model',
-    mobileUrl:
-        'https://huggingface.co/litert-community/Phi-4-mini-instruct/resolve/main/Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.task',
-    desktopUrl:
-        'https://huggingface.co/litert-community/Phi-4-mini-instruct/resolve/main/Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.litertlm',
-    description:
-        'Large advanced candidate for better reasoning on machines with enough memory.',
-    modelType: ModelType.general,
-    fileType: ModelFileType.task,
-    isAdvanced: true,
-  ),
 ];
 
 final _defaultLocalAiModel = _downloadableLocalAiModels.first;
@@ -143,6 +131,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isDownloadingModel = false;
   bool _showAdvancedLocalAi = false;
   String _localAiMode = localAiModeRulesOnly;
+  String _localBackend = localAiBackendAuto;
   String _localAiProvider = _defaultLocalAiModel.providerLabel;
   _DownloadableModel _selectedModel = _defaultLocalAiModel;
   String? _downloadedModelId;
@@ -228,6 +217,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _useAiForSearch =
           prefs.getBool(LocalAiSettingsKeys.useAiForSearch) ?? _useAiForSearch;
       _localAiMode = savedMode;
+      _localBackend =
+          prefs.getString(LocalAiSettingsKeys.localBackend) ??
+          localAiBackendAuto;
       if (_localAiMode == localAiModeRulesOnly) {
         _useLocalAi = false;
       }
@@ -351,9 +343,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return 'External local server will handle AI requests.';
     }
     if (_hasDownloadedModel) {
-      return '${_downloadedModelName ?? 'On-device model'} is active for AI requests.';
+      return '${_downloadedModelName ?? 'On-device model'} is active for AI requests using $_localBackend backend.';
     }
-    return 'On-device AI will activate after a public text model is installed.';
+    return 'On-device AI will activate after a public text model is installed; backend is set to $_localBackend.';
   }
 
   @override
@@ -645,6 +637,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       );
                     },
                     onDownload: _downloadRecommendedModel,
+                  ),
+                if (_usesOnDeviceAi)
+                  _OptionRow(
+                    icon: Icons.speed_rounded,
+                    title: 'On-device backend',
+                    subtitle:
+                        'Auto lets LiteRT choose; CPU is safest, GPU/NPU can be faster on newer devices.',
+                    value: _localBackend,
+                    options: const [
+                      localAiBackendAuto,
+                      localAiBackendCpu,
+                      localAiBackendGpu,
+                      localAiBackendNpu,
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setState(() => _localBackend = value);
+                      _saveString(LocalAiSettingsKeys.localBackend, value);
+                      showInfoToast(context, 'Local AI backend set to $value.');
+                    },
                   ),
                 if (_usesOnDeviceAi)
                   _SwitchRow(

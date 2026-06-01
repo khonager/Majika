@@ -43,6 +43,60 @@ class TasteProfile {
     this.profileUrl = '',
   }) : displayName = displayName ?? userName;
 
+  factory TasteProfile.fromJson(Map<String, dynamic> json) {
+    return TasteProfile(
+      userName: json['userName'] as String? ?? '',
+      library: _mediaItemsFromJson(json['library']),
+      favoriteGenres: _stringList(json['favoriteGenres']),
+      tagWeights: _doubleMap(json['tagWeights']),
+      formatWeights: _doubleMap(json['formatWeights']),
+      formatCounts: _intMap(json['formatCounts']),
+      favoriteCharacters: _stringList(json['favoriteCharacters']),
+      favoriteStaff: _stringList(json['favoriteStaff']),
+      favoriteStudios: _stringList(json['favoriteStudios']),
+      highRatedItems: _mediaItemsFromJson(json['highRatedItems']),
+      recentActivity: json['recentActivity'] is Map
+          ? MediaItem.fromJson(
+              Map<String, dynamic>.from(json['recentActivity'] as Map),
+            )
+          : null,
+      completedCount: json['completedCount'] as int? ?? 0,
+      currentCount: json['currentCount'] as int? ?? 0,
+      importedAt:
+          DateTime.tryParse(json['importedAt']?.toString() ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      serviceId: json['serviceId'] as String? ?? 'com.majika.service.anilist',
+      serviceName: json['serviceName'] as String? ?? 'AniList',
+      displayName: json['displayName'] as String?,
+      avatarUrl: json['avatarUrl'] as String? ?? '',
+      profileUrl: json['profileUrl'] as String? ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'userName': userName,
+      'library': library.map((item) => item.toJson()).toList(),
+      'favoriteGenres': favoriteGenres,
+      'tagWeights': tagWeights,
+      'formatWeights': formatWeights,
+      'formatCounts': formatCounts,
+      'favoriteCharacters': favoriteCharacters,
+      'favoriteStaff': favoriteStaff,
+      'favoriteStudios': favoriteStudios,
+      'highRatedItems': highRatedItems.map((item) => item.toJson()).toList(),
+      'recentActivity': recentActivity?.toJson(),
+      'completedCount': completedCount,
+      'currentCount': currentCount,
+      'importedAt': importedAt.toIso8601String(),
+      'serviceId': serviceId,
+      'serviceName': serviceName,
+      'displayName': displayName,
+      'avatarUrl': avatarUrl,
+      'profileUrl': profileUrl,
+    };
+  }
+
   bool get isEmpty => library.isEmpty;
 
   String get primaryTaste {
@@ -69,5 +123,40 @@ class TasteProfile {
     }
 
     return 'Built from ${library.length} $serviceName entries: $completed, $current, with strongest signals around $genres.';
+  }
+
+  static List<MediaItem> _mediaItemsFromJson(Object? value) {
+    if (value is! List) return const [];
+    return [
+      for (final item in value)
+        if (item is Map) MediaItem.fromJson(Map<String, dynamic>.from(item)),
+    ];
+  }
+
+  static List<String> _stringList(Object? value) {
+    if (value is! List) return const [];
+    return [
+      for (final item in value)
+        if (item != null && item.toString().trim().isNotEmpty)
+          item.toString().trim(),
+    ];
+  }
+
+  static Map<String, double> _doubleMap(Object? value) {
+    if (value is! Map) return const {};
+    return {
+      for (final entry in value.entries)
+        if (entry.value is num)
+          entry.key.toString(): (entry.value as num).toDouble(),
+    };
+  }
+
+  static Map<String, int> _intMap(Object? value) {
+    if (value is! Map) return const {};
+    return {
+      for (final entry in value.entries)
+        if (entry.value is num)
+          entry.key.toString(): (entry.value as num).toInt(),
+    };
   }
 }

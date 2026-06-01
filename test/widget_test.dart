@@ -248,6 +248,160 @@ void main() {
     expect(find.byTooltip('Open on Steam'), findsWidgets);
   });
 
+  testWidgets('service switching keeps imported profiles', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          mediaServices: [_FakeMediaService(), _FakeSteamMediaService()],
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('AniList'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('@tester · Mystery + Drama'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Steam'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'steamtester');
+    await tester.tap(find.text('Build game profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('@Steam Tester · RPG + Strategy'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('AniList'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('@tester · Mystery + Drama'), findsOneWidget);
+    expect(find.text('Best Match'), findsOneWidget);
+  });
+
+  testWidgets('saved profile restores after HomeScreen restart', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('@tester · Mystery + Drama'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('@tester · Mystery + Drama'), findsOneWidget);
+    expect(find.text('Best Match'), findsOneWidget);
+  });
+
+  testWidgets('home aggregates services and AI-style query prefers PC games', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          mediaServices: [_FakeMediaService(), _FakeSteamMediaService()],
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('AniList'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Steam'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'steamtester');
+    await tester.tap(find.text('Build game profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Home'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('One local feed across your imported services.'),
+      findsOneWidget,
+    );
+    expect(find.text('Best Match'), findsWidgets);
+    await tester.scrollUntilVisible(
+      find.text('Strategy RPG Match'),
+      350,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Strategy RPG Match'), findsWidgets);
+
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('home-recommendation-query')),
+      -350,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('home-recommendation-query')),
+      'I want something entertaining where I can laugh a lot and do it on my PC',
+    );
+    await tester.tap(find.byTooltip('Search Home recommendations'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Funny PC Game'), findsWidgets);
+  });
+
+  testWidgets('sign out clears only the active saved service', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          mediaServices: [_FakeMediaService(), _FakeSteamMediaService()],
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('AniList'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Steam'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'steamtester');
+    await tester.tap(find.text('Build game profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Sign out'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Connect Steam'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('AniList'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('@tester · Mystery + Drama'), findsOneWidget);
+  });
+
   testWidgets(
     'switch user returns to the import form without layout overflow',
     (WidgetTester tester) async {
@@ -321,13 +475,14 @@ void main() {
     await tester.tap(find.text('Automatic on-device').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Qwen3 0.6B'), findsOneWidget);
-    expect(find.text('586 MB · Balanced public text model'), findsOneWidget);
+    expect(find.text('Gemma 3 1B IT'), findsOneWidget);
+    expect(find.text('586 MB · Small Google text model'), findsOneWidget);
     expect(find.text('FunctionGemma 270M'), findsNothing);
 
     expect(find.text('Use local model when available'), findsNothing);
     expect(find.text('AI search interpretation'), findsOneWidget);
     expect(find.text('Advanced model choice'), findsOneWidget);
+    expect(find.text('On-device backend'), findsOneWidget);
 
     await tester.scrollUntilVisible(
       find.text('Recommendation context items'),
@@ -338,17 +493,17 @@ void main() {
 
     expect(find.text('Recommendation context items'), findsOneWidget);
     await tester.scrollUntilVisible(
-      find.text('Qwen3 0.6B'),
+      find.text('Gemma 3 1B IT'),
       500,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Qwen3 0.6B'));
+    await tester.tap(find.text('Gemma 3 1B IT'));
     await tester.pumpAndSettle();
-    expect(find.text('FunctionGemma 270M'), findsOneWidget);
+    expect(find.text('Gemma 3n E2B IT'), findsOneWidget);
+    expect(find.text('Gemma 3n E4B IT'), findsOneWidget);
     expect(find.text('DeepSeek R1 Distill Qwen 1.5B'), findsOneWidget);
     expect(find.text('Qwen 2.5 1.5B Instruct'), findsOneWidget);
-    expect(find.text('Phi-4 Mini Instruct'), findsOneWidget);
     await tester.tap(find.text('Qwen 2.5 1.5B Instruct').last);
     await tester.pumpAndSettle();
     expect(find.text('1.6 GB · Advanced public text model'), findsOneWidget);
@@ -396,7 +551,7 @@ void main() {
     expect(find.text('Server model preset'), findsOneWidget);
     expect(find.text('gemma3:4b'), findsWidgets);
     expect(find.text('Local server model'), findsOneWidget);
-    expect(find.text('Qwen3 0.6B'), findsNothing);
+    expect(find.text('Gemma 3 1B IT'), findsNothing);
   });
 
   testWidgets('settings persists recommendation context items', (
@@ -695,11 +850,34 @@ class _FakeSteamMediaService implements MediaService {
   Future<List<MediaItem>> searchRecommendationCandidates(
     RecommendationQuery query,
   ) async {
-    return fetchRecommendationCandidates();
+    final tags = query.effectiveTags(await fetchAvailableTags());
+    return [
+      if (tags.contains('Comedy') ||
+          query.effectiveMediaTypes().contains('GAME'))
+        MediaItem(
+          id: 'steam_3',
+          title: 'Funny PC Game',
+          coverUrl: '',
+          tags: const ['Comedy', 'Single-player'],
+          rating: 8.5,
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: id,
+          siteUrl: 'https://store.steampowered.com/app/3',
+          popularity: 70000,
+        ),
+      ...await fetchRecommendationCandidates(),
+    ];
   }
 
   @override
   Future<List<String>> fetchAvailableTags() async {
-    return const ['RPG', 'Strategy', 'Single-player', 'Controller Support'];
+    return const [
+      'Comedy',
+      'RPG',
+      'Strategy',
+      'Single-player',
+      'Controller Support',
+    ];
   }
 }
