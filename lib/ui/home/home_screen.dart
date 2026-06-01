@@ -478,7 +478,7 @@ class _MobileLiquidShell extends StatelessWidget {
       children: [
         Positioned.fill(child: child),
         Positioned(
-          top: 58,
+          top: 88,
           bottom: 16,
           left: 6,
           child: _MobileLiquidRail(
@@ -1743,12 +1743,12 @@ class _LiquidGlassPod extends StatelessWidget {
     return ClipRRect(
       borderRadius: borderRadius,
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+        filter: ImageFilter.blur(sigmaX: 34, sigmaY: 34),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.14),
+            color: Colors.white.withValues(alpha: 0.08),
             borderRadius: borderRadius,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.26)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.36),
@@ -1772,9 +1772,9 @@ class _LiquidGlassPod extends StatelessWidget {
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [
-                        Colors.white.withValues(alpha: 0.28),
-                        Colors.white.withValues(alpha: 0.07),
-                        Colors.black.withValues(alpha: 0.08),
+                        Colors.white.withValues(alpha: 0.2),
+                        Colors.white.withValues(alpha: 0.035),
+                        Colors.black.withValues(alpha: 0.05),
                       ],
                       stops: const [0, 0.42, 1],
                     ),
@@ -1788,7 +1788,7 @@ class _LiquidGlassPod extends StatelessWidget {
                 height: 1.2,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.42),
+                    color: Colors.white.withValues(alpha: 0.34),
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
@@ -1831,8 +1831,8 @@ class _LiquidRailButton extends StatelessWidget {
           icon: Icon(icon, color: iconColor, size: 21),
           style: IconButton.styleFrom(
             backgroundColor: isActive
-                ? activeColor.withValues(alpha: 0.92)
-                : Colors.white.withValues(alpha: 0.03),
+                ? activeColor.withValues(alpha: 0.84)
+                : Colors.white.withValues(alpha: 0.015),
             fixedSize: const Size(40, 40),
             minimumSize: const Size(40, 40),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
