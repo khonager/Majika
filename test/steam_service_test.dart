@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/services/steam_service.dart';
 
 void main() {
@@ -150,6 +151,47 @@ void main() {
     expect(library.single.tags, contains('Strategy'));
     expect(library.single.playtimeMinutes, 9000);
     expect(library.single.recentPlaytimeMinutes, 90);
+  });
+
+  test('co-op search adds local co-op candidate pool', () async {
+    final service = SteamService(
+      client: MockClient((request) async {
+        final url = request.url.toString();
+        if (url.contains('storesearch')) {
+          return _json({'items': []});
+        }
+        if (url.contains('appdetails')) {
+          final appId = request.url.queryParameters['appids']!;
+          return _json({
+            appId: {
+              'success': true,
+              'data': {
+                'steam_appid': int.parse(appId),
+                'name': appId == '728880' ? 'Overcooked! 2' : 'Game $appId',
+                'genres': [
+                  {'description': 'Action'},
+                ],
+                'categories': [
+                  {'description': 'Shared/Split Screen Co-op'},
+                  {'description': 'Full controller support'},
+                ],
+              },
+            },
+          });
+        }
+        return http.Response('not found', 404);
+      }),
+    );
+
+    final candidates = await service.searchRecommendationCandidates(
+      const RecommendationQuery(
+        request: 'fun game to play with two players on one pc with controllers',
+        mediaTypes: {'GAME'},
+        formats: {'CO_OP', 'CONTROLLER'},
+      ),
+    );
+
+    expect(candidates.map((item) => item.title), contains('Overcooked! 2'));
   });
 
   test('service reports missing local Steam API key', () async {

@@ -143,6 +143,74 @@ void main() {
     expect(recommendations.first.item.title, 'Strategy RPG Match');
   });
 
+  test('Steam mode requests require every requested capability', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile(
+      '76561198000000000',
+      [
+        MediaItem(
+          id: 'steam_1',
+          title: 'Played Action Game',
+          coverUrl: '',
+          tags: const ['Action', 'Controller Support'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          status: 'OWNED',
+          playtimeMinutes: 6000,
+          sourceId: 'com.majika.service.steam',
+        ),
+      ],
+      serviceId: 'com.majika.service.steam',
+      serviceName: 'Steam',
+    );
+
+    final recommendations = engine.rankCandidates(
+      profile,
+      [
+        MediaItem(
+          id: 'steam_gta',
+          title: 'Single Player Controller Game',
+          coverUrl: '',
+          tags: const [
+            'Action',
+            'Adventure',
+            'Co-op',
+            'Online Co-op',
+            'Controller Support',
+          ],
+          rating: 9.3,
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+          popularity: 100000,
+        ),
+        MediaItem(
+          id: 'steam_coop',
+          title: 'Couch Co-op Controller Game',
+          coverUrl: '',
+          tags: const [
+            'Action',
+            'Co-op',
+            'Shared/Split Screen Co-op',
+            'Controller Support',
+          ],
+          rating: 8.1,
+          format: 'CO_OP',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+        ),
+      ],
+      query: const RecommendationQuery(
+        request: 'fun game to play with two players on one pc with controller',
+        mediaTypes: {'GAME'},
+        formats: {'MULTIPLAYER', 'CO_OP'},
+      ),
+    );
+
+    expect(recommendations, hasLength(1));
+    expect(recommendations.single.item.id, 'steam_coop');
+  });
+
   test(
     'ratings and AniList favorites affect match scores without flat 99s',
     () {
@@ -328,6 +396,17 @@ void main() {
       expect(magicSchool.aiSelectedTags, contains('Fantasy'));
       expect(magicSchool.aiSelectedTags, contains('Magic'));
       expect(magicSchool.aiSelectedTags, contains('School'));
+
+      final couchCoopGame = const RecommendationQuery(
+        request: 'two players on one pc with controller',
+        formats: {'CO_OP'},
+      ).withInferredSelections(RecommendationQuery.browsableTags);
+
+      expect(couchCoopGame.formats, contains('CO_OP'));
+      expect(couchCoopGame.formats, contains('CONTROLLER'));
+      expect(couchCoopGame.infersLocalCoOp, isTrue);
+      expect(couchCoopGame.effectiveFormats(), contains('CO_OP'));
+      expect(couchCoopGame.mediaTypes, contains('GAME'));
     },
   );
 

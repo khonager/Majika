@@ -60,6 +60,22 @@ class SteamService implements MediaService {
     221100, // DayZ
     359550, // Rainbow Six Siege
   ];
+  static const _localCoopCandidateAppIds = [
+    728880, // Overcooked! 2
+    1426210, // It Takes Two
+    996770, // Moving Out
+    252110, // Lovers in a Dangerous Spacetime
+    1599600, // PlateUp!
+    204360, // Castle Crashers
+    1016920, // Unrailed!
+    386940, // Ultimate Chicken Horse
+    285900, // Gang Beasts
+    674940, // Stick Fight: The Game
+    268910, // Cuphead
+    477160, // Human Fall Flat
+    690640, // Trine 4
+    920210, // LEGO Star Wars: The Skywalker Saga
+  ];
 
   final http.Client _client;
   final SteamApiKeyProvider _apiKeyProvider;
@@ -164,6 +180,10 @@ class SteamService implements MediaService {
       final decoded = await _getJson(uri);
       final appIds = parseStoreSearchAppIds(decoded).take(20).toList();
       items.addAll((await _fetchAppDetails(appIds)).values);
+    }
+    final formats = query.effectiveFormats();
+    if (formats.contains('CO_OP') || formats.contains('ONLINE_CO_OP')) {
+      items.addAll((await _fetchAppDetails(_localCoopCandidateAppIds)).values);
     }
 
     final baseline = await fetchRecommendationCandidates();

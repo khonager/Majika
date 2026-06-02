@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:http/http.dart' as http;
 import 'package:majika/core/ai/local_ai_settings.dart';
+import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation.dart';
 import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/taste_profile.dart';
@@ -434,25 +435,29 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
         .toSet();
     final allowedFormatSet = _canonicalLookup(allowedFormats);
     final allowedMediaTypeSet = _canonicalLookup(allowedMediaTypes);
-    final formats = _stringList(decoded['formats'])
+    final modelFormats = _stringList(decoded['formats'])
         .map((format) => allowedFormatSet[_canonicalKey(format)])
         .whereType<String>()
         .toSet();
-    final mediaTypes = _stringList(decoded['mediaTypes'])
+    final modelMediaTypes = _stringList(decoded['mediaTypes'])
         .map((type) => allowedMediaTypeSet[_canonicalKey(type)])
         .whereType<String>()
         .toSet();
     final searchText = decoded['searchText']?.toString().trim();
+    final ruleInterpreted = original.withInferredSelections(availableTags);
+    final formats = {...ruleInterpreted.formats, ...modelFormats};
+    final mediaTypes = {...ruleInterpreted.mediaTypes, ...modelMediaTypes};
 
     return original.copyWith(
       request: searchText == null || searchText.isEmpty
           ? original.request
           : searchText,
       selectedTags: original.selectedTags,
-      aiSelectedTags: tags,
-      formats: formats.isEmpty ? original.formats : formats,
-      mediaTypes: mediaTypes.isEmpty ? original.mediaTypes : mediaTypes,
-      includeAdult: original.includeAdult || decoded['includeAdult'] == true,
+      aiSelectedTags: {...ruleInterpreted.aiSelectedTags, ...tags},
+      formats: formats,
+      mediaTypes: mediaTypes,
+      includeAdult:
+          ruleInterpreted.includeAdult || decoded['includeAdult'] == true,
     );
   }
 
@@ -558,10 +563,17 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
   }) async {
     if (recommendations.isEmpty) return null;
     final settings = await _runtimeSettings();
+    final requestedFormats = query.effectiveFormats();
+    final requireLocalCoOp = query.infersLocalCoOp;
+    final selectableRecommendations = _formatEligibleRecommendations(
+      recommendations,
+      requestedFormats,
+      requireLocalCoOp: requireLocalCoOp,
+    );
     if (!settings.useLocalAi && textGenerator == null) {
       return fallback.chooseTopRecommendation(
         profile,
-        recommendations,
+        selectableRecommendations,
         query: query,
       );
     }
@@ -570,7 +582,7 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
     final tagLimit = (settings.contextItemLimit / 3).round().clamp(4, 8);
     final signalLimit = (settings.contextItemLimit / 6).round().clamp(2, 4);
     final optionTags = {
-      for (final recommendation in recommendations)
+      for (final recommendation in selectableRecommendations)
         for (final tag in recommendation.item.tags) tag,
     };
     final requestTags = {
@@ -578,8 +590,20 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
       ...query.aiSelectedTags,
       ...query.inferredTags(optionTags),
     };
-    final options = recommendations.take(optionLimit).map((recommendation) {
+    final options = selectableRecommendations.take(optionLimit).map((
+      recommendation,
+    ) {
       final item = recommendation.item;
+      final matchedFormats = _matchedRequestedFormats(
+        item,
+        requestedFormats,
+        requireLocalCoOp: requireLocalCoOp,
+      );
+      final missingFormats = _missingRequestedFormats(
+        item,
+        requestedFormats,
+        requireLocalCoOp: requireLocalCoOp,
+      );
       return {
         'id': item.id,
         'title': item.title,
@@ -590,6 +614,9 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
             .take(tagLimit)
             .toList(),
         'format': item.format,
+        'requestedFormats': requestedFormats.toList(),
+        'matchedFormats': matchedFormats,
+        'missingFormats': missingFormats,
         'signals': recommendation.signals.take(signalLimit).toList(),
       };
     }).toList();
@@ -597,6 +624,8 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
         '''
 Pick the single best recommendation for this user from the options.
 Prioritize the search request and requestTags first; use user taste and score only to break close ties.
+Only the listed options are eligible for this request.
+If missingFormats is empty, that option satisfies all requested play modes.
 Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
 User taste: ${profile.primaryTaste}
 Favorite tags: ${profile.favoriteGenres.take(settings.contextItemLimit).join(', ')}
@@ -605,6 +634,8 @@ Favorite studios: ${profile.favoriteStudios.take(signalLimit).join(', ')}
 Search request: ${query.request}
 User-selected tags: ${query.selectedTags.join(', ')}
 AI-selected tags: ${query.aiSelectedTags.join(', ')}
+Requested formats: ${requestedFormats.join(', ')}
+Local co-op required: $requireLocalCoOp
 Request-inferred tags: ${query.inferredTags(optionTags).join(', ')}
 Options: ${jsonEncode(options)}
 ''';
@@ -619,7 +650,7 @@ Options: ${jsonEncode(options)}
       String? reason;
       for (final candidate in _jsonObjects(response)) {
         final id = candidate['id']?.toString();
-        for (final recommendation in recommendations) {
+        for (final recommendation in selectableRecommendations) {
           if (recommendation.item.id == id) {
             chosen = recommendation;
             reason = candidate['reason']?.toString().trim();
@@ -630,7 +661,7 @@ Options: ${jsonEncode(options)}
           break;
         }
       }
-      if (chosen == null) return recommendations.first;
+      if (chosen == null) return selectableRecommendations.first;
       return chosen.copyWith(
         reason: reason == null || reason.isEmpty ? chosen.reason : reason,
         isAiPick: true,
@@ -638,7 +669,7 @@ Options: ${jsonEncode(options)}
     } catch (_) {
       return fallback.chooseTopRecommendation(
         profile,
-        recommendations,
+        selectableRecommendations,
         query: query,
       );
     }
@@ -652,10 +683,17 @@ Options: ${jsonEncode(options)}
   }) async {
     if (recommendations.isEmpty) return null;
     final settings = await _runtimeSettings();
+    final requestedFormats = query.effectiveFormats();
+    final requireLocalCoOp = query.infersLocalCoOp;
+    final selectableRecommendations = _formatEligibleRecommendations(
+      recommendations,
+      requestedFormats,
+      requireLocalCoOp: requireLocalCoOp,
+    );
     if (!settings.useLocalAi && textGenerator == null) {
       return fallback.chooseHomeRecommendation(
         profiles,
-        recommendations,
+        selectableRecommendations,
         query: query,
       );
     }
@@ -665,7 +703,9 @@ Options: ${jsonEncode(options)}
     final profilesSummary = profiles
         .map((profile) => '${profile.serviceName}: ${profile.primaryTaste}')
         .join(' | ');
-    final options = recommendations.take(optionLimit).map((recommendation) {
+    final options = selectableRecommendations.take(optionLimit).map((
+      recommendation,
+    ) {
       final item = recommendation.item;
       return {
         'id': item.id,
@@ -674,6 +714,17 @@ Options: ${jsonEncode(options)}
         'score': recommendation.matchScore.round(),
         'tags': item.tags.take(tagLimit).toList(),
         'format': item.format,
+        'requestedFormats': requestedFormats.toList(),
+        'matchedFormats': _matchedRequestedFormats(
+          item,
+          requestedFormats,
+          requireLocalCoOp: requireLocalCoOp,
+        ),
+        'missingFormats': _missingRequestedFormats(
+          item,
+          requestedFormats,
+          requireLocalCoOp: requireLocalCoOp,
+        ),
         'mediaType': item.mediaType,
         'reason': recommendation.reason,
       };
@@ -682,12 +733,15 @@ Options: ${jsonEncode(options)}
         '''
 Pick the single best next recommendation across all services.
 Prioritize the user's search request first. Use service fit, tags, and score to break close ties.
+Only the listed options are eligible for this request.
+If missingFormats is empty, that option satisfies all requested play modes.
 Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
 Profiles: $profilesSummary
 Search request: ${query.request}
 User-selected tags: ${query.selectedTags.join(', ')}
 AI-selected tags: ${query.aiSelectedTags.join(', ')}
 Requested formats: ${query.formats.join(', ')}
+Local co-op required: $requireLocalCoOp
 Requested media types: ${query.mediaTypes.join(', ')}
 Options: ${jsonEncode(options)}
 ''';
@@ -702,7 +756,7 @@ Options: ${jsonEncode(options)}
       String? reason;
       for (final candidate in _jsonObjects(response)) {
         final id = candidate['id']?.toString();
-        for (final recommendation in recommendations) {
+        for (final recommendation in selectableRecommendations) {
           if (recommendation.item.id == id) {
             chosen = recommendation;
             reason = candidate['reason']?.toString().trim();
@@ -711,7 +765,7 @@ Options: ${jsonEncode(options)}
         }
         if (chosen != null) break;
       }
-      if (chosen == null) return recommendations.first;
+      if (chosen == null) return selectableRecommendations.first;
       return chosen.copyWith(
         reason: reason == null || reason.isEmpty ? chosen.reason : reason,
         isAiPick: true,
@@ -723,5 +777,143 @@ Options: ${jsonEncode(options)}
         query: query,
       );
     }
+  }
+
+  List<Recommendation> _formatEligibleRecommendations(
+    List<Recommendation> recommendations,
+    Set<String> requestedFormats, {
+    required bool requireLocalCoOp,
+  }) {
+    final eligible = recommendations
+        .where(
+          (recommendation) => _satisfiesRequestedFormats(
+            recommendation.item,
+            requestedFormats,
+            requireLocalCoOp: requireLocalCoOp,
+          ),
+        )
+        .toList();
+    return eligible.isEmpty ? recommendations : eligible;
+  }
+
+  bool _satisfiesRequestedFormats(
+    MediaItem item,
+    Set<String> requestedFormats, {
+    required bool requireLocalCoOp,
+  }) {
+    return _missingRequestedFormats(
+      item,
+      requestedFormats,
+      requireLocalCoOp: requireLocalCoOp,
+    ).isEmpty;
+  }
+
+  List<String> _matchedRequestedFormats(
+    MediaItem item,
+    Set<String> requestedFormats, {
+    required bool requireLocalCoOp,
+  }) {
+    return requestedFormats
+        .where(
+          (format) => _matchesRequestedFormat(
+            item,
+            format,
+            requireLocalCoOp: requireLocalCoOp,
+          ),
+        )
+        .toList();
+  }
+
+  List<String> _missingRequestedFormats(
+    MediaItem item,
+    Set<String> requestedFormats, {
+    required bool requireLocalCoOp,
+  }) {
+    final steamFormats = requestedFormats
+        .where(RecommendationQuery.steamFormats.contains)
+        .toList();
+    final otherFormats = requestedFormats
+        .where((format) => !RecommendationQuery.steamFormats.contains(format))
+        .toList();
+    final missing = <String>[
+      for (final format in steamFormats)
+        if (!_matchesRequestedFormat(
+          item,
+          format,
+          requireLocalCoOp: requireLocalCoOp,
+        ))
+          format,
+    ];
+
+    if (otherFormats.isNotEmpty &&
+        !otherFormats.any(
+          (format) => _matchesRequestedFormat(
+            item,
+            format,
+            requireLocalCoOp: requireLocalCoOp,
+          ),
+        )) {
+      missing.addAll(otherFormats);
+    }
+
+    return missing;
+  }
+
+  bool _matchesRequestedFormat(
+    MediaItem item,
+    String requestedFormat, {
+    required bool requireLocalCoOp,
+  }) {
+    if (requestedFormat == item.format) return true;
+    final normalizedTags = item.tags
+        .map((tag) => tag.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ''))
+        .toSet();
+    if (requestedFormat == 'CO_OP' && requireLocalCoOp) {
+      return _localCoOpAliases.any(normalizedTags.contains);
+    }
+    return _formatAliases(requestedFormat).any(normalizedTags.contains);
+  }
+
+  Set<String> get _localCoOpAliases => const {
+    'localcoop',
+    'localmultiplayer',
+    'sharedsplitscreencoop',
+    'sharedsplitscreen',
+    'splitscreencoop',
+    'splitscreen',
+    'remoteplaytogether',
+    'lancoop',
+  };
+
+  Set<String> _formatAliases(String format) {
+    return switch (format) {
+      'SINGLE_PLAYER' => {'singleplayer'},
+      'MULTIPLAYER' => {
+        'multiplayer',
+        'coop',
+        'localcoop',
+        'onlinecoop',
+        'pvp',
+        'onlinepvp',
+        'remoteplaytogether',
+        'sharedsplitscreencoop',
+        'sharedsplitscreenpvp',
+      },
+      'CO_OP' => {
+        'coop',
+        'localcoop',
+        'sharedsplitscreencoop',
+        'remoteplaytogether',
+      },
+      'ONLINE_CO_OP' => {'onlinecoop'},
+      'CONTROLLER' => {
+        'controller',
+        'controllersupport',
+        'fullcontrollersupport',
+        'partialcontrollersupport',
+      },
+      'STEAM_DECK' => {'steamdeck', 'steamdeckverified'},
+      _ => {format.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '')},
+    };
   }
 }

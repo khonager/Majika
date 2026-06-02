@@ -184,6 +184,68 @@ void main() {
     expect(find.text('Time Manipulation'), findsWidgets);
   });
 
+  testWidgets('unsent recommendation search edits survive rebuilds', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    final searchField = find.widgetWithText(
+      TextField,
+      'Search a vibe, tag, format, or request',
+    );
+    await tester.enterText(searchField, 'romance movie about time travel');
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).first, 'unsent draft');
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
+    );
+    await tester.pump();
+
+    expect(find.text('unsent draft'), findsOneWidget);
+    expect(find.text('romance movie about time travel'), findsNothing);
+  });
+
+  testWidgets('Steam controller language selects controller mode', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FakeSteamMediaService())),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build game profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search a genre, mode, game, or vibe'),
+      'fun game to play with two players on one pc with controllers',
+    );
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    final controllerChip = tester.widget<FilterChip>(
+      find.descendant(
+        of: find.byKey(const ValueKey('filter-format-controller')),
+        matching: find.byType(FilterChip),
+      ),
+    );
+    expect(controllerChip.selected, isTrue);
+    expect(find.text('Couch Co-op Controller Game'), findsOneWidget);
+    expect(find.text('Funny PC Game'), findsNothing);
+  });
+
   testWidgets('cancelled recommendation search ignores late results', (
     WidgetTester tester,
   ) async {
@@ -1126,7 +1188,26 @@ class _FakeSteamMediaService implements MediaService {
     RecommendationQuery query,
   ) async {
     final tags = query.effectiveTags(await fetchAvailableTags());
+    final formats = query.effectiveFormats();
     return [
+      if (formats.contains('CO_OP') && formats.contains('CONTROLLER'))
+        MediaItem(
+          id: 'steam_4',
+          title: 'Couch Co-op Controller Game',
+          coverUrl: '',
+          tags: const [
+            'Action',
+            'Co-op',
+            'Shared/Split Screen Co-op',
+            'Controller Support',
+          ],
+          rating: 8.6,
+          format: 'CO_OP',
+          mediaType: 'GAME',
+          sourceId: id,
+          siteUrl: 'https://store.steampowered.com/app/4',
+          popularity: 50000,
+        ),
       if (tags.contains('Comedy') ||
           query.effectiveMediaTypes().contains('GAME'))
         MediaItem(
@@ -1152,6 +1233,7 @@ class _FakeSteamMediaService implements MediaService {
       'RPG',
       'Strategy',
       'Single-player',
+      'Co-op',
       'Controller Support',
     ];
   }

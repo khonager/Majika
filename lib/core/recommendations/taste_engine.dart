@@ -95,12 +95,9 @@ class TasteEngine {
       ...query.aiSelectedTags,
       ...query.inferredTags(availableTags),
     };
-    final requestedFormats = query.formats.isNotEmpty
-        ? query.formats
-        : query.inferredFormats();
-    final requestedMediaTypes = query.mediaTypes.isNotEmpty
-        ? query.mediaTypes
-        : query.inferredMediaTypes();
+    final requestedFormats = query.effectiveFormats();
+    final requestedMediaTypes = query.effectiveMediaTypes();
+    final requireLocalCoOp = query.infersLocalCoOp;
     final includeAdult = query.includeAdult || query.infersAdult;
 
     for (final candidate in candidates) {
@@ -111,7 +108,11 @@ class TasteEngine {
         continue;
       }
       if (requestedFormats.isNotEmpty &&
-          !_matchesAnyFormat(candidate, requestedFormats)) {
+          !_matchesRequestedFormats(
+            candidate,
+            requestedFormats,
+            requireLocalCoOp: requireLocalCoOp,
+          )) {
         continue;
       }
       if (requestedTags.isNotEmpty &&
@@ -189,7 +190,11 @@ class TasteEngine {
         signals.addAll(requestedGenreMatches.map((tag) => 'wanted $tag'));
       }
 
-      if (_matchesAnyFormat(candidate, requestedFormats)) {
+      if (_matchesRequestedFormats(
+        candidate,
+        requestedFormats,
+        requireLocalCoOp: requireLocalCoOp,
+      )) {
         score += 3.2;
         signals.add('wanted ${candidate.format.replaceAll('_', ' ')}');
       }
@@ -361,24 +366,93 @@ class TasteEngine {
     return ratingWeight * statusWeight * recentWeight;
   }
 
-  bool _matchesAnyFormat(MediaItem item, Set<String> requestedFormats) {
+  bool _matchesRequestedFormats(
+    MediaItem item,
+    Set<String> requestedFormats, {
+    required bool requireLocalCoOp,
+  }) {
     if (requestedFormats.isEmpty) return true;
-    if (requestedFormats.contains(item.format)) return true;
+
+    final steamFormats = requestedFormats
+        .where(RecommendationQuery.steamFormats.contains)
+        .toSet();
+    final otherFormats = requestedFormats.difference(steamFormats);
+
+    if (steamFormats.isNotEmpty &&
+        !steamFormats.every(
+          (format) =>
+              _matchesFormat(item, format, requireLocalCoOp: requireLocalCoOp),
+        )) {
+      return false;
+    }
+
+    if (otherFormats.isNotEmpty &&
+        !otherFormats.any(
+          (format) =>
+              _matchesFormat(item, format, requireLocalCoOp: requireLocalCoOp),
+        )) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool _matchesFormat(
+    MediaItem item,
+    String requestedFormat, {
+    required bool requireLocalCoOp,
+  }) {
+    if (requestedFormat == item.format) return true;
     final normalizedTags = item.tags
         .map((tag) => tag.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ''))
         .toSet();
-    for (final format in requestedFormats) {
-      final normalized = format
-          .toLowerCase()
-          .replaceAll('single_player', 'singleplayer')
-          .replaceAll('online_co_op', 'onlinecoop')
-          .replaceAll('co_op', 'coop')
-          .replaceAll('steam_deck', 'steamdeck')
-          .replaceAll('controller', 'controllersupport')
-          .replaceAll(RegExp(r'[^a-z0-9]+'), '');
-      if (normalizedTags.contains(normalized)) return true;
+    if (requestedFormat == 'CO_OP' && requireLocalCoOp) {
+      return _localCoOpAliases.any(normalizedTags.contains);
     }
-    return false;
+    return _formatAliases(requestedFormat).any(normalizedTags.contains);
+  }
+
+  Set<String> get _localCoOpAliases => const {
+    'localcoop',
+    'localmultiplayer',
+    'sharedsplitscreencoop',
+    'sharedsplitscreen',
+    'splitscreencoop',
+    'splitscreen',
+    'remoteplaytogether',
+    'lancoop',
+  };
+
+  Set<String> _formatAliases(String format) {
+    return switch (format) {
+      'SINGLE_PLAYER' => {'singleplayer'},
+      'MULTIPLAYER' => {
+        'multiplayer',
+        'coop',
+        'localcoop',
+        'onlinecoop',
+        'pvp',
+        'onlinepvp',
+        'remoteplaytogether',
+        'sharedsplitscreencoop',
+        'sharedsplitscreenpvp',
+      },
+      'CO_OP' => {
+        'coop',
+        'localcoop',
+        'sharedsplitscreencoop',
+        'remoteplaytogether',
+      },
+      'ONLINE_CO_OP' => {'onlinecoop'},
+      'CONTROLLER' => {
+        'controller',
+        'controllersupport',
+        'fullcontrollersupport',
+        'partialcontrollersupport',
+      },
+      'STEAM_DECK' => {'steamdeck', 'steamdeckverified'},
+      _ => {format.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '')},
+    };
   }
 
   double _steamCandidateScore(MediaItem candidate) {

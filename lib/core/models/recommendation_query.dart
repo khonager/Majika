@@ -147,6 +147,28 @@ class RecommendationQuery {
     ]);
   }
 
+  bool get infersLocalCoOp {
+    final text = _normalize(request);
+    return _containsAny(text, [
+      'couch co op',
+      'couch co-op',
+      'local co op',
+      'local co-op',
+      'local coop',
+      'local multiplayer',
+      'same pc',
+      'same computer',
+      'one pc',
+      'one computer',
+      'two players',
+      '2 players',
+      'split screen',
+      'splitscreen',
+      'shared screen',
+      'shared/split screen',
+    ]);
+  }
+
   RecommendationQuery copyWith({
     String? request,
     Set<String>? selectedTags,
@@ -179,7 +201,7 @@ class RecommendationQuery {
   }
 
   Set<String> effectiveFormats() {
-    return formats.isNotEmpty ? formats : inferredFormats();
+    return {...inferredFormats(), ...formats};
   }
 
   Set<String> effectiveMediaTypes() {
@@ -245,7 +267,27 @@ class RecommendationQuery {
     if (_containsAny(text, ['multiplayer', 'pvp'])) {
       formats.add('MULTIPLAYER');
     }
-    if (_containsAny(text, ['co op', 'co-op', 'coop'])) {
+    if (_containsAny(text, [
+      'co op',
+      'co-op',
+      'coop',
+      'couch co op',
+      'couch co-op',
+      'local co op',
+      'local co-op',
+      'local coop',
+      'local multiplayer',
+      'remote play together',
+      'same pc',
+      'same computer',
+      'one pc',
+      'one computer',
+      'two players',
+      '2 players',
+      'split screen',
+      'splitscreen',
+      'shared screen',
+    ])) {
       formats.add('CO_OP');
     }
     if (_containsAny(text, ['online co op', 'online co-op', 'online coop'])) {

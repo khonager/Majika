@@ -387,6 +387,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final byService = <String, List<Recommendation>>{};
       final merged = <Recommendation>[];
+      var chooserQuery = rawQuery;
 
       for (final workspace in importedWorkspaces) {
         final profile = workspace.profile;
@@ -400,6 +401,15 @@ class _HomeScreenState extends State<HomeScreen> {
           serviceName: workspace.service.displayName,
           allowedMediaTypes: workspace.service.supportedMediaTypes,
           allowedFormats: workspace.service.supportedFormats,
+        );
+        chooserQuery = chooserQuery.copyWith(
+          aiSelectedTags: {
+            ...chooserQuery.aiSelectedTags,
+            ...query.aiSelectedTags,
+          },
+          mediaTypes: {...chooserQuery.mediaTypes, ...query.mediaTypes},
+          formats: {...chooserQuery.formats, ...query.formats},
+          includeAdult: chooserQuery.includeAdult || query.includeAdult,
         );
 
         var candidates = workspace.candidates;
@@ -452,7 +462,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final chosen = await _aiService.chooseHomeRecommendation(
         importedWorkspaces.map((workspace) => workspace.profile!).toList(),
         merged,
-        query: rawQuery,
+        query: chooserQuery,
       );
       final ordered = _promoteChosenRecommendation(merged, chosen);
 
@@ -1021,7 +1031,8 @@ class _HomeSearchPanelState extends State<_HomeSearchPanel> {
   @override
   void didUpdateWidget(covariant _HomeSearchPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.query.request != _controller.text) {
+    if (oldWidget.query.request != widget.query.request &&
+        widget.query.request != _controller.text) {
       _controller.text = widget.query.request;
     }
   }
@@ -1967,7 +1978,8 @@ class _RecommendationSearchPanelState
   @override
   void didUpdateWidget(covariant _RecommendationSearchPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.query.request != _searchController.text) {
+    if (oldWidget.query.request != widget.query.request &&
+        widget.query.request != _searchController.text) {
       _searchController.text = widget.query.request;
     }
   }
@@ -2043,7 +2055,9 @@ class _RecommendationSearchPanelState
                 _FilterChipButton(
                   key: ValueKey('filter-type-${mediaType.toLowerCase()}'),
                   label: _mediaTypeLabel(mediaType),
-                  selected: widget.query.mediaTypes.contains(mediaType),
+                  selected: widget.query.effectiveMediaTypes().contains(
+                    mediaType,
+                  ),
                   onSelected: () => _toggleMediaType(mediaType),
                 ),
               if (widget.mediaService.supportsAdultContent)
@@ -2065,7 +2079,7 @@ class _RecommendationSearchPanelState
               return _FilterChipButton(
                 key: ValueKey('filter-format-${format.toLowerCase()}'),
                 label: _formatLabel(format),
-                selected: widget.query.formats.contains(format),
+                selected: widget.query.effectiveFormats().contains(format),
                 onSelected: () => _toggleFormat(format),
               );
             }).toList(),

@@ -65,6 +65,44 @@ void main() {
     expect(interpreted.aiSelectedTags, contains('RPG'));
   });
 
+  test('flutter gemma service keeps rule-inferred Steam constraints', () async {
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        return '''
+```json
+{
+  "tags": [],
+  "formats": ["MULTIPLAYER", "CO_OP"],
+  "mediaTypes": ["GAME"],
+  "includeAdult": false,
+  "searchText": "fun game to play with two players on one pc with controllers"
+}
+```
+''';
+      },
+    );
+
+    final interpreted = await service.interpretRecommendationRequest(
+      const RecommendationQuery(
+        request: 'fun game to play with two players on one pc with controllers',
+      ),
+      availableTags: const [
+        'Action',
+        'Adventure',
+        'Co-op',
+        'Controller Support',
+      ],
+      serviceName: 'Steam',
+      allowedMediaTypes: RecommendationQuery.steamMediaTypes,
+      allowedFormats: RecommendationQuery.steamFormats,
+    );
+
+    expect(interpreted.mediaTypes, contains('GAME'));
+    expect(interpreted.formats, contains('CO_OP'));
+    expect(interpreted.formats, contains('MULTIPLAYER'));
+    expect(interpreted.formats, contains('CONTROLLER'));
+  });
+
   test('flutter gemma service canonicalizes model filter spelling', () async {
     final service = FlutterGemmaLocalAiService(
       textGenerator: (prompt, maxTokens) async {
@@ -329,6 +367,100 @@ void main() {
     );
   });
 
+  test('local AI top pick cannot override missing Steam modes', () async {
+    late String capturedPrompt;
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        capturedPrompt = prompt;
+        return '{"id":"steam_gta","reason":"Popular profile match."}';
+      },
+    );
+
+    final chosen = await service.chooseTopRecommendation(
+      _profile(serviceName: 'Steam'),
+      [
+        _recommendation(
+          'steam_gta',
+          'Grand Theft Auto V Legacy',
+          tags: const ['Action', 'Adventure', 'Controller Support'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+        ),
+        _recommendation(
+          'steam_coop',
+          'Couch Co-op Controller Game',
+          tags: const ['Action', 'Co-op', 'Controller Support'],
+          format: 'CO_OP',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+        ),
+      ],
+      query: const RecommendationQuery(
+        request: 'fun game to play with two players on one pc with controller',
+        mediaTypes: {'GAME'},
+        formats: {'MULTIPLAYER', 'CO_OP', 'CONTROLLER'},
+      ),
+    );
+
+    expect(capturedPrompt, contains('missingFormats'));
+    expect(capturedPrompt, contains('Only the listed options are eligible'));
+    expect(capturedPrompt, isNot(contains('Grand Theft Auto V Legacy')));
+    expect(chosen?.item.id, 'steam_coop');
+    expect(chosen?.isAiPick, isFalse);
+  });
+
+  test(
+    'local rules top pick requires local co-op for one-pc requests',
+    () async {
+      final service = FlutterGemmaLocalAiService(
+        settingsLoader: () async => const LocalAiRuntimeSettings.defaults(),
+      );
+
+      final chosen = await service.chooseTopRecommendation(
+        _profile(serviceName: 'Steam'),
+        [
+          _recommendation(
+            'steam_gta',
+            'Grand Theft Auto V Legacy',
+            tags: const [
+              'Action',
+              'Adventure',
+              'Co-op',
+              'Online Co-op',
+              'Controller Support',
+            ],
+            format: 'SINGLE_PLAYER',
+            mediaType: 'GAME',
+            sourceId: 'com.majika.service.steam',
+          ),
+          _recommendation(
+            'steam_moving_out',
+            'Moving Out',
+            tags: const [
+              'Action',
+              'Casual',
+              'Shared/Split Screen Co-op',
+              'Controller Support',
+            ],
+            format: 'CO_OP',
+            mediaType: 'GAME',
+            sourceId: 'com.majika.service.steam',
+          ),
+        ],
+        query: const RecommendationQuery(
+          request:
+              'fun game to play with two players on one pc with controllers',
+          mediaTypes: {'GAME'},
+          formats: {'CO_OP', 'CONTROLLER'},
+        ),
+      );
+
+      expect(chosen?.item.id, 'steam_moving_out');
+      expect(chosen?.isAiPick, isFalse);
+    },
+  );
+
   test('local AI service can choose a home recommendation', () async {
     final service = FlutterGemmaLocalAiService(
       textGenerator: (prompt, maxTokens) async {
@@ -369,7 +501,7 @@ void main() {
   });
 }
 
-TasteProfile _profile() {
+TasteProfile _profile({String serviceName = 'AniList'}) {
   return TasteProfile(
     userName: 'tester',
     library: const [],
@@ -385,6 +517,7 @@ TasteProfile _profile() {
     completedCount: 0,
     currentCount: 0,
     importedAt: DateTime(2026),
+    serviceName: serviceName,
   );
 }
 
@@ -392,6 +525,7 @@ Recommendation _recommendation(
   String id,
   String title, {
   List<String> tags = const ['Mystery'],
+  String format = 'TV',
   String mediaType = 'ANIME',
   String sourceId = 'com.majika.service.anilist',
 }) {
@@ -401,6 +535,7 @@ Recommendation _recommendation(
       title: title,
       coverUrl: '',
       tags: tags,
+      format: format,
       mediaType: mediaType,
       sourceId: sourceId,
     ),
