@@ -596,6 +596,32 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('settings shows delete control for downloaded local model', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      LocalAiSettingsKeys.localAiMode: localAiModeRulesOnly,
+      LocalAiSettingsKeys.useLocalAi: false,
+      LocalAiSettingsKeys.downloadedModelId: 'gemma3_1b_it',
+      LocalAiSettingsKeys.downloadedModelName: 'Gemma 3 1B IT',
+    });
+
+    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+
+    await tester.scrollUntilVisible(
+      find.text('AI mode'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Downloaded'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('delete-downloaded-ai-model')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('settings persists Hugging Face token locally', (
     WidgetTester tester,
   ) async {

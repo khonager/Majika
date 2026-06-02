@@ -136,6 +136,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _useLocalAi = false;
   bool _useAiForSearch = true;
   bool _isDownloadingModel = false;
+  bool _isDeletingModel = false;
   bool _showAdvancedLocalAi = false;
   String _localAiMode = localAiModeRulesOnly;
   String _localBackend = localAiBackendAuto;
@@ -297,6 +298,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> _clearDownloadedModelSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(LocalAiSettingsKeys.downloadedModelId);
+    await prefs.remove(LocalAiSettingsKeys.downloadedModelName);
+    await prefs.setBool(LocalAiSettingsKeys.useLocalAi, false);
+    await prefs.setString(
+      LocalAiSettingsKeys.localAiMode,
+      localAiModeRulesOnly,
+    );
+    await prefs.setString(
+      LocalAiSettingsKeys.localAiProvider,
+      fallbackRulesProvider,
+    );
+  }
+
   Future<void> _loadProfileHuggingFaceTokenIfNeeded() async {
     if (_huggingFaceTokenController.text.trim().isNotEmpty) return;
     try {
@@ -414,6 +430,73 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _downloadProgress = null;
     });
     showInfoToast(context, 'Model download canceled.');
+  }
+
+  Future<void> _deleteDownloadedModel() async {
+    if (_isDownloadingModel || _isDeletingModel) return;
+    final modelToDelete = _effectiveSelectedModel;
+    final isDownloaded =
+        _downloadedModelId == modelToDelete.id ||
+        _downloadedModelName == modelToDelete.name;
+    if (!isDownloaded) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete model?'),
+        content: Text(
+          'Remove ${modelToDelete.name} from this device. Majika will use rules only until another model is installed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.delete_rounded),
+            label: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isDeletingModel = true);
+    try {
+      await FlutterGemma.uninstallModel(modelToDelete.storageFileName);
+      if (!mounted) return;
+      setState(() {
+        _downloadedModelId = null;
+        _downloadedModelName = null;
+        _useLocalAi = false;
+        _localAiMode = localAiModeRulesOnly;
+        _localAiProvider = fallbackRulesProvider;
+        _downloadProgress = null;
+      });
+      await _clearDownloadedModelSettings();
+      if (!mounted) return;
+      showInfoToast(context, '${modelToDelete.name} deleted.');
+    } catch (error) {
+      if (!mounted) return;
+      if (error.toString().contains('Model not found')) {
+        setState(() {
+          _downloadedModelId = null;
+          _downloadedModelName = null;
+          _useLocalAi = false;
+          _localAiMode = localAiModeRulesOnly;
+          _localAiProvider = fallbackRulesProvider;
+          _downloadProgress = null;
+        });
+        await _clearDownloadedModelSettings();
+        if (!mounted) return;
+        showInfoToast(context, 'Model record cleared.');
+      } else {
+        showErrorToast(context, 'Could not delete model: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _isDeletingModel = false);
+    }
   }
 
   @override
@@ -694,11 +777,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     showInfoToast(context, 'Local AI mode set to $value.');
                   },
                 ),
-                if (_usesOnDeviceAi)
+                if (_usesOnDeviceAi || _hasDownloadedModel)
                   _ModelDownloadCard(
                     models: _visibleLocalAiModels,
                     selectedModel: _effectiveSelectedModel,
                     isDownloading: _isDownloadingModel,
+                    isDeleting: _isDeletingModel,
                     progress: _downloadProgress,
                     downloadedId: _downloadedModelId,
                     downloadedName: _downloadedModelName,
@@ -730,6 +814,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onHuggingFaceTokenChanged: _saveHuggingFaceToken,
                     onDownload: _downloadRecommendedModel,
                     onCancel: _cancelModelDownload,
+                    onDelete: _deleteDownloadedModel,
                   ),
                 if (_usesOnDeviceAi)
                   _OptionRow(
@@ -976,6 +1061,11 @@ class _DownloadableModel {
     return mobileUrl;
   }
 
+  String get storageFileName {
+    final path = Uri.parse(url).pathSegments.last;
+    return path.isEmpty ? url.split('/').last : path;
+  }
+
   bool get isDesktop =>
       !kIsWeb &&
       (defaultTargetPlatform == TargetPlatform.linux ||
@@ -1001,6 +1091,7 @@ class _ModelDownloadCard extends StatelessWidget {
   final List<_DownloadableModel> models;
   final _DownloadableModel selectedModel;
   final bool isDownloading;
+  final bool isDeleting;
   final double? progress;
   final String? downloadedId;
   final String? downloadedName;
@@ -1009,11 +1100,13 @@ class _ModelDownloadCard extends StatelessWidget {
   final ValueChanged<String> onHuggingFaceTokenChanged;
   final VoidCallback onDownload;
   final VoidCallback onCancel;
+  final VoidCallback onDelete;
 
   const _ModelDownloadCard({
     required this.models,
     required this.selectedModel,
     required this.isDownloading,
+    required this.isDeleting,
     required this.progress,
     required this.downloadedId,
     required this.downloadedName,
@@ -1022,6 +1115,7 @@ class _ModelDownloadCard extends StatelessWidget {
     required this.onHuggingFaceTokenChanged,
     required this.onDownload,
     required this.onCancel,
+    required this.onDelete,
   });
 
   @override
@@ -1090,7 +1184,7 @@ class _ModelDownloadCard extends StatelessWidget {
     Widget downloadButton() {
       return FilledButton.icon(
         key: const ValueKey('download-recommended-ai-model'),
-        onPressed: isDownloading ? onCancel : onDownload,
+        onPressed: isDeleting ? null : (isDownloading ? onCancel : onDownload),
         icon: isDownloading
             ? const Icon(Icons.cancel_rounded)
             : Icon(
@@ -1101,6 +1195,30 @@ class _ModelDownloadCard extends StatelessWidget {
         label: Text(
           isDownloading ? 'Cancel' : (isDownloaded ? 'Downloaded' : 'Download'),
         ),
+      );
+    }
+
+    Widget deleteButton() {
+      return IconButton.filledTonal(
+        key: const ValueKey('delete-downloaded-ai-model'),
+        tooltip: 'Delete downloaded model',
+        onPressed: isDownloading || isDeleting ? null : onDelete,
+        icon: isDeleting
+            ? const SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.delete_rounded),
+      );
+    }
+
+    Widget modelActions() {
+      return Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        alignment: WrapAlignment.end,
+        children: [if (isDownloaded) deleteButton(), downloadButton()],
       );
     }
 
@@ -1131,7 +1249,7 @@ class _ModelDownloadCard extends StatelessWidget {
                     const SizedBox(height: 12),
                     Align(
                       alignment: Alignment.centerRight,
-                      child: downloadButton(),
+                      child: modelActions(),
                     ),
                   ],
                 );
@@ -1143,7 +1261,7 @@ class _ModelDownloadCard extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(child: modelDetails()),
                   const SizedBox(width: 12),
-                  downloadButton(),
+                  modelActions(),
                 ],
               );
             },
