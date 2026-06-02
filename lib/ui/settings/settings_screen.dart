@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/firebase/firebase_profile_service.dart';
@@ -146,6 +147,8 @@ const _downloadableLocalAiModels = [
 ];
 
 final _defaultLocalAiModel = _downloadableLocalAiModels.first;
+const _flmLocalAiEndpoint = 'http://127.0.0.1:52625/v1/chat/completions';
+const _flmDefaultModel = 'llama3.2:1b';
 const _externalLocalServerModelPresets = [
   _ServerModelPreset(
     name: 'qwen3:1.7b',
@@ -186,6 +189,12 @@ const _externalLocalServerModelPresets = [
     sizeLabel: '8.1 GB',
     description:
         'Large Gemma option for stronger reasoning on beefier machines.',
+  ),
+  _ServerModelPreset(
+    name: _flmDefaultModel,
+    tier: _AiModelTier.low,
+    sizeLabel: 'FastFlowLM',
+    description: 'FastFlowLM starter model for AMD NPU-oriented setups.',
   ),
 ];
 
@@ -267,6 +276,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       orElse: () => _externalLocalServerModelPresets.first,
     );
   }
+
+  String get _effectiveServerModelName {
+    final modelName = _localServerModelController.text.trim();
+    return modelName.isEmpty ? defaultLocalAiModel : modelName;
+  }
+
+  String get _ollamaServeCommand => 'ollama run $_effectiveServerModelName';
+
+  String get _flmServeCommand => 'flm serve $_flmDefaultModel';
 
   @override
   void initState() {
@@ -374,6 +392,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveString(String key, String value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(key, value);
+  }
+
+  Future<void> _copyServerCommand(String label, String command) async {
+    await Clipboard.setData(ClipboardData(text: command));
+    if (!mounted) return;
+    showInfoToast(context, '$label command copied.');
+  }
+
+  Future<void> _useOllamaDefaults() async {
+    final modelName = _effectiveServerModelName == _flmDefaultModel
+        ? defaultLocalAiModel
+        : _effectiveServerModelName;
+    setState(() {
+      _localEndpointController.text = defaultLocalAiEndpoint;
+      _localServerModelController.text = modelName;
+      _localAiMode = localAiModeExternalServer;
+      _useLocalAi = true;
+      _localAiProvider = localAiModeExternalServer;
+    });
+    await _saveString(
+      LocalAiSettingsKeys.localEndpoint,
+      defaultLocalAiEndpoint,
+    );
+    await _saveString(LocalAiSettingsKeys.localServerModel, modelName);
+    await _saveString(
+      LocalAiSettingsKeys.localAiMode,
+      localAiModeExternalServer,
+    );
+    await _saveBool(LocalAiSettingsKeys.useLocalAi, true);
+  }
+
+  Future<void> _useFlmDefaults() async {
+    setState(() {
+      _localEndpointController.text = _flmLocalAiEndpoint;
+      _localServerModelController.text = _flmDefaultModel;
+      _localAiMode = localAiModeExternalServer;
+      _useLocalAi = true;
+      _localAiProvider = localAiModeExternalServer;
+    });
+    await _saveString(LocalAiSettingsKeys.localEndpoint, _flmLocalAiEndpoint);
+    await _saveString(LocalAiSettingsKeys.localServerModel, _flmDefaultModel);
+    await _saveString(
+      LocalAiSettingsKeys.localAiMode,
+      localAiModeExternalServer,
+    );
+    await _saveBool(LocalAiSettingsKeys.useLocalAi, true);
   }
 
   Future<void> _saveDownloadedModel(_DownloadableModel model) async {
@@ -985,6 +1049,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _saveString(LocalAiSettingsKeys.localServerModel, value);
                     },
                   ),
+                if (_usesExternalServer)
+                  _ServerRuntimeHelpCard(
+                    ollamaCommand: _ollamaServeCommand,
+                    flmCommand: _flmServeCommand,
+                    onUseOllama: () {
+                      unawaited(_useOllamaDefaults());
+                      showInfoToast(context, 'Ollama endpoint selected.');
+                    },
+                    onUseFlm: () {
+                      unawaited(_useFlmDefaults());
+                      showInfoToast(context, 'FastFlowLM endpoint selected.');
+                    },
+                    onCopyOllama: () =>
+                        _copyServerCommand('Ollama', _ollamaServeCommand),
+                    onCopyFlm: () =>
+                        _copyServerCommand('FastFlowLM', _flmServeCommand),
+                  ),
                 _SwitchRow(
                   icon: Icons.manage_search_rounded,
                   title: 'AI search interpretation',
@@ -1290,6 +1371,155 @@ class _ServerModelPresetCard extends StatelessWidget {
             onPressed: _openOllamaDownload,
             icon: const Icon(Icons.open_in_new_rounded, size: 16),
             label: const Text('Install local server app'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ServerRuntimeHelpCard extends StatelessWidget {
+  final String ollamaCommand;
+  final String flmCommand;
+  final VoidCallback onUseOllama;
+  final VoidCallback onUseFlm;
+  final VoidCallback onCopyOllama;
+  final VoidCallback onCopyFlm;
+
+  const _ServerRuntimeHelpCard({
+    required this.ollamaCommand,
+    required this.flmCommand,
+    required this.onUseOllama,
+    required this.onUseFlm,
+    required this.onCopyOllama,
+    required this.onCopyFlm,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Serve a local model',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Pick a runtime, copy its start command, then leave it running while Majika searches.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Colors.white70,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _ServerCommandRow(
+            title: 'Ollama',
+            subtitle:
+                'Endpoint ${defaultLocalAiEndpoint}; model follows the preset above.',
+            command: ollamaCommand,
+            onUse: onUseOllama,
+            onCopy: onCopyOllama,
+          ),
+          const SizedBox(height: 10),
+          _ServerCommandRow(
+            title: 'FastFlowLM',
+            subtitle:
+                'Endpoint $_flmLocalAiEndpoint; starter model $_flmDefaultModel.',
+            command: flmCommand,
+            onUse: onUseFlm,
+            onCopy: onCopyFlm,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ServerCommandRow extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final String command;
+  final VoidCallback onUse;
+  final VoidCallback onCopy;
+
+  const _ServerCommandRow({
+    required this.title,
+    required this.subtitle,
+    required this.command,
+    required this.onUse,
+    required this.onCopy,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filledTonal(
+                tooltip: 'Use $title settings',
+                onPressed: onUse,
+                icon: const Icon(Icons.check_rounded),
+              ),
+              const SizedBox(width: 4),
+              IconButton.filledTonal(
+                tooltip: 'Copy $title command',
+                onPressed: onCopy,
+                icon: const Icon(Icons.copy_rounded),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SelectableText(
+            command,
+            style: const TextStyle(
+              color: Colors.white,
+              fontFamily: 'monospace',
+              fontSize: 12,
+            ),
           ),
         ],
       ),

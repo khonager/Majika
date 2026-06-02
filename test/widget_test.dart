@@ -682,7 +682,45 @@ void main() {
     expect(find.text('qwen3:4b-instruct'), findsWidgets);
     expect(find.text(defaultLocalAiEndpoint), findsWidgets);
     expect(find.text('Local server model'), findsOneWidget);
+    expect(find.text('Serve a local model'), findsOneWidget);
+    expect(find.textContaining('flm serve llama3.2:1b'), findsOneWidget);
     expect(find.text('Gemma 3 1B IT'), findsNothing);
+  });
+
+  testWidgets('settings can switch external server defaults to FastFlowLM', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      LocalAiSettingsKeys.localAiMode: localAiModeExternalServer,
+      LocalAiSettingsKeys.useLocalAi: true,
+    });
+
+    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+
+    await tester.scrollUntilVisible(
+      find.text('Serve a local model'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Use FastFlowLM settings'));
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+      prefs.getString(LocalAiSettingsKeys.localEndpoint),
+      'http://127.0.0.1:52625/v1/chat/completions',
+    );
+    expect(
+      prefs.getString(LocalAiSettingsKeys.localServerModel),
+      'llama3.2:1b',
+    );
+    expect(
+      find.text('http://127.0.0.1:52625/v1/chat/completions'),
+      findsOneWidget,
+    );
+    expect(find.text('llama3.2:1b'), findsWidgets);
   });
 
   testWidgets('settings keeps a custom local server endpoint', (
