@@ -76,6 +76,14 @@ class SteamService implements MediaService {
     690640, // Trine 4
     920210, // LEGO Star Wars: The Skywalker Saga
   ];
+  static const _infamousLikeCandidateAppIds = [
+    10150, // Prototype
+    115320, // Prototype 2
+    870780, // Control Ultimate Edition
+    847370, // Sunset Overdrive
+    225540, // Just Cause 3
+    206420, // Saints Row IV
+  ];
 
   final http.Client _client;
   final SteamApiKeyProvider _apiKeyProvider;
@@ -166,20 +174,24 @@ class SteamService implements MediaService {
   Future<List<MediaItem>> searchRecommendationCandidates(
     RecommendationQuery query,
   ) async {
-    final text = query.request.trim();
     final items = <MediaItem>[];
-    if (text.isNotEmpty) {
+    for (final term in _storeSearchTermsForQuery(query)) {
       final uri = Uri.parse('$_storeApi/storesearch/').replace(
         queryParameters: {
-          'term': text,
+          'term': term,
           'l': 'en',
           'cc': 'us',
           'category1': '998',
         },
       );
       final decoded = await _getJson(uri);
-      final appIds = parseStoreSearchAppIds(decoded).take(20).toList();
+      final appIds = parseStoreSearchAppIds(decoded).take(8).toList();
       items.addAll((await _fetchAppDetails(appIds)).values);
+    }
+    if (query.infersInfamousLike) {
+      items.addAll(
+        (await _fetchAppDetails(_infamousLikeCandidateAppIds)).values,
+      );
     }
     final formats = query.effectiveFormats();
     if (formats.contains('CO_OP') || formats.contains('ONLINE_CO_OP')) {
@@ -188,6 +200,22 @@ class SteamService implements MediaService {
 
     final baseline = await fetchRecommendationCandidates();
     return _dedupe([...items, ...baseline]);
+  }
+
+  static List<String> _storeSearchTermsForQuery(RecommendationQuery query) {
+    if (query.infersInfamousLike) {
+      return const [
+        'Prototype',
+        'Prototype 2',
+        'Control Ultimate Edition',
+        'Sunset Overdrive',
+        'Just Cause 3',
+        'Saints Row IV',
+      ];
+    }
+
+    final text = query.request.trim();
+    return text.isEmpty ? const [] : [text];
   }
 
   @override

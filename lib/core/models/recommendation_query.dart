@@ -169,6 +169,8 @@ class RecommendationQuery {
     ]);
   }
 
+  bool get infersInfamousLike => _infersInfamousLike(_normalize(request));
+
   RecommendationQuery copyWith({
     String? request,
     Set<String>? selectedTags,
@@ -264,6 +266,9 @@ class RecommendationQuery {
     if (_containsAny(text, ['single player', 'single-player', 'solo'])) {
       formats.add('SINGLE_PLAYER');
     }
+    if (_infersInfamousLike(text)) {
+      formats.add('SINGLE_PLAYER');
+    }
     if (_containsAny(text, ['multiplayer', 'pvp'])) {
       formats.add('MULTIPLAYER');
     }
@@ -331,6 +336,9 @@ class RecommendationQuery {
       'play',
       'roguelike',
     ])) {
+      types.add('GAME');
+    }
+    if (_infersInfamousLike(text)) {
       types.add('GAME');
     }
 
@@ -440,6 +448,19 @@ class RecommendationQuery {
     return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(text);
   }
 
+  static bool _infersInfamousLike(String text) {
+    return _containsAny(text, [
+      'infamous game',
+      'infamous games',
+      'in famous game',
+      'in famous games',
+      'infamous-like',
+      'infamous like',
+      'in famous-like',
+      'in famous like',
+    ]);
+  }
+
   static String _normalize(String value) {
     return value.toLowerCase().replaceAll(RegExp(r'[_-]+'), ' ').trim();
   }
@@ -510,6 +531,20 @@ class RecommendationQuery {
     ],
     'Hentai': ['hentai', 'explicit adult'],
     'Ecchi': ['ecchi', 'fanservice'],
+    'Action': [
+      'action',
+      'fight',
+      'fighting',
+      'infamous game',
+      'infamous games',
+    ],
+    'Adventure': [
+      'adventure',
+      'exploration',
+      'explore',
+      'infamous game',
+      'infamous games',
+    ],
     'Fantasy': ['fantasy', 'harry potter', 'wizard', 'witch', 'witchcraft'],
     'RPG': ['role playing', 'role-playing', 'rpg'],
     'Strategy': ['strategy', 'tactics', 'tactical'],
@@ -517,7 +552,8 @@ class RecommendationQuery {
     'Puzzle': ['puzzle', 'brain teaser'],
     'Shooter': ['shooter', 'fps', 'third person shooter'],
     'Roguelike': ['roguelike', 'roguelite', 'run based'],
-    'Open World': ['open world', 'sandbox'],
+    'Open World': ['open world', 'sandbox', 'infamous game', 'infamous games'],
+    'Supernatural': ['super powers', 'superpowers', 'infamous games'],
     'Co-op': ['co op', 'co-op', 'coop'],
     'Multiplayer': ['multiplayer', 'pvp'],
     'Magic': [

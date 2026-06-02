@@ -194,6 +194,61 @@ void main() {
     expect(candidates.map((item) => item.title), contains('Overcooked! 2'));
   });
 
+  test('inFAMOUS-like search expands to similar Steam candidates', () async {
+    final storeTerms = <String>[];
+    final appDetailIds = <String>[];
+    final service = SteamService(
+      client: MockClient((request) async {
+        final url = request.url.toString();
+        if (url.contains('storesearch')) {
+          storeTerms.add(request.url.queryParameters['term']!);
+          return _json({
+            'items': [
+              {'id': 10150},
+            ],
+          });
+        }
+        if (url.contains('appdetails')) {
+          final appId = request.url.queryParameters['appids']!;
+          appDetailIds.add(appId);
+          return _json({
+            appId: {
+              'success': true,
+              'data': {
+                'steam_appid': int.parse(appId),
+                'name': appId == '10150' ? 'Prototype' : 'Game $appId',
+                'short_description': 'Open-world superpower action.',
+                'genres': [
+                  {'description': 'Action'},
+                  {'description': 'Adventure'},
+                ],
+                'categories': [
+                  {'description': 'Single-player'},
+                  {'description': 'Full controller support'},
+                ],
+              },
+            },
+          });
+        }
+        return http.Response('not found', 404);
+      }),
+    );
+
+    final candidates = await service.searchRecommendationCandidates(
+      const RecommendationQuery(
+        request: 'something similar to the infamous games',
+      ),
+    );
+
+    expect(storeTerms, contains('Prototype'));
+    expect(
+      storeTerms,
+      isNot(contains('something similar to the infamous games')),
+    );
+    expect(appDetailIds, contains('10150'));
+    expect(candidates.map((item) => item.title), contains('Prototype'));
+  });
+
   test('service reports missing local Steam API key', () async {
     final service = SteamService(apiKeyProvider: () async => '');
 

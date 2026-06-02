@@ -211,6 +211,48 @@ void main() {
     expect(recommendations.single.item.id, 'steam_coop');
   });
 
+  test('inFAMOUS-like game requests infer open-world action traits', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile(
+      '76561198000000000',
+      const [],
+      serviceId: 'com.majika.service.steam',
+      serviceName: 'Steam',
+    );
+    final query = const RecommendationQuery(
+      request: 'something similar to the infamous games',
+    ).withInferredSelections(RecommendationQuery.browsableTags);
+
+    expect(query.aiSelectedTags, contains('Action'));
+    expect(query.aiSelectedTags, contains('Adventure'));
+    expect(query.aiSelectedTags, contains('Open World'));
+    expect(query.formats, contains('SINGLE_PLAYER'));
+    expect(query.mediaTypes, contains('GAME'));
+
+    final recommendations = engine.rankCandidates(profile, [
+      MediaItem(
+        id: 'steam_10150',
+        title: 'Prototype',
+        coverUrl: '',
+        tags: const ['Action', 'Adventure', 'Open World', 'Supernatural'],
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        rating: 8.1,
+      ),
+      MediaItem(
+        id: 'steam_2',
+        title: 'Quiet Puzzle',
+        coverUrl: '',
+        tags: const ['Puzzle'],
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        rating: 9,
+      ),
+    ], query: query);
+
+    expect(recommendations.single.item.title, 'Prototype');
+  });
+
   test(
     'ratings and AniList favorites affect match scores without flat 99s',
     () {
