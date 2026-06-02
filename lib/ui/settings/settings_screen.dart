@@ -146,6 +146,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _imageQuality = 0.85;
   double _aiContextItems = 24;
   double? _downloadProgress;
+  CancelToken? _downloadCancelToken;
   final _localEndpointController = TextEditingController(
     text: defaultLocalAiEndpoint,
   );
@@ -330,9 +331,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _downloadRecommendedModel() async {
     if (_isDownloadingModel) return;
 
+    final cancelToken = CancelToken();
     setState(() {
       _isDownloadingModel = true;
       _downloadProgress = null;
+      _downloadCancelToken = cancelToken;
     });
 
     try {
@@ -355,13 +358,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 token: modelToDownload.needsHuggingFaceToken
                     ? huggingFaceToken
                     : null,
+                foreground: true,
               )
+              .withCancelToken(cancelToken)
               .withProgress((progress) {
-                if (mounted) setState(() => _downloadProgress = progress / 100);
+                if (mounted && !cancelToken.isCancelled) {
+                  setState(() => _downloadProgress = progress / 100);
+                }
               })
               .install();
 
-      if (!mounted) return;
+      if (!mounted ||
+          cancelToken.isCancelled ||
+          _downloadCancelToken != cancelToken) {
+        return;
+      }
       setState(() {
         _downloadedModelId = modelToDownload.id;
         _downloadedModelName = modelToDownload.name;
@@ -378,15 +389,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
     } catch (error) {
       if (!mounted) return;
+      if (CancelToken.isCancel(error) || cancelToken.isCancelled) return;
       final message = error is _HuggingFaceTokenRequiredException
           ? 'Add a Hugging Face token before downloading this gated model.'
           : 'Could not download model: $error';
       showErrorToast(context, message);
     } finally {
-      if (mounted) {
-        setState(() => _isDownloadingModel = false);
+      if (mounted && _downloadCancelToken == cancelToken) {
+        setState(() {
+          _isDownloadingModel = false;
+          _downloadCancelToken = null;
+          if (cancelToken.isCancelled) _downloadProgress = null;
+        });
       }
     }
+  }
+
+  void _cancelModelDownload() {
+    final cancelToken = _downloadCancelToken;
+    if (cancelToken == null || cancelToken.isCancelled) return;
+    cancelToken.cancel('Model download canceled by user.');
+    setState(() {
+      _isDownloadingModel = false;
+      _downloadProgress = null;
+    });
+    showInfoToast(context, 'Model download canceled.');
   }
 
   @override
@@ -702,6 +729,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     huggingFaceTokenController: _huggingFaceTokenController,
                     onHuggingFaceTokenChanged: _saveHuggingFaceToken,
                     onDownload: _downloadRecommendedModel,
+                    onCancel: _cancelModelDownload,
                   ),
                 if (_usesOnDeviceAi)
                   _OptionRow(
@@ -980,6 +1008,7 @@ class _ModelDownloadCard extends StatelessWidget {
   final TextEditingController huggingFaceTokenController;
   final ValueChanged<String> onHuggingFaceTokenChanged;
   final VoidCallback onDownload;
+  final VoidCallback onCancel;
 
   const _ModelDownloadCard({
     required this.models,
@@ -992,6 +1021,7 @@ class _ModelDownloadCard extends StatelessWidget {
     required this.huggingFaceTokenController,
     required this.onHuggingFaceTokenChanged,
     required this.onDownload,
+    required this.onCancel,
   });
 
   @override
@@ -1060,18 +1090,17 @@ class _ModelDownloadCard extends StatelessWidget {
     Widget downloadButton() {
       return FilledButton.icon(
         key: const ValueKey('download-recommended-ai-model'),
-        onPressed: isDownloading ? null : onDownload,
+        onPressed: isDownloading ? onCancel : onDownload,
         icon: isDownloading
-            ? const SizedBox.square(
-                dimension: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
+            ? const Icon(Icons.cancel_rounded)
             : Icon(
                 isDownloaded
                     ? Icons.download_done_rounded
                     : Icons.download_rounded,
               ),
-        label: Text(isDownloaded ? 'Downloaded' : 'Download'),
+        label: Text(
+          isDownloading ? 'Cancel' : (isDownloaded ? 'Downloaded' : 'Download'),
+        ),
       );
     }
 

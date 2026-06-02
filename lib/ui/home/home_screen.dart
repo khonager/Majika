@@ -33,6 +33,7 @@ class _ServiceWorkspace {
   bool isRefreshingRecommendations;
   bool adultCandidatesLoaded;
   String userNameDraft;
+  int? activeRecommendationSearchRunId;
 
   _ServiceWorkspace({required this.service})
     : candidates = [],
@@ -80,6 +81,7 @@ class _ServiceWorkspace {
     error = null;
     isLoading = false;
     isRefreshingRecommendations = false;
+    activeRecommendationSearchRunId = null;
   }
 
   void clear({String draft = ''}) {
@@ -93,6 +95,7 @@ class _ServiceWorkspace {
     isRefreshingRecommendations = false;
     adultCandidatesLoaded = false;
     userNameDraft = draft;
+    activeRecommendationSearchRunId = null;
   }
 }
 
@@ -129,6 +132,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, List<Recommendation>> _homeRecommendationsByService = {};
   String? _homeError;
   bool _isRefreshingHome = false;
+  int _nextSearchRunId = 0;
+  int? _activeHomeSearchRunId;
 
   @override
   void initState() {
@@ -263,10 +268,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final workspace = _activeWorkspace;
     final profile = workspace.profile;
     if (profile == null) return;
+    final searchRunId = ++_nextSearchRunId;
 
     setState(() {
       workspace.query = rawQuery;
       workspace.isRefreshingRecommendations = true;
+      workspace.activeRecommendationSearchRunId = searchRunId;
     });
 
     try {
@@ -305,7 +312,10 @@ class _HomeScreenState extends State<HomeScreen> {
         query,
       );
 
-      if (!mounted) return;
+      if (!mounted ||
+          workspace.activeRecommendationSearchRunId != searchRunId) {
+        return;
+      }
       setState(() {
         workspace.query = query;
         workspace.candidates = candidates;
@@ -313,14 +323,19 @@ class _HomeScreenState extends State<HomeScreen> {
         workspace.adultCandidatesLoaded =
             workspace.adultCandidatesLoaded || needsAdultCandidates;
         workspace.isRefreshingRecommendations = false;
+        workspace.activeRecommendationSearchRunId = null;
       });
       unawaited(_persistWorkspace(workspace));
       _rebuildHomeRecommendationsSync();
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted ||
+          workspace.activeRecommendationSearchRunId != searchRunId) {
+        return;
+      }
       setState(() {
         workspace.error = error.toString();
         workspace.isRefreshingRecommendations = false;
+        workspace.activeRecommendationSearchRunId = null;
       });
       showErrorToast(context, 'Could not refresh recommendations: $error');
     }
@@ -334,11 +349,13 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() => _homeQuery = rawQuery);
       return;
     }
+    final searchRunId = ++_nextSearchRunId;
 
     setState(() {
       _homeQuery = rawQuery;
       _isRefreshingHome = true;
       _homeError = null;
+      _activeHomeSearchRunId = searchRunId;
     });
 
     try {
@@ -400,21 +417,42 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       final ordered = _promoteChosenRecommendation(merged, chosen);
 
-      if (!mounted) return;
+      if (!mounted || _activeHomeSearchRunId != searchRunId) return;
       setState(() {
         _homeQuery = rawQuery;
         _homeRecommendationsByService = byService;
         _homeRecommendations = ordered;
         _isRefreshingHome = false;
+        _activeHomeSearchRunId = null;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || _activeHomeSearchRunId != searchRunId) return;
       setState(() {
         _homeError = error.toString();
         _isRefreshingHome = false;
+        _activeHomeSearchRunId = null;
       });
       showErrorToast(context, 'Could not refresh Home: $error');
     }
+  }
+
+  void _cancelRecommendationSearch() {
+    final workspace = _activeWorkspace;
+    if (!workspace.isRefreshingRecommendations) return;
+    setState(() {
+      workspace.activeRecommendationSearchRunId = null;
+      workspace.isRefreshingRecommendations = false;
+    });
+    showInfoToast(context, 'Recommendation search canceled.');
+  }
+
+  void _cancelHomeSearch() {
+    if (!_isRefreshingHome) return;
+    setState(() {
+      _activeHomeSearchRunId = null;
+      _isRefreshingHome = false;
+    });
+    showInfoToast(context, 'Home search canceled.');
   }
 
   void _openSettings() {
@@ -540,6 +578,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       error: _homeError,
                       aiService: _aiService,
                       onQueryChanged: _updateHomeRecommendationQuery,
+                      onCancelSearch: _cancelHomeSearch,
                       onConnectService: _selectService,
                     )
                   : _ContentShell(
@@ -559,6 +598,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           workspace.isRefreshingRecommendations,
                       availableTags: _availableTags,
                       onQueryChanged: _updateRecommendationQuery,
+                      onCancelSearch: _cancelRecommendationSearch,
                     );
 
               if (isDesktop) {
@@ -694,6 +734,7 @@ class _HomeContentShell extends StatelessWidget {
   final String? error;
   final LocalAiService aiService;
   final ValueChanged<RecommendationQuery> onQueryChanged;
+  final VoidCallback onCancelSearch;
   final ValueChanged<MediaService> onConnectService;
 
   const _HomeContentShell({
@@ -707,6 +748,7 @@ class _HomeContentShell extends StatelessWidget {
     required this.error,
     required this.aiService,
     required this.onQueryChanged,
+    required this.onCancelSearch,
     required this.onConnectService,
   });
 
@@ -771,6 +813,7 @@ class _HomeContentShell extends StatelessWidget {
                             query: query,
                             isRefreshing: isRefreshing,
                             onQueryChanged: onQueryChanged,
+                            onCancelSearch: onCancelSearch,
                           ),
                         ),
                       ),
@@ -905,11 +948,13 @@ class _HomeSearchPanel extends StatefulWidget {
   final RecommendationQuery query;
   final bool isRefreshing;
   final ValueChanged<RecommendationQuery> onQueryChanged;
+  final VoidCallback onCancelSearch;
 
   const _HomeSearchPanel({
     required this.query,
     required this.isRefreshing,
     required this.onQueryChanged,
+    required this.onCancelSearch,
   });
 
   @override
@@ -978,13 +1023,12 @@ class _HomeSearchPanelState extends State<_HomeSearchPanel> {
           ),
           const SizedBox(width: 8),
           IconButton.filledTonal(
-            tooltip: 'Search Home recommendations',
-            onPressed: widget.isRefreshing ? null : _submit,
+            tooltip: widget.isRefreshing
+                ? 'Cancel Home search'
+                : 'Search Home recommendations',
+            onPressed: widget.isRefreshing ? widget.onCancelSearch : _submit,
             icon: widget.isRefreshing
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                ? const Icon(Icons.close_rounded)
                 : const Icon(Icons.arrow_forward_rounded),
           ),
         ],
@@ -1200,6 +1244,7 @@ class _ContentShell extends StatelessWidget {
   final bool isRefreshingRecommendations;
   final List<String> availableTags;
   final ValueChanged<RecommendationQuery> onQueryChanged;
+  final VoidCallback onCancelSearch;
 
   const _ContentShell({
     this.isMobileSurface = false,
@@ -1217,6 +1262,7 @@ class _ContentShell extends StatelessWidget {
     required this.isRefreshingRecommendations,
     required this.availableTags,
     required this.onQueryChanged,
+    required this.onCancelSearch,
   });
 
   @override
@@ -1288,6 +1334,7 @@ class _ContentShell extends StatelessWidget {
                             mediaService: mediaService,
                             isMobileSurface: isMobileSurface,
                             onQueryChanged: onQueryChanged,
+                            onCancelSearch: onCancelSearch,
                           ),
                   ),
                 ),
@@ -1567,6 +1614,7 @@ class _RecommendationState extends StatelessWidget {
   final MediaService mediaService;
   final bool isMobileSurface;
   final ValueChanged<RecommendationQuery> onQueryChanged;
+  final VoidCallback onCancelSearch;
 
   const _RecommendationState({
     super.key,
@@ -1578,6 +1626,7 @@ class _RecommendationState extends StatelessWidget {
     required this.mediaService,
     required this.isMobileSurface,
     required this.onQueryChanged,
+    required this.onCancelSearch,
   });
 
   @override
@@ -1609,6 +1658,7 @@ class _RecommendationState extends StatelessWidget {
                       availableTags: availableTags,
                       mediaService: mediaService,
                       onQueryChanged: onQueryChanged,
+                      onCancelSearch: onCancelSearch,
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -1840,6 +1890,7 @@ class _RecommendationSearchPanel extends StatefulWidget {
   final List<String> availableTags;
   final MediaService mediaService;
   final ValueChanged<RecommendationQuery> onQueryChanged;
+  final VoidCallback onCancelSearch;
 
   const _RecommendationSearchPanel({
     required this.query,
@@ -1847,6 +1898,7 @@ class _RecommendationSearchPanel extends StatefulWidget {
     required this.availableTags,
     required this.mediaService,
     required this.onQueryChanged,
+    required this.onCancelSearch,
   });
 
   @override
@@ -1923,13 +1975,14 @@ class _RecommendationSearchPanelState
               ),
               const SizedBox(width: 8),
               IconButton.filledTonal(
-                tooltip: 'Search recommendations',
-                onPressed: widget.isRefreshing ? null : _submitRequest,
+                tooltip: widget.isRefreshing
+                    ? 'Cancel recommendation search'
+                    : 'Search recommendations',
+                onPressed: widget.isRefreshing
+                    ? widget.onCancelSearch
+                    : _submitRequest,
                 icon: widget.isRefreshing
-                    ? const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
+                    ? const Icon(Icons.close_rounded)
                     : const Icon(Icons.arrow_forward_rounded),
               ),
             ],

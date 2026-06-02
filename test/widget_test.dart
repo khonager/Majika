@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:majika/core/ai/local_ai_settings.dart';
@@ -179,6 +181,38 @@ void main() {
     expect(find.text('Time Travel Movie'), findsOneWidget);
     expect(find.text('Romance'), findsWidgets);
     expect(find.text('Time Manipulation'), findsWidgets);
+  });
+
+  testWidgets('cancelled recommendation search ignores late results', (
+    WidgetTester tester,
+  ) async {
+    final service = _SlowSearchMediaService();
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: service)),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search a vibe, tag, format, or request'),
+      'slow search',
+    );
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pump();
+
+    expect(find.byTooltip('Cancel recommendation search'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Cancel recommendation search'));
+    await tester.pump();
+
+    service.completeSearch();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Canceled Search Result'), findsNothing);
+    expect(find.byTooltip('Search recommendations'), findsOneWidget);
   });
 
   testWidgets('tag picker keeps the long tag list out of the main feed', (
@@ -813,6 +847,33 @@ class _FakeMediaService implements MediaService {
         siteUrl: 'https://anilist.co/anime/1',
       ),
     ];
+  }
+}
+
+class _SlowSearchMediaService extends _FakeMediaService {
+  final Completer<List<MediaItem>> _searchCompleter = Completer();
+
+  @override
+  Future<List<MediaItem>> searchRecommendationCandidates(
+    RecommendationQuery query,
+  ) {
+    return _searchCompleter.future;
+  }
+
+  void completeSearch() {
+    if (_searchCompleter.isCompleted) return;
+    _searchCompleter.complete([
+      MediaItem(
+        id: 'anilist_cancelled',
+        title: 'Canceled Search Result',
+        coverUrl: '',
+        tags: const ['Mystery'],
+        rating: 10,
+        format: 'TV',
+        mediaType: 'ANIME',
+        siteUrl: 'https://anilist.co/anime/cancelled',
+      ),
+    ]);
   }
 }
 
