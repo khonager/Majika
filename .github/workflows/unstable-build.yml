@@ -68,9 +68,9 @@ jobs:
         run: |
           mkdir -p release
           cp build/app/outputs/flutter-apk/app-release.apk \
-            "release/${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-android.apk"
+            "release/${APP_NAME}-${RELEASE_CHANNEL}-android.apk"
           cp build/app/outputs/bundle/release/app-release.aab \
-            "release/${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-android.aab"
+            "release/${APP_NAME}-${RELEASE_CHANNEL}-android.aab"
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
@@ -78,6 +78,7 @@ jobs:
           name: majika-unstable-android
           path: release/*
           if-no-files-found: error
+          retention-days: 3
 
   build-linux:
     name: Build Linux
@@ -109,7 +110,7 @@ jobs:
         run: flutter build linux --release --dart-define=IS_DEV=true
 
       - name: Compress Linux build
-        run: tar -czf "${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-linux-x64.tar.gz" -C build/linux/x64/release/bundle .
+        run: tar -czf "${APP_NAME}-${RELEASE_CHANNEL}-linux-x64.tar.gz" -C build/linux/x64/release/bundle .
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
@@ -117,6 +118,7 @@ jobs:
           name: majika-unstable-linux-x64
           path: "*.tar.gz"
           if-no-files-found: error
+          retention-days: 3
 
   build-windows:
     name: Build Windows
@@ -143,7 +145,7 @@ jobs:
         run: flutter build windows --release --dart-define=IS_DEV=true
 
       - name: Compress Windows build
-        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "${{ env.APP_NAME }}-${{ env.RELEASE_CHANNEL }}-${{ github.run_number }}-windows-x64.zip"
+        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "${{ env.APP_NAME }}-${{ env.RELEASE_CHANNEL }}-windows-x64.zip"
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
@@ -151,6 +153,7 @@ jobs:
           name: majika-unstable-windows-x64
           path: "*.zip"
           if-no-files-found: error
+          retention-days: 3
 
   build-macos:
     name: Build macOS
@@ -183,7 +186,7 @@ jobs:
             echo "::error::Could not find macOS .app bundle"
             exit 1
           fi
-          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-macos.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "${APP_NAME}-${RELEASE_CHANNEL}-macos.zip"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -191,6 +194,7 @@ jobs:
           name: majika-unstable-macos
           path: "*.zip"
           if-no-files-found: error
+          retention-days: 3
 
   build-web:
     name: Build Web
@@ -213,7 +217,7 @@ jobs:
         run: flutter build web --release --dart-define=IS_DEV=true
 
       - name: Compress Web build
-        run: tar -czf "${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-web.tar.gz" -C build/web .
+        run: tar -czf "${APP_NAME}-${RELEASE_CHANNEL}-web.tar.gz" -C build/web .
 
       - name: Upload Web artifact
         uses: actions/upload-artifact@v4
@@ -221,12 +225,17 @@ jobs:
           name: majika-unstable-web
           path: "*.tar.gz"
           if-no-files-found: error
+          retention-days: 3
 
   release:
     name: Publish Unstable Release
     needs:
       - build-android
+      - build-linux
+      - build-windows
+      - build-macos
       - build-web
+    if: ${{ always() && needs.build-android.result == 'success' && needs.build-web.result == 'success' && (github.event_name != 'workflow_dispatch' || (needs.build-linux.result == 'success' && needs.build-windows.result == 'success' && needs.build-macos.result == 'success')) }}
     runs-on: ubuntu-latest
     concurrency:
       group: majika-unstable-release
@@ -259,6 +268,28 @@ jobs:
             echo "- Build commit: \`${GITHUB_SHA::7}\`"
             echo "- Build number: ${{ github.run_number }}"
           } > release-body.md
+
+      - name: Clear old unstable release assets
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const release = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: 'unstable-latest',
+              });
+
+              for (const asset of release.data.assets) {
+                await github.rest.repos.deleteReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  asset_id: asset.id,
+                });
+              }
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
 
       - name: Update unstable-latest release
         uses: softprops/action-gh-release@v2

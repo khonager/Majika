@@ -99,9 +99,9 @@ jobs:
         run: |
           mkdir -p release
           cp build/app/outputs/flutter-apk/app-release.apk \
-            "release/${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-android.apk"
+            "release/${APP_NAME}-${APP_VERSION}-${RELEASE_CHANNEL}-android.apk"
           cp build/app/outputs/bundle/release/app-release.aab \
-            "release/${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-android.aab"
+            "release/${APP_NAME}-${APP_VERSION}-${RELEASE_CHANNEL}-android.aab"
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
@@ -109,6 +109,7 @@ jobs:
           name: majika-stable-android
           path: release/*
           if-no-files-found: error
+          retention-days: 3
 
   build-linux:
     name: Build Linux
@@ -140,7 +141,9 @@ jobs:
         run: flutter build linux --release
 
       - name: Compress Linux build
-        run: tar -czf "${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-linux-x64.tar.gz" -C build/linux/x64/release/bundle .
+        run: |
+          APP_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+          tar -czf "${APP_NAME}-${APP_VERSION}-${RELEASE_CHANNEL}-linux-x64.tar.gz" -C build/linux/x64/release/bundle .
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
@@ -148,6 +151,7 @@ jobs:
           name: majika-stable-linux-x64
           path: "*.tar.gz"
           if-no-files-found: error
+          retention-days: 3
 
   build-windows:
     name: Build Windows
@@ -174,7 +178,9 @@ jobs:
         run: flutter build windows --release
 
       - name: Compress Windows build
-        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "${{ env.APP_NAME }}-${{ env.RELEASE_CHANNEL }}-${{ github.run_number }}-windows-x64.zip"
+        run: |
+          $appVersion = ((Select-String -Path pubspec.yaml -Pattern '^version:').Line -split '\s+')[1].Split('+')[0]
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "${{ env.APP_NAME }}-$appVersion-${{ env.RELEASE_CHANNEL }}-windows-x64.zip"
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
@@ -182,6 +188,7 @@ jobs:
           name: majika-stable-windows-x64
           path: "*.zip"
           if-no-files-found: error
+          retention-days: 3
 
   build-macos:
     name: Build macOS
@@ -214,7 +221,8 @@ jobs:
             echo "::error::Could not find macOS .app bundle"
             exit 1
           fi
-          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-macos.zip"
+          APP_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "${APP_NAME}-${APP_VERSION}-${RELEASE_CHANNEL}-macos.zip"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -222,6 +230,7 @@ jobs:
           name: majika-stable-macos
           path: "*.zip"
           if-no-files-found: error
+          retention-days: 3
 
   build-web:
     name: Build Web
@@ -245,7 +254,9 @@ jobs:
         run: flutter build web --release
 
       - name: Compress Web build
-        run: tar -czf "${APP_NAME}-${RELEASE_CHANNEL}-${{ github.run_number }}-web.tar.gz" -C build/web .
+        run: |
+          APP_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+          tar -czf "${APP_NAME}-${APP_VERSION}-${RELEASE_CHANNEL}-web.tar.gz" -C build/web .
 
       - name: Upload Web artifact
         uses: actions/upload-artifact@v4
@@ -253,6 +264,7 @@ jobs:
           name: majika-stable-web
           path: "*.tar.gz"
           if-no-files-found: error
+          retention-days: 3
 
   release:
     name: Publish Stable Release
@@ -296,6 +308,38 @@ jobs:
             echo "- Build commit: \`${GITHUB_SHA::7}\`"
             echo "- Build number: ${{ github.run_number }}"
           } > release-body.md
+
+      - name: Clear old numbered stable release assets
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const pubspec = fs.readFileSync('pubspec.yaml', 'utf8');
+            const versionMatch = pubspec.match(/^version:\s*([^\s+]+)/m);
+            if (!versionMatch) {
+              core.setFailed('Could not read version from pubspec.yaml');
+              return;
+            }
+
+            try {
+              const release = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: 'stable-latest',
+              });
+
+              for (const asset of release.data.assets) {
+                if (asset.name.startsWith('Majika-stable-')) {
+                  await github.rest.repos.deleteReleaseAsset({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    asset_id: asset.id,
+                  });
+                }
+              }
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
 
       - name: Update stable-latest release
         uses: softprops/action-gh-release@v2
