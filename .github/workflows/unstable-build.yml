@@ -13,6 +13,10 @@ env:
 permissions:
   contents: write
 
+concurrency:
+  group: majika-unstable-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-android:
     name: Build Android APK
@@ -77,6 +81,7 @@ jobs:
 
   build-linux:
     name: Build Linux
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
@@ -115,6 +120,7 @@ jobs:
 
   build-windows:
     name: Build Windows
+    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
 
     steps:
@@ -148,6 +154,7 @@ jobs:
 
   build-macos:
     name: Build macOS
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
 
     steps:
@@ -219,9 +226,6 @@ jobs:
     name: Publish Unstable Release
     needs:
       - build-android
-      - build-linux
-      - build-windows
-      - build-macos
       - build-web
     runs-on: ubuntu-latest
     concurrency:
