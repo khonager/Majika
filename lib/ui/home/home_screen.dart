@@ -134,6 +134,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isRefreshingHome = false;
   int _nextSearchRunId = 0;
   int? _activeHomeSearchRunId;
+  AppProgressToast? _activeRecommendationProgressToast;
+  AppProgressToast? _activeHomeProgressToast;
 
   @override
   void initState() {
@@ -162,6 +164,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _activeRecommendationProgressToast?.dismiss();
+    _activeHomeProgressToast?.dismiss();
     _userNameController.dispose();
     super.dispose();
   }
@@ -275,8 +279,14 @@ class _HomeScreenState extends State<HomeScreen> {
       workspace.isRefreshingRecommendations = true;
       workspace.activeRecommendationSearchRunId = searchRunId;
     });
+    final progressToast = showProgressToast(
+      context,
+      'Reading your request for ${workspace.service.displayName}...',
+    );
+    _activeRecommendationProgressToast = progressToast;
 
     try {
+      progressToast.update('Interpreting request with local AI or rules...');
       final query = await _aiService.interpretRecommendationRequest(
         rawQuery,
         availableTags: _availableTags,
@@ -290,22 +300,28 @@ class _HomeScreenState extends State<HomeScreen> {
           !workspace.adultCandidatesLoaded;
 
       if (query.isActive) {
+        progressToast.update(
+          'Searching ${workspace.service.displayName} candidates...',
+        );
         final searchedCandidates = await workspace.service
             .searchRecommendationCandidates(query);
         candidates = _dedupeCandidates([...searchedCandidates, ...candidates]);
       }
 
       if (needsAdultCandidates) {
+        progressToast.update('Adding adult-content candidates...');
         final adultCandidates = await workspace.service
             .fetchRecommendationCandidates(includeAdult: true);
         candidates = _dedupeCandidates([...candidates, ...adultCandidates]);
       }
 
+      progressToast.update('Ranking matches against your profile...');
       final recommendations = _tasteEngine.rankCandidates(
         profile,
         candidates,
         query: query,
       );
+      progressToast.update('Choosing the lead recommendation...');
       final orderedRecommendations = await _withChosenTopRecommendation(
         profile,
         recommendations,
@@ -338,6 +354,11 @@ class _HomeScreenState extends State<HomeScreen> {
         workspace.activeRecommendationSearchRunId = null;
       });
       showErrorToast(context, 'Could not refresh recommendations: $error');
+    } finally {
+      if (_activeRecommendationProgressToast == progressToast) {
+        _activeRecommendationProgressToast = null;
+      }
+      progressToast.dismiss();
     }
   }
 
@@ -357,6 +378,11 @@ class _HomeScreenState extends State<HomeScreen> {
       _homeError = null;
       _activeHomeSearchRunId = searchRunId;
     });
+    final progressToast = showProgressToast(
+      context,
+      'Reading your Home search across services...',
+    );
+    _activeHomeProgressToast = progressToast;
 
     try {
       final byService = <String, List<Recommendation>>{};
@@ -365,6 +391,9 @@ class _HomeScreenState extends State<HomeScreen> {
       for (final workspace in importedWorkspaces) {
         final profile = workspace.profile;
         if (profile == null) continue;
+        progressToast.update(
+          'Interpreting ${workspace.service.displayName} filters...',
+        );
         final query = await _aiService.interpretRecommendationRequest(
           rawQuery,
           availableTags: _availableTagsFor(workspace),
@@ -379,6 +408,9 @@ class _HomeScreenState extends State<HomeScreen> {
             !workspace.adultCandidatesLoaded;
 
         if (query.isActive) {
+          progressToast.update(
+            'Searching ${workspace.service.displayName} candidates...',
+          );
           final searchedCandidates = await workspace.service
               .searchRecommendationCandidates(query);
           candidates = _dedupeCandidates([
@@ -388,11 +420,17 @@ class _HomeScreenState extends State<HomeScreen> {
         }
 
         if (needsAdultCandidates) {
+          progressToast.update(
+            'Adding ${workspace.service.displayName} adult-content candidates...',
+          );
           final adultCandidates = await workspace.service
               .fetchRecommendationCandidates(includeAdult: true);
           candidates = _dedupeCandidates([...candidates, ...adultCandidates]);
         }
 
+        progressToast.update(
+          'Ranking ${workspace.service.displayName} matches...',
+        );
         final recommendations = _tasteEngine.rankCandidates(
           profile,
           candidates,
@@ -410,6 +448,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       merged.sort((a, b) => b.matchScore.compareTo(a.matchScore));
+      progressToast.update('Choosing the best Home recommendation...');
       final chosen = await _aiService.chooseHomeRecommendation(
         importedWorkspaces.map((workspace) => workspace.profile!).toList(),
         merged,
@@ -433,6 +472,11 @@ class _HomeScreenState extends State<HomeScreen> {
         _activeHomeSearchRunId = null;
       });
       showErrorToast(context, 'Could not refresh Home: $error');
+    } finally {
+      if (_activeHomeProgressToast == progressToast) {
+        _activeHomeProgressToast = null;
+      }
+      progressToast.dismiss();
     }
   }
 
@@ -443,6 +487,8 @@ class _HomeScreenState extends State<HomeScreen> {
       workspace.activeRecommendationSearchRunId = null;
       workspace.isRefreshingRecommendations = false;
     });
+    _activeRecommendationProgressToast?.dismiss();
+    _activeRecommendationProgressToast = null;
     showInfoToast(context, 'Recommendation search canceled.');
   }
 
@@ -452,6 +498,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _activeHomeSearchRunId = null;
       _isRefreshingHome = false;
     });
+    _activeHomeProgressToast?.dismiss();
+    _activeHomeProgressToast = null;
     showInfoToast(context, 'Home search canceled.');
   }
 

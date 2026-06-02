@@ -65,6 +65,27 @@ void main() {
     expect(interpreted.aiSelectedTags, contains('RPG'));
   });
 
+  test('flutter gemma service canonicalizes model filter spelling', () async {
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        return '{"tags":["single player","role playing"],"formats":["single player"],"mediaTypes":["game"],"includeAdult":false,"searchText":"single player role playing"}';
+      },
+    );
+
+    final interpreted = await service.interpretRecommendationRequest(
+      const RecommendationQuery(request: 'single player role playing'),
+      availableTags: const ['Single-player', 'Role Playing'],
+      serviceName: 'Steam',
+      allowedMediaTypes: RecommendationQuery.steamMediaTypes,
+      allowedFormats: RecommendationQuery.steamFormats,
+    );
+
+    expect(interpreted.mediaTypes, contains('GAME'));
+    expect(interpreted.formats, contains('SINGLE_PLAYER'));
+    expect(interpreted.aiSelectedTags, contains('Single-player'));
+    expect(interpreted.aiSelectedTags, contains('Role Playing'));
+  });
+
   test(
     'flutter gemma service falls back when model output is malformed',
     () async {

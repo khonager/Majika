@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:http/http.dart' as http;
 import 'package:majika/core/ai/local_ai_settings.dart';
@@ -273,13 +274,42 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
       );
     }
 
+    if (_shouldSkipOnDeviceInference(settings)) {
+      throw StateError('On-device local AI is unavailable on Linux desktop.');
+    }
+
     if (!isConfigured) {
       throw StateError('No local AI model is configured.');
     }
 
+    final preferredBackend = _safeOnDeviceBackend(settings.preferredBackend);
+    try {
+      return await _generateOnDeviceText(
+        prompt,
+        maxTokens: maxTokens,
+        preferredBackend: preferredBackend,
+      );
+    } catch (_) {
+      if (preferredBackend == null ||
+          preferredBackend == PreferredBackend.cpu) {
+        rethrow;
+      }
+      return _generateOnDeviceText(
+        prompt,
+        maxTokens: maxTokens,
+        preferredBackend: PreferredBackend.cpu,
+      );
+    }
+  }
+
+  Future<String> _generateOnDeviceText(
+    String prompt, {
+    required int maxTokens,
+    required PreferredBackend? preferredBackend,
+  }) async {
     final model = await FlutterGemma.getActiveModel(
       maxTokens: maxTokens,
-      preferredBackend: settings.preferredBackend,
+      preferredBackend: preferredBackend,
     );
     try {
       final chat = await model.createChat(
@@ -297,6 +327,19 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
     } finally {
       await model.close();
     }
+  }
+
+  PreferredBackend? _safeOnDeviceBackend(PreferredBackend? preferredBackend) {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux) {
+      return PreferredBackend.cpu;
+    }
+    return preferredBackend;
+  }
+
+  bool _shouldSkipOnDeviceInference(LocalAiRuntimeSettings settings) {
+    return settings.usesOnDeviceModel &&
+        !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.linux;
   }
 
   Future<String> _generateExternalText(
@@ -384,18 +427,21 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
     }
     if (decoded == null) return null;
 
-    final availableTagSet = availableTags.toSet();
-    final tags = _stringList(
-      decoded['tags'],
-    ).where((tag) => availableTagSet.contains(tag)).toSet();
-    final allowedFormatSet = allowedFormats.toSet();
-    final allowedMediaTypeSet = allowedMediaTypes.toSet();
-    final formats = _stringList(
-      decoded['formats'],
-    ).where(allowedFormatSet.contains).toSet();
-    final mediaTypes = _stringList(
-      decoded['mediaTypes'],
-    ).where(allowedMediaTypeSet.contains).toSet();
+    final availableTagSet = _canonicalLookup(availableTags);
+    final tags = _stringList(decoded['tags'])
+        .map((tag) => availableTagSet[_canonicalKey(tag)])
+        .whereType<String>()
+        .toSet();
+    final allowedFormatSet = _canonicalLookup(allowedFormats);
+    final allowedMediaTypeSet = _canonicalLookup(allowedMediaTypes);
+    final formats = _stringList(decoded['formats'])
+        .map((format) => allowedFormatSet[_canonicalKey(format)])
+        .whereType<String>()
+        .toSet();
+    final mediaTypes = _stringList(decoded['mediaTypes'])
+        .map((type) => allowedMediaTypeSet[_canonicalKey(type)])
+        .whereType<String>()
+        .toSet();
     final searchText = decoded['searchText']?.toString().trim();
 
     return original.copyWith(
@@ -416,6 +462,17 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
       for (final item in value)
         if (item != null) item.toString().trim(),
     ].where((item) => item.isNotEmpty).toList();
+  }
+
+  Map<String, String> _canonicalLookup(Iterable<String> values) {
+    return {
+      for (final value in values)
+        if (value.trim().isNotEmpty) _canonicalKey(value): value,
+    };
+  }
+
+  String _canonicalKey(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
   }
 
   List<String> _promptTagList({
