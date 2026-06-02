@@ -215,7 +215,7 @@ class RecommendationQuery {
     final searchSpace = {...browsableTags, ...availableTags};
     final inferred = <String>{
       for (final tag in searchSpace)
-        if (normalizedRequest.contains(_normalize(tag))) tag,
+        if (_shouldInferTagFromRequest(normalizedRequest, tag)) tag,
     };
 
     for (final entry in _fallbackTagHints.entries) {
@@ -427,9 +427,29 @@ class RecommendationQuery {
     return values.any((value) => text.contains(_normalize(value)));
   }
 
+  static bool _shouldInferTagFromRequest(String normalizedRequest, String tag) {
+    final normalizedTag = _normalize(tag);
+    if (normalizedTag.isEmpty || _blockedAutoTags.contains(normalizedTag)) {
+      return false;
+    }
+    return _containsWholePhrase(normalizedRequest, normalizedTag);
+  }
+
+  static bool _containsWholePhrase(String text, String phrase) {
+    final escaped = RegExp.escape(phrase);
+    return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(text);
+  }
+
   static String _normalize(String value) {
     return value.toLowerCase().replaceAll(RegExp(r'[_-]+'), ' ').trim();
   }
+
+  static const Set<String> _blockedAutoTags = {
+    // AniList's Kids tag is a demographic/content bucket. A request like
+    // "good to watch with kids" is better handled as family-friendly intent,
+    // not as a hard Kids tag filter.
+    'kids',
+  };
 
   static Set<String> _jsonStringSet(Object? value) {
     if (value is! List) return {};
@@ -474,6 +494,19 @@ class RecommendationQuery {
       'laugh',
       'laughing',
       'laugh a lot',
+      'spy family',
+      'spy x family',
+    ],
+    'Family Life': [
+      'family anime',
+      'family friendly',
+      'family-friendly',
+      'watch with kids',
+      'watch with parents',
+      'kids and parents',
+      'parents and kids',
+      'spy family',
+      'spy x family',
     ],
     'Hentai': ['hentai', 'explicit adult'],
     'Ecchi': ['ecchi', 'fanservice'],

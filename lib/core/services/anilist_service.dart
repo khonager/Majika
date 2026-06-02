@@ -156,6 +156,10 @@ class AniListService implements MediaService {
     final searchText = tags.isEmpty && formats.isEmpty
         ? query.aniListSearchText
         : '';
+    final genreTags = tags.where(_knownAniListGenres.contains).toList();
+    final mediaTags = tags
+        .where((tag) => !_knownAniListGenres.contains(tag))
+        .toList();
     final variables = {
       'type': mediaType,
       'page': 1,
@@ -163,16 +167,19 @@ class AniListService implements MediaService {
       'isAdult': query.includeAdult || query.infersAdult,
       if (searchText.isNotEmpty) 'search': searchText,
       if (formats.isNotEmpty) 'formatIn': formats.toList(),
-      if (tags.isNotEmpty)
-        'genreIn': tags.where(_knownAniListGenres.contains).toList(),
-      if (tags.isNotEmpty)
-        'tagIn': tags
-            .where((tag) => !_knownAniListGenres.contains(tag))
-            .toList(),
+      if (genreTags.isNotEmpty) 'genreIn': genreTags,
+      if (mediaTags.isNotEmpty) 'tagIn': mediaTags,
     };
 
     final response = await _postGraphQl(_searchQuery, variables);
-    return parseCandidates(jsonDecode(response.body));
+    final candidates = parseCandidates(jsonDecode(response.body));
+    if (candidates.isNotEmpty || mediaTags.isEmpty || genreTags.isEmpty) {
+      return candidates;
+    }
+
+    final relaxedVariables = {...variables}..remove('tagIn');
+    final relaxedResponse = await _postGraphQl(_searchQuery, relaxedVariables);
+    return parseCandidates(jsonDecode(relaxedResponse.body));
   }
 
   Future<http.Response> _postGraphQl(

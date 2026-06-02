@@ -397,6 +397,16 @@ void main() {
       expect(magicSchool.aiSelectedTags, contains('Magic'));
       expect(magicSchool.aiSelectedTags, contains('School'));
 
+      final familyAnime = const RecommendationQuery(
+        request:
+            'family anime that is good to watch with kids and parents. something fun like spy family',
+      ).withInferredSelections(const ['Comedy', 'Family Life', 'Go', 'Kids']);
+
+      expect(familyAnime.aiSelectedTags, contains('Comedy'));
+      expect(familyAnime.aiSelectedTags, contains('Family Life'));
+      expect(familyAnime.aiSelectedTags, isNot(contains('Go')));
+      expect(familyAnime.aiSelectedTags, isNot(contains('Kids')));
+
       final couchCoopGame = const RecommendationQuery(
         request: 'two players on one pc with controller',
         formats: {'CO_OP'},

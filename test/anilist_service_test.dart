@@ -1,4 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/services/anilist_service.dart';
 
 void main() {
@@ -146,4 +151,90 @@ void main() {
     expect(signals.favoriteStaff, contains('Naoko Yamada'));
     expect(signals.favoriteStudios, contains('Kyoto Animation'));
   });
+
+  test(
+    'search relaxes over-specific AniList tags when no results match',
+    () async {
+      final requests = <Map<String, dynamic>>[];
+      final service = AniListService(
+        client: MockClient((request) async {
+          final payload = jsonDecode(request.body) as Map<String, dynamic>;
+          final variables = Map<String, dynamic>.from(
+            payload['variables'] as Map,
+          );
+          requests.add(variables);
+
+          if (variables.containsKey('tagIn')) {
+            return _json({
+              'data': {
+                'Page': {'media': []},
+              },
+            });
+          }
+
+          return _json({
+            'data': {
+              'Page': {
+                'media': [
+                  {
+                    'id': 10,
+                    'type': 'ANIME',
+                    'format': 'TV',
+                    'title': {
+                      'userPreferred': 'Family Comedy',
+                      'romaji': 'Family Comedy',
+                      'english': null,
+                    },
+                    'coverImage': {'large': 'https://example.com/family.jpg'},
+                    'genres': ['Comedy'],
+                    'tags': [
+                      {
+                        'name': 'Family Life',
+                        'rank': 80,
+                        'isMediaSpoiler': false,
+                        'isAdult': false,
+                      },
+                    ],
+                    'siteUrl': 'https://anilist.co/anime/10',
+                    'characters': {'nodes': []},
+                    'studios': {'nodes': []},
+                    'averageScore': 82,
+                    'popularity': 50000,
+                    'episodes': 12,
+                    'chapters': null,
+                    'status': 'FINISHED',
+                    'startDate': {'year': 2024},
+                    'description': 'A family comedy.',
+                  },
+                ],
+              },
+            },
+          });
+        }),
+      );
+
+      final results = await service.searchRecommendationCandidates(
+        const RecommendationQuery(
+          request:
+              'family anime that is good to watch with kids and parents. something fun like spy family',
+        ).withInferredSelections(const ['Comedy', 'Family Life', 'Go', 'Kids']),
+      );
+
+      expect(results.single.title, 'Family Comedy');
+      expect(requests, hasLength(2));
+      expect(requests.first['genreIn'], contains('Comedy'));
+      expect(requests.first['tagIn'], contains('Family Life'));
+      expect(requests.first['tagIn'], isNot(contains('Go')));
+      expect(requests.first['tagIn'], isNot(contains('Kids')));
+      expect(requests.last, isNot(contains('tagIn')));
+    },
+  );
+}
+
+http.Response _json(Map<String, Object?> body) {
+  return http.Response(
+    jsonEncode(body),
+    200,
+    headers: {'content-type': 'application/json'},
+  );
 }
