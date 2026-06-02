@@ -680,8 +680,53 @@ void main() {
     expect(find.text('Local server endpoint'), findsOneWidget);
     expect(find.text('Server model preset'), findsOneWidget);
     expect(find.text('qwen3:4b-instruct'), findsWidgets);
+    expect(find.text(defaultLocalAiEndpoint), findsWidgets);
     expect(find.text('Local server model'), findsOneWidget);
     expect(find.text('Gemma 3 1B IT'), findsNothing);
+  });
+
+  testWidgets('settings keeps a custom local server endpoint', (
+    WidgetTester tester,
+  ) async {
+    const customEndpoint = 'http://127.0.0.1:52625/v1/chat/completions';
+    SharedPreferences.setMockInitialValues({
+      LocalAiSettingsKeys.localAiMode: localAiModeExternalServer,
+      LocalAiSettingsKeys.useLocalAi: true,
+      LocalAiSettingsKeys.localEndpoint: customEndpoint,
+    });
+
+    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+
+    await tester.scrollUntilVisible(
+      find.text('Local AI'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    final endpointFinder = find.byKey(const ValueKey('local-ai-endpoint'));
+    expect(endpointFinder, findsOneWidget);
+    expect(find.text(customEndpoint), findsOneWidget);
+
+    const changedEndpoint = 'http://192.168.1.8:8080';
+    await tester.enterText(endpointFinder, changedEndpoint);
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString(LocalAiSettingsKeys.localEndpoint), changedEndpoint);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('Local AI'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text(changedEndpoint), findsOneWidget);
   });
 
   testWidgets('settings hides unsupported on-device AI on Linux', (

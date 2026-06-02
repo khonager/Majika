@@ -10,7 +10,7 @@ const localAiBackendAuto = 'auto';
 const localAiBackendCpu = 'cpu';
 const localAiBackendGpu = 'gpu';
 const localAiBackendNpu = 'npu';
-const defaultLocalAiEndpoint = 'http://127.0.0.1:52625/v1/chat/completions';
+const defaultLocalAiEndpoint = 'http://127.0.0.1:11434';
 const defaultLocalAiModel = 'qwen3:4b-instruct';
 
 class LocalAiSettingsKeys {
