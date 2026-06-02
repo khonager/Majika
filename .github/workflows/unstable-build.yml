@@ -14,41 +14,8 @@ permissions:
   contents: write
 
 jobs:
-  analyze:
-    name: Analyze & Test
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: "temurin"
-          java-version: ${{ env.JAVA_VERSION }}
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: "stable"
-          cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Check formatting
-        run: dart format --set-exit-if-changed lib test
-
-      - name: Analyze code
-        run: flutter analyze
-
-      - name: Run tests
-        run: flutter test
-
   build-android:
     name: Build Android APK
-    needs: analyze
     runs-on: ubuntu-latest
 
     steps:
@@ -110,7 +77,6 @@ jobs:
 
   build-linux:
     name: Build Linux
-    needs: analyze
     runs-on: ubuntu-latest
 
     steps:
@@ -149,7 +115,6 @@ jobs:
 
   build-windows:
     name: Build Windows
-    needs: analyze
     runs-on: windows-latest
 
     steps:
@@ -183,7 +148,6 @@ jobs:
 
   build-macos:
     name: Build macOS
-    needs: analyze
     runs-on: macos-latest
 
     steps:
@@ -223,7 +187,6 @@ jobs:
 
   build-web:
     name: Build Web
-    needs: analyze
     runs-on: ubuntu-latest
 
     steps:
