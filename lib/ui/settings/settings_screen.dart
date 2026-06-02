@@ -11,12 +11,34 @@ import 'package:majika/ui/shared/glass_panel.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+const _desktopOnDevicePlatforms = {
+  TargetPlatform.macOS,
+  TargetPlatform.windows,
+};
+const _mobileOnDevicePlatforms = {TargetPlatform.android, TargetPlatform.iOS};
+const _onDevicePlatforms = {
+  ..._mobileOnDevicePlatforms,
+  ..._desktopOnDevicePlatforms,
+};
+
+enum _AiModelTier {
+  low('Lowest working', Icons.bolt_rounded),
+  recommended('Recommended mid', Icons.auto_awesome_rounded),
+  high('Extra accurate', Icons.workspace_premium_rounded);
+
+  final String label;
+  final IconData icon;
+
+  const _AiModelTier(this.label, this.icon);
+}
+
 const _downloadableLocalAiModels = [
   _DownloadableModel(
     id: 'gemma3_1b_it',
     name: 'Gemma 3 1B IT',
     sizeLabel: '586 MB',
     providerLabel: 'Gemma',
+    tier: _AiModelTier.low,
     resourceLabel: 'Small Google text model',
     mobileUrl:
         'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task',
@@ -27,12 +49,14 @@ const _downloadableLocalAiModels = [
     modelType: ModelType.gemmaIt,
     fileType: ModelFileType.task,
     needsHuggingFaceToken: true,
+    supportedPlatforms: _onDevicePlatforms,
   ),
   _DownloadableModel(
     id: 'gemma3n_e2b_it',
     name: 'Gemma 3n E2B IT',
     sizeLabel: '3.1 GB',
     providerLabel: 'Gemma',
+    tier: _AiModelTier.recommended,
     resourceLabel: 'Advanced Google multimodal model',
     mobileUrl:
         'https://huggingface.co/google/gemma-3n-E2B-it-litert-preview/resolve/main/gemma-3n-E2B-it-int4.task',
@@ -44,12 +68,14 @@ const _downloadableLocalAiModels = [
     fileType: ModelFileType.task,
     isAdvanced: true,
     needsHuggingFaceToken: true,
+    supportedPlatforms: _onDevicePlatforms,
   ),
   _DownloadableModel(
     id: 'gemma3n_e4b_it',
     name: 'Gemma 3n E4B IT',
     sizeLabel: '6.5 GB',
     providerLabel: 'Gemma',
+    tier: _AiModelTier.high,
     resourceLabel: 'Large Google multimodal model',
     mobileUrl:
         'https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-3n-E4B-it-int4.task',
@@ -61,12 +87,14 @@ const _downloadableLocalAiModels = [
     fileType: ModelFileType.task,
     isAdvanced: true,
     needsHuggingFaceToken: true,
+    supportedPlatforms: _onDevicePlatforms,
   ),
   _DownloadableModel(
     id: 'qwen3_0_6b',
     name: 'Qwen3 0.6B',
     sizeLabel: '586 MB',
     providerLabel: 'Qwen',
+    tier: _AiModelTier.low,
     resourceLabel: 'Balanced public text model',
     mobileUrl:
         'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
@@ -77,12 +105,14 @@ const _downloadableLocalAiModels = [
     modelType: ModelType.qwen,
     fileType: ModelFileType.task,
     isAdvanced: true,
+    supportedPlatforms: _desktopOnDevicePlatforms,
   ),
   _DownloadableModel(
     id: 'deepseek_r1_qwen_1_5b',
     name: 'DeepSeek R1 Distill Qwen 1.5B',
     sizeLabel: '1.7 GB',
     providerLabel: 'DeepSeek',
+    tier: _AiModelTier.high,
     resourceLabel: 'Advanced reasoning model',
     mobileUrl:
         'https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv1280.task',
@@ -93,12 +123,14 @@ const _downloadableLocalAiModels = [
     modelType: ModelType.deepSeek,
     fileType: ModelFileType.task,
     isAdvanced: true,
+    supportedPlatforms: _desktopOnDevicePlatforms,
   ),
   _DownloadableModel(
     id: 'qwen25_1_5b_instruct',
     name: 'Qwen 2.5 1.5B Instruct',
     sizeLabel: '1.6 GB',
     providerLabel: 'Qwen',
+    tier: _AiModelTier.recommended,
     resourceLabel: 'Advanced public text model',
     mobileUrl:
         'https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
@@ -109,16 +141,52 @@ const _downloadableLocalAiModels = [
     modelType: ModelType.qwen,
     fileType: ModelFileType.task,
     isAdvanced: true,
+    supportedPlatforms: _desktopOnDevicePlatforms,
   ),
 ];
 
 final _defaultLocalAiModel = _downloadableLocalAiModels.first;
 const _externalLocalServerModelPresets = [
-  'gemma3:270m',
-  'gemma3:1b',
-  'gemma3:4b',
-  'gemma3:12b',
-  'gemma3:27b',
+  _ServerModelPreset(
+    name: 'qwen3:1.7b',
+    tier: _AiModelTier.low,
+    sizeLabel: '1.4 GB',
+    description:
+        'Smallest practical server model for quick search interpretation on modest laptops.',
+  ),
+  _ServerModelPreset(
+    name: 'qwen3:4b-instruct',
+    tier: _AiModelTier.recommended,
+    sizeLabel: '2.5 GB',
+    description:
+        'Best default for Majika: strong instruction following without being too heavy.',
+  ),
+  _ServerModelPreset(
+    name: 'qwen3:8b',
+    tier: _AiModelTier.high,
+    sizeLabel: '5.2 GB',
+    description:
+        'Higher accuracy for better tag and top-pick choices if the laptop has enough RAM.',
+  ),
+  _ServerModelPreset(
+    name: 'gemma3:1b',
+    tier: _AiModelTier.low,
+    sizeLabel: '815 MB',
+    description: 'Tiny Gemma fallback when speed matters more than nuance.',
+  ),
+  _ServerModelPreset(
+    name: 'gemma3:4b',
+    tier: _AiModelTier.recommended,
+    sizeLabel: '3.3 GB',
+    description: 'Balanced Gemma option for local server users.',
+  ),
+  _ServerModelPreset(
+    name: 'gemma3:12b',
+    tier: _AiModelTier.high,
+    sizeLabel: '8.1 GB',
+    description:
+        'Large Gemma option for stronger reasoning on beefier machines.',
+  ),
 ];
 
 class SettingsScreen extends StatefulWidget {
@@ -164,6 +232,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool get _usesExternalServer => _localAiMode == localAiModeExternalServer;
 
+  bool get _supportsOnDeviceAi =>
+      !kIsWeb && _onDevicePlatforms.contains(defaultTargetPlatform);
+
+  List<String> get _localAiModeOptions => [
+    if (_supportsOnDeviceAi) localAiModeOnDevice,
+    localAiModeExternalServer,
+    localAiModeRulesOnly,
+  ];
+
   List<_DownloadableModel> get _availableLocalAiModels =>
       _downloadableLocalAiModels
           .where((model) => model.supportsCurrentPlatform)
@@ -178,6 +255,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   _DownloadableModel get _effectiveSelectedModel {
     final models = _visibleLocalAiModels;
     return models.contains(_selectedModel) ? _selectedModel : models.first;
+  }
+
+  _ServerModelPreset get _effectiveServerModelPreset {
+    final modelName = _localServerModelController.text.trim();
+    for (final preset in _externalLocalServerModelPresets) {
+      if (preset.name == modelName) return preset;
+    }
+    return _externalLocalServerModelPresets.firstWhere(
+      (preset) => preset.name == defaultLocalAiModel,
+      orElse: () => _externalLocalServerModelPresets.first,
+    );
   }
 
   @override
@@ -207,6 +295,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final savedMode =
         prefs.getString(LocalAiSettingsKeys.localAiMode) ??
         _modeFromLegacyProvider(legacyProvider);
+    final normalizedMode =
+        savedMode == localAiModeOnDevice && !_supportsOnDeviceAi
+        ? localAiModeExternalServer
+        : savedMode;
 
     setState(() {
       _immersiveReader =
@@ -223,11 +315,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _enableMotionEffects;
       _useLocalAi =
           prefs.getBool(LocalAiSettingsKeys.useLocalAi) ??
-          (savedMode == localAiModeOnDevice ||
-              savedMode == localAiModeExternalServer);
+          (normalizedMode == localAiModeOnDevice ||
+              normalizedMode == localAiModeExternalServer);
       _useAiForSearch =
           prefs.getBool(LocalAiSettingsKeys.useAiForSearch) ?? _useAiForSearch;
-      _localAiMode = savedMode;
+      _localAiMode = normalizedMode;
       _localBackend =
           prefs.getString(LocalAiSettingsKeys.localBackend) ??
           localAiBackendAuto;
@@ -513,7 +605,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return 'Deterministic rules only; no model is required.';
     }
     if (_localAiMode == localAiModeExternalServer) {
-      return 'External local server will handle AI requests.';
+      return 'External local server will handle AI requests with ${_localServerModelController.text.trim().isEmpty ? defaultLocalAiModel : _localServerModelController.text.trim()}.';
     }
     if (_hasDownloadedModel) {
       return '${_downloadedModelName ?? 'On-device model'} is active for AI requests using $_localBackend backend.';
@@ -749,11 +841,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: 'AI mode',
                   subtitle: 'Choose how Majika handles local reasoning.',
                   value: _localAiMode,
-                  options: const [
-                    localAiModeOnDevice,
-                    localAiModeExternalServer,
-                    localAiModeRulesOnly,
-                  ],
+                  options: _localAiModeOptions,
                   onChanged: (value) {
                     if (value == null) return;
                     setState(() {
@@ -777,7 +865,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     showInfoToast(context, 'Local AI mode set to $value.');
                   },
                 ),
-                if (_usesOnDeviceAi || _hasDownloadedModel)
+                if (_supportsOnDeviceAi &&
+                    (_usesOnDeviceAi || _hasDownloadedModel))
                   _ModelDownloadCard(
                     models: _visibleLocalAiModels,
                     selectedModel: _effectiveSelectedModel,
@@ -816,7 +905,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onCancel: _cancelModelDownload,
                     onDelete: _deleteDownloadedModel,
                   ),
-                if (_usesOnDeviceAi)
+                if (_usesOnDeviceAi && _supportsOnDeviceAi)
                   _OptionRow(
                     icon: Icons.speed_rounded,
                     title: 'On-device backend',
@@ -836,7 +925,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       showInfoToast(context, 'Local AI backend set to $value.');
                     },
                   ),
-                if (_usesOnDeviceAi)
+                if (_usesOnDeviceAi && _supportsOnDeviceAi)
                   _SwitchRow(
                     icon: Icons.tune_rounded,
                     title: 'Advanced model choice',
@@ -845,7 +934,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onChanged: (value) =>
                         setState(() => _showAdvancedLocalAi = value),
                   ),
-                if (_usesOnDeviceAi && _showAdvancedLocalAi)
+                if (_usesOnDeviceAi &&
+                    _supportsOnDeviceAi &&
+                    _showAdvancedLocalAi)
                   _ActionRow(
                     icon: Icons.file_open_rounded,
                     title: 'Import custom model file',
@@ -867,21 +958,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         _saveString(LocalAiSettingsKeys.localEndpoint, value),
                   ),
                 if (_usesExternalServer)
-                  _OptionRow(
-                    icon: Icons.memory_rounded,
-                    title: 'Server model preset',
-                    subtitle:
-                        'Common Ollama model names; edit the field below for LM Studio or custom names.',
-                    value:
-                        _externalLocalServerModelPresets.contains(
-                          _localServerModelController.text,
-                        )
-                        ? _localServerModelController.text
-                        : defaultLocalAiModel,
-                    options: _externalLocalServerModelPresets,
-                    onChanged: (value) {
-                      if (value == null) return;
-                      _localServerModelController.text = value;
+                  _ServerModelPresetCard(
+                    presets: _externalLocalServerModelPresets,
+                    selectedPreset: _effectiveServerModelPreset,
+                    onPresetSelected: (preset) {
+                      final value = preset.name;
+                      setState(() => _localServerModelController.text = value);
                       _saveString(LocalAiSettingsKeys.localServerModel, value);
                       showInfoToast(
                         context,
@@ -898,10 +980,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         'Model name sent in OpenAI-compatible requests, such as gemma3:4b.',
                     controller: _localServerModelController,
                     hintText: defaultLocalAiModel,
-                    onChanged: (value) => _saveString(
-                      LocalAiSettingsKeys.localServerModel,
-                      value,
-                    ),
+                    onChanged: (value) {
+                      setState(() {});
+                      _saveString(LocalAiSettingsKeys.localServerModel, value);
+                    },
                   ),
                 _SwitchRow(
                   icon: Icons.manage_search_rounded,
@@ -1031,6 +1113,7 @@ class _DownloadableModel {
   final String name;
   final String sizeLabel;
   final String providerLabel;
+  final _AiModelTier tier;
   final String resourceLabel;
   final String mobileUrl;
   final String? desktopUrl;
@@ -1039,12 +1122,14 @@ class _DownloadableModel {
   final ModelFileType fileType;
   final bool isAdvanced;
   final bool needsHuggingFaceToken;
+  final Set<TargetPlatform> supportedPlatforms;
 
   const _DownloadableModel({
     required this.id,
     required this.name,
     required this.sizeLabel,
     required this.providerLabel,
+    required this.tier,
     required this.resourceLabel,
     required this.mobileUrl,
     this.desktopUrl,
@@ -1053,6 +1138,7 @@ class _DownloadableModel {
     this.fileType = ModelFileType.task,
     this.isAdvanced = false,
     this.needsHuggingFaceToken = false,
+    required this.supportedPlatforms,
   });
 
   String get url {
@@ -1072,10 +1158,8 @@ class _DownloadableModel {
           defaultTargetPlatform == TargetPlatform.macOS ||
           defaultTargetPlatform == TargetPlatform.windows);
 
-  bool get supportsCurrentPlatform {
-    if (isDesktop) return desktopUrl != null;
-    return mobileUrl.isNotEmpty;
-  }
+  bool get supportsCurrentPlatform =>
+      !kIsWeb && supportedPlatforms.contains(defaultTargetPlatform);
 
   String get platformNote {
     if (supportsCurrentPlatform) return description;
@@ -1083,8 +1167,134 @@ class _DownloadableModel {
   }
 }
 
+class _ServerModelPreset {
+  final String name;
+  final _AiModelTier tier;
+  final String sizeLabel;
+  final String description;
+
+  const _ServerModelPreset({
+    required this.name,
+    required this.tier,
+    required this.sizeLabel,
+    required this.description,
+  });
+}
+
 class _HuggingFaceTokenRequiredException implements Exception {
   const _HuggingFaceTokenRequiredException();
+}
+
+class _ServerModelPresetCard extends StatelessWidget {
+  final List<_ServerModelPreset> presets;
+  final _ServerModelPreset selectedPreset;
+  final ValueChanged<_ServerModelPreset> onPresetSelected;
+
+  const _ServerModelPresetCard({
+    required this.presets,
+    required this.selectedPreset,
+    required this.onPresetSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.secondary.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  selectedPreset.tier.icon,
+                  color: theme.colorScheme.secondary,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Server model preset',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Built-in local-server choices for this platform.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonHideUnderline(
+            child: DropdownButton<_ServerModelPreset>(
+              value: selectedPreset,
+              isExpanded: true,
+              dropdownColor: const Color(0xFF1A1F27),
+              iconEnabledColor: Colors.white70,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
+              items: [
+                for (final preset in presets)
+                  DropdownMenuItem(
+                    value: preset,
+                    child: Text(
+                      '${preset.tier.label} · ${preset.name}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (preset) {
+                if (preset != null) onPresetSelected(preset);
+              },
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${selectedPreset.sizeLabel} · ${selectedPreset.tier.label}',
+            style: const TextStyle(color: Colors.white70),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            selectedPreset.description,
+            style: const TextStyle(color: Colors.white70, height: 1.35),
+          ),
+          const SizedBox(height: 10),
+          TextButton.icon(
+            onPressed: _openOllamaDownload,
+            icon: const Icon(Icons.open_in_new_rounded, size: 16),
+            label: const Text('Install local server app'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ModelDownloadCard extends StatelessWidget {
@@ -1174,7 +1384,7 @@ class _ModelDownloadCard extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            '${selectedModel.sizeLabel} · ${selectedModel.resourceLabel}',
+            '${selectedModel.sizeLabel} · ${selectedModel.tier.label} · ${selectedModel.resourceLabel}',
             style: const TextStyle(color: Colors.white70),
           ),
         ],
@@ -1401,6 +1611,11 @@ class _HuggingFaceTokenPanel extends StatelessWidget {
 
 Future<void> _openHuggingFaceTokens() async {
   final uri = Uri.parse('https://huggingface.co/settings/tokens');
+  await launchUrl(uri, mode: LaunchMode.externalApplication);
+}
+
+Future<void> _openOllamaDownload() async {
+  final uri = Uri.parse('https://ollama.com/download');
   await launchUrl(uri, mode: LaunchMode.externalApplication);
 }
 

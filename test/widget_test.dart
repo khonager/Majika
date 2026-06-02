@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:majika/core/ai/local_ai_settings.dart';
@@ -511,7 +512,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Gemma 3 1B IT'), findsOneWidget);
-    expect(find.text('586 MB · Small Google text model'), findsOneWidget);
+    expect(
+      find.text('586 MB · Lowest working · Small Google text model'),
+      findsOneWidget,
+    );
     expect(find.text('FunctionGemma 270M'), findsNothing);
     expect(find.text('Hugging Face token'), findsOneWidget);
     expect(find.byKey(const ValueKey('hugging-face-token')), findsOneWidget);
@@ -539,12 +543,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Gemma 3n E2B IT'), findsOneWidget);
     expect(find.text('Gemma 3n E4B IT'), findsOneWidget);
-    expect(find.text('DeepSeek R1 Distill Qwen 1.5B'), findsOneWidget);
-    expect(find.text('Qwen 2.5 1.5B Instruct'), findsOneWidget);
-    await tester.tap(find.text('Qwen 2.5 1.5B Instruct').last);
+    expect(find.text('DeepSeek R1 Distill Qwen 1.5B'), findsNothing);
+    expect(find.text('Qwen 2.5 1.5B Instruct'), findsNothing);
+    await tester.tap(find.text('Gemma 3n E2B IT').last);
     await tester.pumpAndSettle();
-    expect(find.text('1.6 GB · Advanced public text model'), findsOneWidget);
-    expect(find.text('Hugging Face token'), findsNothing);
+    expect(
+      find.text('3.1 GB · Recommended mid · Advanced Google multimodal model'),
+      findsOneWidget,
+    );
+    expect(find.text('Hugging Face token'), findsOneWidget);
 
     await tester.scrollUntilVisible(
       find.text('Advanced model choice'),
@@ -672,9 +679,44 @@ void main() {
 
     expect(find.text('Local server endpoint'), findsOneWidget);
     expect(find.text('Server model preset'), findsOneWidget);
-    expect(find.text('gemma3:4b'), findsWidgets);
+    expect(find.text('qwen3:4b-instruct'), findsWidgets);
     expect(find.text('Local server model'), findsOneWidget);
     expect(find.text('Gemma 3 1B IT'), findsNothing);
+  });
+
+  testWidgets('settings hides unsupported on-device AI on Linux', (
+    WidgetTester tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      SharedPreferences.setMockInitialValues({
+        LocalAiSettingsKeys.localAiMode: localAiModeExternalServer,
+        LocalAiSettingsKeys.useLocalAi: true,
+      });
+
+      await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+
+      await tester.scrollUntilVisible(
+        find.text('Local AI'),
+        500,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Automatic on-device'), findsNothing);
+      expect(find.text('Gemma 3 1B IT'), findsNothing);
+      expect(find.text('Server model preset'), findsOneWidget);
+      expect(find.text('qwen3:4b-instruct'), findsWidgets);
+      expect(find.text('Lowest working · qwen3:1.7b'), findsNothing);
+
+      await tester.tap(find.text('Recommended mid · qwen3:4b-instruct'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Lowest working · qwen3:1.7b'), findsOneWidget);
+      expect(find.text('Extra accurate · qwen3:8b'), findsOneWidget);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   testWidgets('settings persists recommendation context items', (
