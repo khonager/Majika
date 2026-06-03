@@ -295,6 +295,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (_supportsOnDeviceAi) localAiModeOnDevice,
     localAiModeExternalServer,
     localAiModeExternalCloud,
+    localAiModeManual,
     localAiModeRulesOnly,
   ];
 
@@ -390,7 +391,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           prefs.getBool(LocalAiSettingsKeys.useLocalAi) ??
           (normalizedMode == localAiModeOnDevice ||
               normalizedMode == localAiModeExternalServer ||
-              normalizedMode == localAiModeExternalCloud);
+              normalizedMode == localAiModeExternalCloud ||
+              normalizedMode == localAiModeManual);
       _useAiForSearch =
           prefs.getBool(LocalAiSettingsKeys.useAiForSearch) ?? _useAiForSearch;
       _localAiMode = normalizedMode;
@@ -442,6 +444,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return switch (provider) {
       externalLocalAiProvider => localAiModeExternalServer,
       externalCloudAiProvider => localAiModeExternalCloud,
+      localAiModeManual => localAiModeManual,
       fallbackRulesProvider => localAiModeRulesOnly,
       null => localAiModeRulesOnly,
       _ => localAiModeOnDevice,
@@ -1016,6 +1019,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         localAiModeOnDevice => _selectedModel.providerLabel,
                         localAiModeExternalCloud =>
                           _effectiveCloudProviderPreset.provider,
+                        localAiModeManual => localAiModeManual,
                         _ => value,
                       };
                     });
@@ -1235,6 +1239,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     title: 'Cloud privacy note',
                     subtitle:
                         'Recommendation prompts and taste-profile signals are sent to the selected provider. Use rules-only or on-device AI to keep AI reasoning local.',
+                  ),
+                if (_localAiMode == localAiModeManual)
+                  const _InfoRow(
+                    icon: Icons.content_paste_go_rounded,
+                    title: 'Manual AI prompt handoff',
+                    subtitle:
+                        'Majika will show each AI prompt for copying. Paste it into ChatGPT or another AI, then paste that response back into Majika.',
                   ),
                 _SwitchRow(
                   icon: Icons.manage_search_rounded,

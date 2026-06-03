@@ -1,13 +1,35 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:majika/core/ai/ai_console_log.dart';
 import 'package:http/http.dart' as http;
 import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation.dart';
 import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/taste_profile.dart';
+
+final Object localAiConsoleLogZoneKey = Object();
+final Object manualAiRequestHandlerZoneKey = Object();
+
+typedef ManualAiRequestHandler =
+    Future<String> Function(ManualAiRequest request);
+
+class ManualAiRequest {
+  final String prompt;
+  final int maxTokens;
+  final String mode;
+  final String provider;
+
+  const ManualAiRequest({
+    required this.prompt,
+    required this.maxTokens,
+    required this.mode,
+    required this.provider,
+  });
+}
 
 abstract class LocalAiService {
   bool get isConfigured;
@@ -263,8 +285,30 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
     required LocalAiRuntimeSettings settings,
   }) async {
     final generator = textGenerator;
+    final log = _currentConsoleLog;
+    log?.addSection('Prompt', prompt);
     if (generator != null) {
-      return generator(prompt, maxTokens);
+      final response = await generator(prompt, maxTokens);
+      log?.addSection('Response', response);
+      return response;
+    }
+
+    if (settings.usesManualAi) {
+      final handler = _currentManualAiRequestHandler;
+      if (handler == null) {
+        throw StateError('Manual AI mode has no copy/paste handler.');
+      }
+      log?.addLine('Manual copy/paste mode is waiting for a response.');
+      final response = await handler(
+        ManualAiRequest(
+          prompt: prompt,
+          maxTokens: maxTokens,
+          mode: settings.mode,
+          provider: settings.provider,
+        ),
+      );
+      log?.addSection('Manual response', response);
+      return response;
     }
 
     if (settings.usesExternalServer || settings.usesExternalCloud) {
@@ -281,21 +325,25 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
 
     final preferredBackend = _safeOnDeviceBackend(settings.preferredBackend);
     try {
-      return await _generateOnDeviceText(
+      final response = await _generateOnDeviceText(
         prompt,
         maxTokens: maxTokens,
         preferredBackend: preferredBackend,
       );
+      log?.addSection('Response', response);
+      return response;
     } catch (_) {
       if (preferredBackend == null ||
           preferredBackend == PreferredBackend.cpu) {
         rethrow;
       }
-      return _generateOnDeviceText(
+      final response = await _generateOnDeviceText(
         prompt,
         maxTokens: maxTokens,
         preferredBackend: PreferredBackend.cpu,
       );
+      log?.addSection('Response', response);
+      return response;
     }
   }
 
@@ -340,6 +388,7 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
   }) async {
     final post = httpPost ?? http.post;
     final isCloud = settings.usesExternalCloud;
+    final log = _currentConsoleLog;
     final apiKey = settings.cloudApiKey.trim();
     if (isCloud && apiKey.isEmpty) {
       throw StateError('No ${settings.cloudProvider} API key is configured.');
@@ -352,13 +401,18 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
         'X-OpenRouter-Title': 'Majika',
       },
     };
+    final endpoint = isCloud
+        ? settings.cloudChatCompletionsUri
+        : settings.localChatCompletionsUri;
+    final model = isCloud ? settings.cloudModel : settings.serverModel;
+    log?.addLine(
+      'Sending request to ${isCloud ? settings.cloudProvider : 'local server'}: $model',
+    );
     final response = await post(
-      isCloud
-          ? settings.cloudChatCompletionsUri
-          : settings.localChatCompletionsUri,
+      endpoint,
       headers: headers,
       body: jsonEncode({
-        'model': isCloud ? settings.cloudModel : settings.serverModel,
+        'model': model,
         'messages': [
           {'role': 'user', 'content': prompt},
         ],
@@ -373,6 +427,7 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
         '${isCloud ? settings.cloudProvider : 'Local AI server'} returned HTTP ${response.statusCode}: ${response.body}',
       );
     }
+    log?.addLine('Received HTTP ${response.statusCode}.');
 
     final decoded = jsonDecode(response.body);
     if (decoded is! Map<String, dynamic>) {
@@ -392,11 +447,19 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
     final message = firstChoice['message'];
     if (message is Map<String, dynamic>) {
       final content = message['content'];
-      if (content != null) return content.toString();
+      if (content != null) {
+        final text = content.toString();
+        log?.addSection('Response', text);
+        return text;
+      }
     }
 
     final text = firstChoice['text'];
-    if (text != null) return text.toString();
+    if (text != null) {
+      final value = text.toString();
+      log?.addSection('Response', value);
+      return value;
+    }
 
     throw const FormatException('Local AI response did not include text.');
   }
@@ -416,6 +479,16 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
     return activeModel is InferenceModelSpec
         ? activeModel.modelType
         : ModelType.gemmaIt;
+  }
+
+  AiConsoleLog? get _currentConsoleLog {
+    final value = Zone.current[localAiConsoleLogZoneKey];
+    return value is AiConsoleLog ? value : null;
+  }
+
+  ManualAiRequestHandler? get _currentManualAiRequestHandler {
+    final value = Zone.current[manualAiRequestHandlerZoneKey];
+    return value is ManualAiRequestHandler ? value : null;
   }
 
   RecommendationQuery? _queryFromModelJson(

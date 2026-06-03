@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:majika/core/ai/ai_console_log.dart';
 import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/ai/local_ai_service.dart';
 import 'package:majika/core/models/media_item.dart';
@@ -352,6 +354,61 @@ void main() {
     );
     expect(interpreted.aiSelectedTags, contains('Mystery'));
     expect(interpreted.formats, contains('TV'));
+  });
+
+  test('local AI service can use manual copy paste responses', () async {
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        mode: localAiModeManual,
+        provider: localAiModeManual,
+        endpoint: defaultLocalAiEndpoint,
+        serverModel: defaultLocalAiModel,
+        contextItems: 24,
+      ),
+    );
+
+    late ManualAiRequest capturedRequest;
+    final interpreted = await runZoned(
+      () => service.interpretRecommendationRequest(
+        const RecommendationQuery(request: 'romance movie'),
+        availableTags: const ['Romance', 'Mystery'],
+      ),
+      zoneValues: {
+        manualAiRequestHandlerZoneKey: (ManualAiRequest request) async {
+          capturedRequest = request;
+          return '{"tags":["Romance"],"formats":["MOVIE"],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"romance movie"}';
+        },
+      },
+    );
+
+    expect(capturedRequest.prompt, contains('Return JSON only'));
+    expect(capturedRequest.maxTokens, 1024);
+    expect(interpreted.aiSelectedTags, contains('Romance'));
+    expect(interpreted.formats, contains('MOVIE'));
+  });
+
+  test('local AI service writes prompt and response to console log', () async {
+    final log = AiConsoleLog();
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        return '{"tags":["Mystery"],"formats":["TV"],"mediaTypes":["ANIME"],"includeAdult":false}';
+      },
+    );
+
+    await runZoned(
+      () => service.interpretRecommendationRequest(
+        const RecommendationQuery(request: 'mystery tv'),
+        availableTags: const ['Mystery', 'Romance'],
+      ),
+      zoneValues: {localAiConsoleLogZoneKey: log},
+    );
+
+    expect(log.value, contains('Prompt'));
+    expect(log.value, contains('mystery tv'));
+    expect(log.value, contains('Response'));
+    expect(log.value, contains('"Mystery"'));
   });
 
   test('local AI service respects the configured context budget', () async {

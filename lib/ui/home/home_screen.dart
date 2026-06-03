@@ -3,6 +3,8 @@ import 'dart:math';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:majika/core/ai/ai_console_log.dart';
 import 'package:majika/core/ai/local_ai_service.dart';
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation.dart';
@@ -279,70 +281,85 @@ class _HomeScreenState extends State<HomeScreen> {
       workspace.isRefreshingRecommendations = true;
       workspace.activeRecommendationSearchRunId = searchRunId;
     });
+    final aiLog = AiConsoleLog();
     final progressToast = showProgressToast(
       context,
       'Reading your request for ${workspace.service.displayName}...',
+      consoleLog: aiLog,
     );
     _activeRecommendationProgressToast = progressToast;
 
     try {
-      progressToast.update('Interpreting request with local AI or rules...');
-      final query = await _aiService.interpretRecommendationRequest(
-        rawQuery,
-        availableTags: _availableTags,
-        serviceName: workspace.service.displayName,
-        allowedMediaTypes: workspace.service.supportedMediaTypes,
-        allowedFormats: workspace.service.supportedFormats,
+      await runZoned(
+        () async {
+          progressToast.update(
+            'Interpreting request with local AI or rules...',
+          );
+          final query = await _aiService.interpretRecommendationRequest(
+            rawQuery,
+            availableTags: _availableTags,
+            serviceName: workspace.service.displayName,
+            allowedMediaTypes: workspace.service.supportedMediaTypes,
+            allowedFormats: workspace.service.supportedFormats,
+          );
+          var candidates = workspace.candidates;
+          final needsAdultCandidates =
+              (query.includeAdult || query.infersAdult) &&
+              !workspace.adultCandidatesLoaded;
+
+          if (query.isActive) {
+            progressToast.update(
+              'Searching ${workspace.service.displayName} candidates...',
+            );
+            final searchedCandidates = await workspace.service
+                .searchRecommendationCandidates(query);
+            candidates = _dedupeCandidates([
+              ...searchedCandidates,
+              ...candidates,
+            ]);
+          }
+
+          if (needsAdultCandidates) {
+            progressToast.update('Adding adult-content candidates...');
+            final adultCandidates = await workspace.service
+                .fetchRecommendationCandidates(includeAdult: true);
+            candidates = _dedupeCandidates([...candidates, ...adultCandidates]);
+          }
+
+          progressToast.update('Ranking matches against your profile...');
+          final recommendations = _tasteEngine.rankCandidates(
+            profile,
+            candidates,
+            query: query,
+          );
+          progressToast.update('Choosing the lead recommendation...');
+          final orderedRecommendations = await _withChosenTopRecommendation(
+            profile,
+            recommendations,
+            query,
+          );
+
+          if (!mounted ||
+              workspace.activeRecommendationSearchRunId != searchRunId) {
+            return;
+          }
+          setState(() {
+            workspace.query = query;
+            workspace.candidates = candidates;
+            workspace.recommendations = orderedRecommendations;
+            workspace.adultCandidatesLoaded =
+                workspace.adultCandidatesLoaded || needsAdultCandidates;
+            workspace.isRefreshingRecommendations = false;
+            workspace.activeRecommendationSearchRunId = null;
+          });
+          unawaited(_persistWorkspace(workspace));
+          _rebuildHomeRecommendationsSync();
+        },
+        zoneValues: {
+          localAiConsoleLogZoneKey: aiLog,
+          manualAiRequestHandlerZoneKey: _handleManualAiRequest,
+        },
       );
-      var candidates = workspace.candidates;
-      final needsAdultCandidates =
-          (query.includeAdult || query.infersAdult) &&
-          !workspace.adultCandidatesLoaded;
-
-      if (query.isActive) {
-        progressToast.update(
-          'Searching ${workspace.service.displayName} candidates...',
-        );
-        final searchedCandidates = await workspace.service
-            .searchRecommendationCandidates(query);
-        candidates = _dedupeCandidates([...searchedCandidates, ...candidates]);
-      }
-
-      if (needsAdultCandidates) {
-        progressToast.update('Adding adult-content candidates...');
-        final adultCandidates = await workspace.service
-            .fetchRecommendationCandidates(includeAdult: true);
-        candidates = _dedupeCandidates([...candidates, ...adultCandidates]);
-      }
-
-      progressToast.update('Ranking matches against your profile...');
-      final recommendations = _tasteEngine.rankCandidates(
-        profile,
-        candidates,
-        query: query,
-      );
-      progressToast.update('Choosing the lead recommendation...');
-      final orderedRecommendations = await _withChosenTopRecommendation(
-        profile,
-        recommendations,
-        query,
-      );
-
-      if (!mounted ||
-          workspace.activeRecommendationSearchRunId != searchRunId) {
-        return;
-      }
-      setState(() {
-        workspace.query = query;
-        workspace.candidates = candidates;
-        workspace.recommendations = orderedRecommendations;
-        workspace.adultCandidatesLoaded =
-            workspace.adultCandidatesLoaded || needsAdultCandidates;
-        workspace.isRefreshingRecommendations = false;
-        workspace.activeRecommendationSearchRunId = null;
-      });
-      unawaited(_persistWorkspace(workspace));
-      _rebuildHomeRecommendationsSync();
     } catch (error) {
       if (!mounted ||
           workspace.activeRecommendationSearchRunId != searchRunId) {
@@ -378,102 +395,115 @@ class _HomeScreenState extends State<HomeScreen> {
       _homeError = null;
       _activeHomeSearchRunId = searchRunId;
     });
+    final aiLog = AiConsoleLog();
     final progressToast = showProgressToast(
       context,
       'Reading your Home search across services...',
+      consoleLog: aiLog,
     );
     _activeHomeProgressToast = progressToast;
 
     try {
-      final byService = <String, List<Recommendation>>{};
-      final merged = <Recommendation>[];
-      var chooserQuery = rawQuery;
+      await runZoned(
+        () async {
+          final byService = <String, List<Recommendation>>{};
+          final merged = <Recommendation>[];
+          var chooserQuery = rawQuery;
 
-      for (final workspace in importedWorkspaces) {
-        final profile = workspace.profile;
-        if (profile == null) continue;
-        progressToast.update(
-          'Interpreting ${workspace.service.displayName} filters...',
-        );
-        final query = await _aiService.interpretRecommendationRequest(
-          rawQuery,
-          availableTags: _availableTagsFor(workspace),
-          serviceName: workspace.service.displayName,
-          allowedMediaTypes: workspace.service.supportedMediaTypes,
-          allowedFormats: workspace.service.supportedFormats,
-        );
-        chooserQuery = chooserQuery.copyWith(
-          aiSelectedTags: {
-            ...chooserQuery.aiSelectedTags,
-            ...query.aiSelectedTags,
-          },
-          mediaTypes: {...chooserQuery.mediaTypes, ...query.mediaTypes},
-          formats: {...chooserQuery.formats, ...query.formats},
-          includeAdult: chooserQuery.includeAdult || query.includeAdult,
-        );
+          for (final workspace in importedWorkspaces) {
+            final profile = workspace.profile;
+            if (profile == null) continue;
+            progressToast.update(
+              'Interpreting ${workspace.service.displayName} filters...',
+            );
+            final query = await _aiService.interpretRecommendationRequest(
+              rawQuery,
+              availableTags: _availableTagsFor(workspace),
+              serviceName: workspace.service.displayName,
+              allowedMediaTypes: workspace.service.supportedMediaTypes,
+              allowedFormats: workspace.service.supportedFormats,
+            );
+            chooserQuery = chooserQuery.copyWith(
+              aiSelectedTags: {
+                ...chooserQuery.aiSelectedTags,
+                ...query.aiSelectedTags,
+              },
+              mediaTypes: {...chooserQuery.mediaTypes, ...query.mediaTypes},
+              formats: {...chooserQuery.formats, ...query.formats},
+              includeAdult: chooserQuery.includeAdult || query.includeAdult,
+            );
 
-        var candidates = workspace.candidates;
-        final needsAdultCandidates =
-            (query.includeAdult || query.infersAdult) &&
-            !workspace.adultCandidatesLoaded;
+            var candidates = workspace.candidates;
+            final needsAdultCandidates =
+                (query.includeAdult || query.infersAdult) &&
+                !workspace.adultCandidatesLoaded;
 
-        if (query.isActive) {
-          progressToast.update(
-            'Searching ${workspace.service.displayName} candidates...',
+            if (query.isActive) {
+              progressToast.update(
+                'Searching ${workspace.service.displayName} candidates...',
+              );
+              final searchedCandidates = await workspace.service
+                  .searchRecommendationCandidates(query);
+              candidates = _dedupeCandidates([
+                ...searchedCandidates,
+                ...candidates,
+              ]);
+            }
+
+            if (needsAdultCandidates) {
+              progressToast.update(
+                'Adding ${workspace.service.displayName} adult-content candidates...',
+              );
+              final adultCandidates = await workspace.service
+                  .fetchRecommendationCandidates(includeAdult: true);
+              candidates = _dedupeCandidates([
+                ...candidates,
+                ...adultCandidates,
+              ]);
+            }
+
+            progressToast.update(
+              'Ranking ${workspace.service.displayName} matches...',
+            );
+            final recommendations = _tasteEngine.rankCandidates(
+              profile,
+              candidates,
+              query: query,
+            );
+            if (recommendations.isEmpty) continue;
+
+            workspace.candidates = candidates;
+            workspace.adultCandidatesLoaded =
+                workspace.adultCandidatesLoaded || needsAdultCandidates;
+            unawaited(_persistWorkspace(workspace));
+
+            byService[workspace.service.id] = recommendations;
+            merged.addAll(recommendations);
+          }
+
+          merged.sort((a, b) => b.matchScore.compareTo(a.matchScore));
+          progressToast.update('Choosing the best Home recommendation...');
+          final chosen = await _aiService.chooseHomeRecommendation(
+            importedWorkspaces.map((workspace) => workspace.profile!).toList(),
+            merged,
+            query: chooserQuery,
           );
-          final searchedCandidates = await workspace.service
-              .searchRecommendationCandidates(query);
-          candidates = _dedupeCandidates([
-            ...searchedCandidates,
-            ...candidates,
-          ]);
-        }
+          final ordered = _promoteChosenRecommendation(merged, chosen);
 
-        if (needsAdultCandidates) {
-          progressToast.update(
-            'Adding ${workspace.service.displayName} adult-content candidates...',
-          );
-          final adultCandidates = await workspace.service
-              .fetchRecommendationCandidates(includeAdult: true);
-          candidates = _dedupeCandidates([...candidates, ...adultCandidates]);
-        }
-
-        progressToast.update(
-          'Ranking ${workspace.service.displayName} matches...',
-        );
-        final recommendations = _tasteEngine.rankCandidates(
-          profile,
-          candidates,
-          query: query,
-        );
-        if (recommendations.isEmpty) continue;
-
-        workspace.candidates = candidates;
-        workspace.adultCandidatesLoaded =
-            workspace.adultCandidatesLoaded || needsAdultCandidates;
-        unawaited(_persistWorkspace(workspace));
-
-        byService[workspace.service.id] = recommendations;
-        merged.addAll(recommendations);
-      }
-
-      merged.sort((a, b) => b.matchScore.compareTo(a.matchScore));
-      progressToast.update('Choosing the best Home recommendation...');
-      final chosen = await _aiService.chooseHomeRecommendation(
-        importedWorkspaces.map((workspace) => workspace.profile!).toList(),
-        merged,
-        query: chooserQuery,
+          if (!mounted || _activeHomeSearchRunId != searchRunId) return;
+          setState(() {
+            _homeQuery = rawQuery;
+            _homeRecommendationsByService = byService;
+            _homeRecommendations = ordered;
+            _isRefreshingHome = false;
+            _activeHomeSearchRunId = null;
+          });
+        },
+        zoneValues: {
+          localAiConsoleLogZoneKey: aiLog,
+          manualAiRequestHandlerZoneKey: _handleManualAiRequest,
+        },
       );
-      final ordered = _promoteChosenRecommendation(merged, chosen);
-
-      if (!mounted || _activeHomeSearchRunId != searchRunId) return;
-      setState(() {
-        _homeQuery = rawQuery;
-        _homeRecommendationsByService = byService;
-        _homeRecommendations = ordered;
-        _isRefreshingHome = false;
-        _activeHomeSearchRunId = null;
-      });
     } catch (error) {
       if (!mounted || _activeHomeSearchRunId != searchRunId) return;
       setState(() {
@@ -487,6 +517,101 @@ class _HomeScreenState extends State<HomeScreen> {
         _activeHomeProgressToast = null;
       }
       progressToast.dismiss();
+    }
+  }
+
+  Future<String> _handleManualAiRequest(ManualAiRequest request) async {
+    if (!mounted) {
+      throw StateError('Manual AI prompt could not be shown.');
+    }
+    final responseController = TextEditingController();
+    try {
+      final response = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) {
+          final theme = Theme.of(context);
+          return AlertDialog(
+            title: const Text('Manual AI response'),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 680),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Copy this prompt into ChatGPT or another AI, then paste the response here.',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      constraints: const BoxConstraints(maxHeight: 220),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: theme.dividerColor.withValues(alpha: 0.4),
+                        ),
+                      ),
+                      child: SingleChildScrollView(
+                        child: SelectableText(
+                          request.prompt,
+                          key: const ValueKey('manual-ai-prompt'),
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      key: const ValueKey('manual-ai-response'),
+                      controller: responseController,
+                      minLines: 5,
+                      maxLines: 10,
+                      decoration: const InputDecoration(
+                        labelText: 'AI response',
+                        alignLabelWithHint: true,
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton.icon(
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: request.prompt));
+                  showInfoToast(context, 'Prompt copied.');
+                },
+                icon: const Icon(Icons.copy_rounded),
+                label: const Text('Copy prompt'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              FilledButton.icon(
+                onPressed: () =>
+                    Navigator.pop(context, responseController.text.trim()),
+                icon: const Icon(Icons.check_rounded),
+                label: const Text('Use response'),
+              ),
+            ],
+          );
+        },
+      );
+      if (response == null || response.trim().isEmpty) {
+        throw StateError('Manual AI response was empty.');
+      }
+      return response.trim();
+    } finally {
+      responseController.dispose();
     }
   }
 

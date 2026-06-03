@@ -7,6 +7,7 @@ const fallbackRulesProvider = 'Fallback rules only';
 const localAiModeOnDevice = 'Automatic on-device';
 const localAiModeExternalServer = externalLocalAiProvider;
 const localAiModeExternalCloud = externalCloudAiProvider;
+const localAiModeManual = 'Manual copy/paste';
 const localAiModeRulesOnly = fallbackRulesProvider;
 const localAiBackendAuto = 'auto';
 const localAiBackendCpu = 'cpu';
@@ -98,11 +99,14 @@ class LocalAiRuntimeSettings {
       mode == localAiModeExternalCloud &&
       cloudEndpoint.trim().isNotEmpty;
 
+  bool get usesManualAi => useLocalAi && mode == localAiModeManual;
+
   bool get usesOnDeviceModel =>
       useLocalAi &&
       mode == localAiModeOnDevice &&
       !usesExternalServer &&
-      !usesExternalCloud;
+      !usesExternalCloud &&
+      !usesManualAi;
 
   int get contextItemLimit => contextItems.round().clamp(8, 48);
 
@@ -148,7 +152,8 @@ class LocalAiRuntimeSettings {
         (defaultEnabled ||
             mode == localAiModeOnDevice ||
             mode == localAiModeExternalServer ||
-            mode == localAiModeExternalCloud);
+            mode == localAiModeExternalCloud ||
+            mode == localAiModeManual);
 
     return LocalAiRuntimeSettings(
       useLocalAi: mode == localAiModeRulesOnly ? false : useLocalAi,
@@ -182,6 +187,7 @@ class LocalAiRuntimeSettings {
     return switch (provider) {
       externalLocalAiProvider => localAiModeExternalServer,
       externalCloudAiProvider => localAiModeExternalCloud,
+      localAiModeManual => localAiModeManual,
       fallbackRulesProvider => localAiModeRulesOnly,
       null => localAiModeRulesOnly,
       _ => localAiModeOnDevice,

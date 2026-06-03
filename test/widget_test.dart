@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:majika/core/ai/ai_console_log.dart';
 import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation_query.dart';
@@ -11,6 +13,7 @@ import 'package:majika/core/services/media_service.dart';
 import 'package:majika/main.dart';
 import 'package:majika/ui/home/home_screen.dart';
 import 'package:majika/ui/settings/settings_screen.dart';
+import 'package:majika/ui/shared/app_feedback.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -182,6 +185,61 @@ void main() {
     expect(find.text('Time Travel Movie'), findsOneWidget);
     expect(find.text('Romance'), findsWidgets);
     expect(find.text('Time Manipulation'), findsWidgets);
+  });
+
+  testWidgets('manual AI mode prompts for pasted search responses', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      LocalAiSettingsKeys.localAiMode: localAiModeManual,
+      LocalAiSettingsKeys.useLocalAi: true,
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search a vibe, tag, format, or request'),
+      'romance movie about time travel',
+    );
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pump();
+    await tester.pumpAndSettle(const Duration(milliseconds: 250));
+
+    expect(find.text('Manual AI response'), findsOneWidget);
+    expect(find.textContaining('Return JSON only'), findsOneWidget);
+    await tester.tap(find.text('Copy prompt'));
+    await tester.pump();
+    final copiedPrompt = await Clipboard.getData('text/plain');
+    expect(copiedPrompt?.text, contains('User request'));
+    await tester.enterText(find.byKey(const ValueKey('manual-ai-response')), '''
+{"tags":["Romance","Time Manipulation"],"formats":["MOVIE"],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"romance movie"}
+''');
+    await tester.tap(find.text('Use response'));
+    await tester.pump();
+    await tester.pumpAndSettle(const Duration(milliseconds: 250));
+
+    expect(find.text('Manual AI response'), findsOneWidget);
+    expect(
+      find.textContaining('Pick the single best recommendation'),
+      findsOneWidget,
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('manual-ai-response')),
+      '{"id":"anilist_5","reason":"Manual pick."}',
+    );
+    await tester.tap(find.text('Use response'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Time Travel Movie'), findsOneWidget);
+    expect(find.text('Manual pick.'), findsOneWidget);
   });
 
   testWidgets('unsent recommendation search edits survive rebuilds', (
@@ -885,6 +943,92 @@ void main() {
       prefs.getString(LocalAiSettingsKeys.cloudModel),
       'meta-llama/llama-3.2-3b-instruct:free',
     );
+  });
+
+  testWidgets('settings can select manual copy paste AI mode', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+
+    await tester.scrollUntilVisible(
+      find.text('AI mode'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Fallback rules only'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Manual copy/paste').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Manual AI prompt handoff'), findsOneWidget);
+    expect(
+      find.textContaining('Paste it into ChatGPT or another AI'),
+      findsOneWidget,
+    );
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString(LocalAiSettingsKeys.localAiMode), localAiModeManual);
+    expect(prefs.getBool(LocalAiSettingsKeys.useLocalAi), isTrue);
+  });
+
+  testWidgets('progress toast expands logs and copies prompt response text', (
+    WidgetTester tester,
+  ) async {
+    final log = AiConsoleLog();
+    late AppProgressToast toast;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            return Scaffold(
+              body: TextButton(
+                onPressed: () {
+                  toast = showProgressToast(
+                    context,
+                    'AI loading...',
+                    consoleLog: log,
+                  );
+                  log.addSection('Prompt', 'Prompt body');
+                  toast.update('Waiting for model...');
+                  log.addSection('Response', 'Response body');
+                },
+                child: const Text('Start toast'),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Start toast'));
+    await tester.pumpAndSettle();
+
+    final toastFinder = find.byKey(const ValueKey('app-progress-toast'));
+    expect(toastFinder, findsOneWidget);
+    expect(find.text('Prompt body'), findsNothing);
+
+    await tester.tap(toastFinder);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Prompt body'), findsOneWidget);
+    expect(find.textContaining('Response body'), findsOneWidget);
+
+    await tester.longPress(toastFinder);
+    await tester.pump();
+    final clipboard = await Clipboard.getData('text/plain');
+    expect(clipboard?.text, contains('Prompt body'));
+    expect(clipboard?.text, contains('Response body'));
+
+    toast.dismiss();
+    await tester.pumpAndSettle();
+    expect(find.text('AI log complete. Swipe to dismiss.'), findsOneWidget);
+
+    await tester.fling(toastFinder, const Offset(0, -500), 1000);
+    await tester.pumpAndSettle();
+    expect(toastFinder, findsNothing);
   });
 
   testWidgets('settings supports downloadable on-device AI on Linux', (
