@@ -95,6 +95,7 @@ class TasteEngine {
       ...query.aiSelectedTags,
       ...query.inferredTags(availableTags),
     };
+    final specificRequestedTags = query.specificRequestedTags(availableTags);
     final requestedFormats = query.effectiveFormats();
     final requestedMediaTypes = query.effectiveMediaTypes();
     final requireLocalCoOp = query.infersLocalCoOp;
@@ -117,6 +118,10 @@ class TasteEngine {
       }
       if (requestedTags.isNotEmpty &&
           !candidate.tags.any(requestedTags.contains)) {
+        continue;
+      }
+      if (specificRequestedTags.isNotEmpty &&
+          !_matchesSpecificRequestedTags(candidate, specificRequestedTags)) {
         continue;
       }
       if (!query.matchesText(candidate)) continue;
@@ -300,6 +305,18 @@ class TasteEngine {
     return 'Recommended from your ${profile.serviceName} profile and current popular releases.';
   }
 
+  bool _matchesSpecificRequestedTags(
+    MediaItem candidate,
+    Set<String> specificRequestedTags,
+  ) {
+    if (candidate.tags.any(specificRequestedTags.contains)) return true;
+    if (candidate.isAdult &&
+        specificRequestedTags.any(_adultRequestTags.contains)) {
+      return true;
+    }
+    return false;
+  }
+
   List<String> _uniqueSignals(List<String> signals) {
     final seen = <String>{};
     return [
@@ -481,6 +498,8 @@ class TasteEngine {
         ),
     ];
   }
+
+  static const Set<String> _adultRequestTags = {'Hentai'};
 }
 
 class _ScoredRecommendation {

@@ -449,6 +449,38 @@ void main() {
       expect(familyAnime.aiSelectedTags, isNot(contains('Go')));
       expect(familyAnime.aiSelectedTags, isNot(contains('Kids')));
 
+      final specificRelationship =
+          const RecommendationQuery(
+            request: 'a romance between two males in school anime',
+          ).withInferredSelections(const [
+            'Romance',
+            "Boys' Love",
+            'LGBTQ+ Themes',
+            'School',
+          ]);
+
+      expect(specificRelationship.aiSelectedTags, contains('Romance'));
+      expect(specificRelationship.aiSelectedTags, contains("Boys' Love"));
+      expect(specificRelationship.aiSelectedTags, contains('School'));
+      expect(
+        specificRelationship.specificRequestedTags(const [
+          'Romance',
+          "Boys' Love",
+          'LGBTQ+ Themes',
+          'School',
+        ]),
+        contains("Boys' Love"),
+      );
+      expect(
+        specificRelationship.specificRequestedTags(const [
+          'Romance',
+          "Boys' Love",
+          'LGBTQ+ Themes',
+          'School',
+        ]),
+        isNot(contains('School')),
+      );
+
       final couchCoopGame = const RecommendationQuery(
         request: 'two players on one pc with controller',
         formats: {'CO_OP'},
@@ -461,6 +493,51 @@ void main() {
       expect(couchCoopGame.mediaTypes, contains('GAME'));
     },
   );
+
+  test('specific inferred tags filter broad-only matches', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile('tester', [
+      MediaItem(
+        id: 'anilist_seen',
+        title: 'Seen Romance',
+        coverUrl: '',
+        tags: const ['Romance', 'School'],
+        rating: 9.5,
+        format: 'TV',
+        status: 'COMPLETED',
+      ),
+    ]);
+
+    final recommendations = engine.rankCandidates(
+      profile,
+      [
+        MediaItem(
+          id: 'anilist_generic',
+          title: 'Generic School Romance',
+          coverUrl: '',
+          tags: const ['Romance', 'School', 'Heterosexual'],
+          rating: 9.8,
+          format: 'TV',
+          mediaType: 'ANIME',
+        ),
+        MediaItem(
+          id: 'anilist_specific',
+          title: 'Specific Relationship Story',
+          coverUrl: '',
+          tags: const ['Romance', 'School', "Boys' Love"],
+          rating: 7.1,
+          format: 'TV',
+          mediaType: 'ANIME',
+        ),
+      ],
+      query: const RecommendationQuery(
+        request: 'a romance between two males in school anime',
+      ),
+    );
+
+    expect(recommendations, hasLength(1));
+    expect(recommendations.single.item.title, 'Specific Relationship Story');
+  });
 
   test('harry potter-like requests prefer magic school candidates', () {
     final engine = TasteEngine();

@@ -13,6 +13,7 @@ class AniListService implements MediaService {
   static const sourceId = 'com.majika.service.anilist';
 
   final http.Client _client;
+  List<String>? _availableTagsCache;
 
   @override
   String get id => sourceId;
@@ -93,10 +94,15 @@ class AniListService implements MediaService {
         : mediaTypes
               .where(RecommendationQuery.aniListMediaTypes.contains)
               .toList();
+    if (typesToSearch.isEmpty) return [];
+
+    final availableTags = await fetchAvailableTags();
     final results = <MediaItem>[];
 
     for (final type in typesToSearch) {
-      results.addAll(await _searchCandidates(type, query));
+      results.addAll(
+        await _searchCandidates(type, query, availableTags: availableTags),
+      );
     }
 
     return _dedupe(results);
@@ -104,6 +110,9 @@ class AniListService implements MediaService {
 
   @override
   Future<List<String>> fetchAvailableTags() async {
+    final cachedTags = _availableTagsCache;
+    if (cachedTags != null) return cachedTags;
+
     final response = await _postGraphQl(_tagsQuery, const {});
     final decoded = jsonDecode(response.body);
     final tags = <String>[
@@ -120,7 +129,9 @@ class AniListService implements MediaService {
     }
 
     tags.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    return tags.toSet().toList();
+    final availableTags = tags.toSet().toList();
+    _availableTagsCache = availableTags;
+    return availableTags;
   }
 
   Future<List<MediaItem>> _fetchUserCollection(
@@ -149,10 +160,11 @@ class AniListService implements MediaService {
 
   Future<List<MediaItem>> _searchCandidates(
     String mediaType,
-    RecommendationQuery query,
-  ) async {
+    RecommendationQuery query, {
+    required Iterable<String> availableTags,
+  }) async {
     final formats = query.effectiveFormats();
-    final tags = query.effectiveTags(RecommendationQuery.browsableTags);
+    final tags = query.effectiveTags(availableTags);
     final searchText = tags.isEmpty && formats.isEmpty
         ? query.aniListSearchText
         : '';

@@ -10,6 +10,7 @@ import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation.dart';
 import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/taste_profile.dart';
+import 'package:majika/core/models/user_taste_signals.dart';
 import 'package:majika/core/recommendations/taste_engine.dart';
 import 'package:majika/core/services/anilist_service.dart';
 import 'package:majika/core/services/firebase_steam_backend.dart';
@@ -188,16 +189,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final service = workspace.service;
-      final profileFuture = service.fetchUserProfile(userName);
-      final libraryFuture = service.fetchUserLibrary(userName);
-      final signalsFuture = service.fetchTasteSignals(userName);
-      final candidatesFuture = service.fetchRecommendationCandidates();
-      final serviceTagsFuture = service.fetchAvailableTags();
-      final serviceProfile = await profileFuture;
-      final library = await libraryFuture;
-      final signals = await signalsFuture;
-      final candidates = await candidatesFuture;
-      final serviceTags = await serviceTagsFuture;
+      final importResults = await Future.wait<Object?>([
+        service.fetchUserProfile(userName),
+        service.fetchUserLibrary(userName),
+        service.fetchTasteSignals(userName),
+        service.fetchRecommendationCandidates(),
+        service.fetchAvailableTags(),
+      ]);
+      final serviceProfile = importResults[0] as ServiceUserProfile?;
+      final library = importResults[1] as List<MediaItem>;
+      final signals = importResults[2] as UserTasteSignals;
+      final candidates = importResults[3] as List<MediaItem>;
+      final serviceTags = importResults[4] as List<String>;
       final profile = _tasteEngine.buildProfile(
         serviceProfile?.userName ?? userName,
         library,
@@ -524,95 +527,90 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) {
       throw StateError('Manual AI prompt could not be shown.');
     }
-    final responseController = TextEditingController();
-    try {
-      final response = await showDialog<String>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) {
-          final theme = Theme.of(context);
-          return AlertDialog(
-            title: const Text('Manual AI response'),
-            content: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 680),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Copy this prompt into ChatGPT or another AI, then paste the response here.',
-                      style: theme.textTheme.bodyMedium,
+    var responseText = '';
+    final response = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return AlertDialog(
+          title: const Text('Manual AI response'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 680),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Copy this prompt into ChatGPT or another AI, then paste the response here.',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 220),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: theme.dividerColor.withValues(alpha: 0.4),
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    Container(
-                      constraints: const BoxConstraints(maxHeight: 220),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: theme.dividerColor.withValues(alpha: 0.4),
+                    child: SingleChildScrollView(
+                      child: SelectableText(
+                        request.prompt,
+                        key: const ValueKey('manual-ai-prompt'),
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                          height: 1.35,
                         ),
                       ),
-                      child: SingleChildScrollView(
-                        child: SelectableText(
-                          request.prompt,
-                          key: const ValueKey('manual-ai-prompt'),
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 12,
-                            height: 1.35,
-                          ),
-                        ),
-                      ),
                     ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      key: const ValueKey('manual-ai-response'),
-                      controller: responseController,
-                      minLines: 5,
-                      maxLines: 10,
-                      decoration: const InputDecoration(
-                        labelText: 'AI response',
-                        alignLabelWithHint: true,
-                        border: OutlineInputBorder(),
-                      ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: const ValueKey('manual-ai-response'),
+                    onChanged: (value) => responseText = value,
+                    minLines: 5,
+                    maxLines: 10,
+                    decoration: const InputDecoration(
+                      labelText: 'AI response',
+                      alignLabelWithHint: true,
+                      border: OutlineInputBorder(),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-            actions: [
-              TextButton.icon(
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: request.prompt));
-                  showInfoToast(context, 'Prompt copied.');
-                },
-                icon: const Icon(Icons.copy_rounded),
-                label: const Text('Copy prompt'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              FilledButton.icon(
-                onPressed: () =>
-                    Navigator.pop(context, responseController.text.trim()),
-                icon: const Icon(Icons.check_rounded),
-                label: const Text('Use response'),
-              ),
-            ],
-          );
-        },
-      );
-      if (response == null || response.trim().isEmpty) {
-        throw StateError('Manual AI response was empty.');
-      }
-      return response.trim();
-    } finally {
-      responseController.dispose();
+          ),
+          actions: [
+            TextButton.icon(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: request.prompt));
+                showInfoToast(context, 'Prompt copied.');
+              },
+              icon: const Icon(Icons.copy_rounded),
+              label: const Text('Copy prompt'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(context, responseText.trim()),
+              icon: const Icon(Icons.check_rounded),
+              label: const Text('Use response'),
+            ),
+          ],
+        );
+      },
+    );
+    if (response == null || response.trim().isEmpty) {
+      throw StateError('Manual AI response was empty.');
     }
+    return response.trim();
   }
 
   void _cancelRecommendationSearch() {
@@ -849,8 +847,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final entries = counts.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
     final baseTags = workspace.service.displayName == 'Steam'
-        ? workspace.serviceTags
-        : RecommendationQuery.browsableTags;
+        ? RecommendationQuery.steamBrowsableTags
+        : RecommendationQuery.aniListBrowsableTags;
     return {
       ...baseTags,
       ...workspace.serviceTags,
@@ -2707,7 +2705,10 @@ class _TopRecommendationDetails extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          recommendation.reason,
+          _recommendationSummary(
+            recommendation,
+            preferAiReason: recommendation.isAiPick,
+          ),
           maxLines: compact ? 3 : 4,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodyMedium?.copyWith(
@@ -2775,7 +2776,10 @@ class _RecommendationTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    recommendation.reason,
+                    _recommendationSummary(
+                      recommendation,
+                      preferAiReason: recommendation.isAiPick,
+                    ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
@@ -2793,6 +2797,26 @@ class _RecommendationTile extends StatelessWidget {
       ),
     );
   }
+}
+
+String _recommendationSummary(
+  Recommendation recommendation, {
+  required bool preferAiReason,
+}) {
+  final reason = recommendation.reason.trim();
+  if (preferAiReason && reason.isNotEmpty) return reason;
+
+  final description = _cleanMediaDescription(recommendation.item.description);
+  if (description.isNotEmpty) return description;
+  return reason;
+}
+
+String _cleanMediaDescription(String? description) {
+  if (description == null) return '';
+  return description
+      .replaceAll(RegExp(r'<[^>]*>'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
 }
 
 class _OpenableRecommendation extends StatelessWidget {

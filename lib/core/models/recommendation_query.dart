@@ -29,7 +29,7 @@ class RecommendationQuery {
 
   static const allFormats = [...aniListFormats, ...steamFormats];
 
-  static const browsableTags = [
+  static const aniListBrowsableTags = [
     'Action',
     'Adventure',
     'Comedy',
@@ -44,6 +44,9 @@ class RecommendationQuery {
     'Mystery',
     'Psychological',
     'Romance',
+    "Boys' Love",
+    'LGBTQ+ Themes',
+    'Yuri',
     'Sci-Fi',
     'Slice of Life',
     'Sports',
@@ -71,6 +74,11 @@ class RecommendationQuery {
     'Work',
     'School',
     'Hentai',
+  ];
+
+  static const steamBrowsableTags = [
+    'Action',
+    'Adventure',
     'RPG',
     'Indie',
     'Strategy',
@@ -80,7 +88,72 @@ class RecommendationQuery {
     'Platformer',
     'Shooter',
     'Roguelike',
+    'Roguelite',
     'Open World',
+    'Horror',
+    'Comedy',
+    'Funny',
+    'Survival',
+    'Crafting',
+    'Sandbox',
+    'Building',
+    'Base Building',
+    'Automation',
+    'Factory',
+    'Souls-like',
+    'Metroidvania',
+    'Deckbuilding',
+    'Card Game',
+    'Turn-Based',
+    'Turn-Based Strategy',
+    'Tactical',
+    'Real-Time Strategy',
+    'Grand Strategy',
+    'JRPG',
+    'CRPG',
+    'Action RPG',
+    'Hack and Slash',
+    'Loot',
+    'Dungeon Crawler',
+    'Stealth',
+    'Immersive Sim',
+    'FPS',
+    'Third-Person Shooter',
+    'Bullet Hell',
+    'Fighting',
+    'Racing',
+    'Sports',
+    'Management',
+    'City Builder',
+    'Colony Sim',
+    'Life Sim',
+    'Farming Sim',
+    'Dating Sim',
+    'Visual Novel',
+    'Point & Click',
+    'Story Rich',
+    'Choices Matter',
+    'Exploration',
+    'Walking Simulator',
+    'Atmospheric',
+    'Relaxing',
+    'Cozy',
+    'Cute',
+    'Anime',
+    'Pixel Graphics',
+    'Retro',
+    '2D',
+    '3D',
+    'VR',
+    'Local Multiplayer',
+    'Local Co-Op',
+    'Split Screen',
+    'PvP',
+    'PvE',
+    'MMO',
+    'Massively Multiplayer',
+    'Early Access',
+    'Free to Play',
     'Single-player',
     'Multiplayer',
     'Co-op',
@@ -88,6 +161,8 @@ class RecommendationQuery {
     'Controller Support',
     'Steam Deck',
   ];
+
+  static const browsableTags = [...aniListBrowsableTags, ...steamBrowsableTags];
 
   final String request;
   final Set<String> selectedTags;
@@ -202,6 +277,14 @@ class RecommendationQuery {
     return {...selectedTags, ...aiSelectedTags, ...inferredTags(availableTags)};
   }
 
+  Set<String> specificRequestedTags(Iterable<String> availableTags) {
+    final tags = effectiveTags(availableTags);
+    return {
+      for (final tag in tags)
+        if (!_broadRequestTags.contains(tag)) tag,
+    };
+  }
+
   Set<String> effectiveFormats() {
     return {...inferredFormats(), ...formats};
   }
@@ -224,6 +307,10 @@ class RecommendationQuery {
       if (_containsAny(normalizedRequest, entry.value)) {
         inferred.add(entry.key);
       }
+    }
+
+    if (inferred.contains("Boys' Love") || inferred.contains('Yuri')) {
+      inferred.remove('LGBTQ+ Themes');
     }
 
     return inferred;
@@ -472,6 +559,36 @@ class RecommendationQuery {
     'kids',
   };
 
+  static const Set<String> _broadRequestTags = {
+    'Action',
+    'Adventure',
+    'Comedy',
+    'Drama',
+    'Ecchi',
+    'Fantasy',
+    'Horror',
+    'Mystery',
+    'Psychological',
+    'Romance',
+    'Sci-Fi',
+    'Slice of Life',
+    'Sports',
+    'Supernatural',
+    'Thriller',
+    'RPG',
+    'Indie',
+    'Strategy',
+    'Simulation',
+    'Casual',
+    'Puzzle',
+    'Platformer',
+    'Shooter',
+    'Roguelike',
+    'Open World',
+    'School',
+    'Work',
+  };
+
   static Set<String> _jsonStringSet(Object? value) {
     if (value is! List) return {};
     return {
@@ -483,6 +600,60 @@ class RecommendationQuery {
 
   static const Map<String, List<String>> _fallbackTagHints = {
     'Romance': ['romance', 'romantic', 'love story', 'relationship'],
+    "Boys' Love": [
+      'boys love',
+      "boy's love",
+      "boys' love",
+      'bl anime',
+      'bl manga',
+      'yaoi',
+      'shounen ai',
+      'shonen ai',
+      'male male romance',
+      'male/male romance',
+      'male x male',
+      'm/m romance',
+      'mlm romance',
+      'gay romance',
+      'homosexual romance',
+      'romance between two males',
+      'romance between two boys',
+      'two males in love',
+      'two boys in love',
+      'between two males',
+      'between two boys',
+    ],
+    'LGBTQ+ Themes': [
+      'lgbt',
+      'lgbtq',
+      'lgbtq+',
+      'queer',
+      'gay',
+      'lesbian',
+      'homosexual',
+      'same sex',
+      'same-sex',
+      'mlm',
+      'wlw',
+    ],
+    'Yuri': [
+      'yuri',
+      'girls love',
+      "girl's love",
+      "girls' love",
+      'shoujo ai',
+      'shojo ai',
+      'female female romance',
+      'female/female romance',
+      'female x female',
+      'f/f romance',
+      'wlw romance',
+      'lesbian romance',
+      'romance between two females',
+      'romance between two girls',
+      'two females in love',
+      'two girls in love',
+    ],
     'Time Manipulation': [
       'time travel',
       'time loop',

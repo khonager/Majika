@@ -24,9 +24,9 @@ const _onDevicePlatforms = {
 };
 
 enum _AiModelTier {
-  low('Lowest working', Icons.bolt_rounded),
-  recommended('Recommended mid', Icons.auto_awesome_rounded),
-  high('Extra accurate', Icons.workspace_premium_rounded);
+  low('Experimental small', Icons.science_rounded),
+  recommended('Benchmark candidate', Icons.auto_awesome_rounded),
+  high('High-context candidate', Icons.workspace_premium_rounded);
 
   final String label;
   final IconData icon;
@@ -48,7 +48,7 @@ const _downloadableLocalAiModels = [
         'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/Gemma3-1B-IT_multi-prefill-seq_q4_ekv4096.litertlm',
     accessUrl: 'https://huggingface.co/litert-community/Gemma3-1B-IT',
     description:
-        'Best current default for this SDK: compact enough for newer phones while staying stronger than tiny fallback models.',
+        'Smallest supported local option. Uses compact prompts and needs benchmark results before it should be treated as a quality default.',
     modelType: ModelType.gemmaIt,
     fileType: ModelFileType.task,
     needsHuggingFaceToken: true,
@@ -67,7 +67,7 @@ const _downloadableLocalAiModels = [
         'https://huggingface.co/google/gemma-3n-E2B-it-litert-lm/resolve/main/gemma-3n-E2B-it-int4.litertlm',
     accessUrl: 'https://huggingface.co/google/gemma-3n-E2B-it-litert-preview',
     description:
-        'Higher-capability Google model for newer devices with enough memory.',
+        'Higher-capability Google model for newer devices with enough memory; candidate default once prompt benchmarks are green.',
     modelType: ModelType.gemmaIt,
     fileType: ModelFileType.task,
     isAdvanced: true,
@@ -106,7 +106,7 @@ const _downloadableLocalAiModels = [
     desktopUrl:
         'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
     description:
-        'Small public alternative that is useful when Gemma model access is not available.',
+        'Tiny public alternative. Keep experimental until benchmarks show it can follow Majika recommendation prompts.',
     modelType: ModelType.qwen,
     fileType: ModelFileType.task,
     isAdvanced: true,
@@ -150,7 +150,10 @@ const _downloadableLocalAiModels = [
   ),
 ];
 
-final _defaultLocalAiModel = _downloadableLocalAiModels.first;
+final _defaultLocalAiModel = _downloadableLocalAiModels.firstWhere(
+  (model) => model.tier == _AiModelTier.recommended,
+  orElse: () => _downloadableLocalAiModels.first,
+);
 const _flmLocalAiEndpoint = 'http://127.0.0.1:52625/v1/chat/completions';
 const _flmDefaultModel = 'llama3.2:1b';
 const _externalLocalServerModelPresets = [
@@ -159,7 +162,7 @@ const _externalLocalServerModelPresets = [
     tier: _AiModelTier.low,
     sizeLabel: '1.4 GB',
     description:
-        'Smallest practical server model for quick search interpretation on modest laptops.',
+        'Experimental compact-prompt model for modest laptops; use only if larger local models are unavailable.',
   ),
   _ServerModelPreset(
     name: 'qwen3:4b-instruct',
@@ -179,7 +182,8 @@ const _externalLocalServerModelPresets = [
     name: 'gemma3:1b',
     tier: _AiModelTier.low,
     sizeLabel: '815 MB',
-    description: 'Tiny Gemma fallback when speed matters more than nuance.',
+    description:
+        'Experimental compact-prompt fallback; keep larger models preferred when recommendation quality matters.',
   ),
   _ServerModelPreset(
     name: 'gemma3:4b',

@@ -1,5 +1,6 @@
-import 'dart:convert';
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,6 +17,30 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+  });
+
+  test('prompt benchmark fixture covers required scenario categories', () {
+    final file = File('test/fixtures/ai_prompt_benchmarks.json');
+    final decoded = jsonDecode(file.readAsStringSync());
+    final scenarios = decoded['scenarios'] as List<dynamic>;
+    final ids = scenarios
+        .map((scenario) => (scenario as Map<String, dynamic>)['id'])
+        .toSet();
+
+    expect(ids, contains('steam_filter_no_anime_tags'));
+    expect(
+      ids,
+      contains('steam_compact_preserves_official_tags_beyond_subset'),
+    );
+    expect(ids, contains('anilist_filter_keeps_specific_request_text'));
+    expect(
+      ids,
+      contains('anilist_adult_request_infers_adult_without_false_warning'),
+    );
+    expect(ids, contains('steam_personal_pick_can_choose_lower_score'));
+    expect(ids, contains('home_prefers_steam_for_pc_game_request'));
+    expect(ids, contains('compact_model_preserves_safety_and_scope'));
+    expect(decoded['scoring'], isA<Map<String, dynamic>>());
   });
 
   test(
@@ -63,11 +88,56 @@ void main() {
     expect(capturedPrompt, contains('Service context: Steam PC games'));
     expect(capturedPrompt, contains('Service source values: GAME'));
     expect(capturedPrompt, contains('Steam play capability values'));
+    expect(
+      capturedPrompt,
+      contains('You may output any official Steam tag you confidently know'),
+    );
     expect(capturedPrompt, isNot(contains('Yandere')));
     expect(capturedPrompt, isNot(contains('Mahou Shoujo')));
     expect(interpreted.mediaTypes, contains('GAME'));
     expect(interpreted.formats, contains('SINGLE_PLAYER'));
     expect(interpreted.aiSelectedTags, contains('RPG'));
+  });
+
+  test('flutter gemma service accepts broader official Steam tags', () async {
+    late String capturedPrompt;
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        mode: localAiModeOnDevice,
+        provider: 'tiny benchmark model',
+        endpoint: defaultLocalAiEndpoint,
+        serverModel: defaultLocalAiModel,
+        deviceModelName: 'Gemma 3 1B IT',
+        contextItems: 8,
+      ),
+      textGenerator: (prompt, maxTokens) async {
+        capturedPrompt = prompt;
+        return '{"tags":["Souls-like","Action RPG"],"formats":["SINGLE_PLAYER"],"mediaTypes":["GAME"],"includeAdult":false,"searchText":"hard boss fights"}';
+      },
+    );
+
+    final interpreted = await service.interpretRecommendationRequest(
+      const RecommendationQuery(request: 'hard unforgiving boss fights'),
+      availableTags: RecommendationQuery.steamBrowsableTags,
+      serviceName: 'Steam',
+      allowedMediaTypes: RecommendationQuery.steamMediaTypes,
+      allowedFormats: RecommendationQuery.steamFormats,
+    );
+
+    expect(capturedPrompt, contains('Prompt mode: compact'));
+    expect(
+      capturedPrompt,
+      contains('High-signal Steam tag subset for this small-model prompt'),
+    );
+    expect(
+      capturedPrompt,
+      contains('For obscure official Steam tags that are not listed'),
+    );
+    expect(interpreted.aiSelectedTags, contains('Souls-like'));
+    expect(interpreted.aiSelectedTags, contains('Action RPG'));
+    expect(interpreted.formats, contains('SINGLE_PLAYER'));
   });
 
   test(
@@ -250,7 +320,10 @@ void main() {
       );
 
       expect(capturedMaxTokens, 1024);
-      expect(capturedPrompt, contains('High-signal AniList tags'));
+      expect(
+        capturedPrompt,
+        contains('High-signal AniList tag subset for this small-model prompt'),
+      );
       expect(capturedPrompt, contains('Prompt mode: compact'));
       expect(capturedPrompt, contains('Fantasy'));
       expect(capturedPrompt, contains('Magic'));

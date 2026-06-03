@@ -699,11 +699,19 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
         : serviceName;
     final prefix = switch (tier) {
       _AiPromptTier.compact =>
-        'High-signal $source tags for this small-model prompt',
-      _AiPromptTier.balanced => 'Known $source tags for this prompt',
+        'High-signal $source tag subset for this small-model prompt',
+      _AiPromptTier.balanced => 'Known $source tag subset for this prompt',
       _AiPromptTier.rich => 'Known $source tags fetched for this user/session',
     };
-    return '$prefix: $tags\nYou may keep any specific title, franchise, creator, trope, or genre wording that is not in this list in searchText; Majika will use that text to fetch candidates.';
+    final catalogGuidance = switch (tier) {
+      _AiPromptTier.compact =>
+        'Use the listed tags when they clearly match. For obscure official $source tags that are not listed, keep the wording in searchText instead of guessing JSON tags.',
+      _AiPromptTier.balanced =>
+        'You may output any official $source tag you confidently know, even if this shortened list omits it; Majika validates tags against the service catalog/session tags.',
+      _AiPromptTier.rich =>
+        'You may output any official $source tag from this fetched catalog/session tag set; keep uncertain or extra wording in searchText.',
+    };
+    return '$prefix: $tags\n$catalogGuidance\nYou may keep any specific title, franchise, creator, trope, or genre wording that is not in this list in searchText; Majika will use that text to fetch candidates.';
   }
 
   bool _isSteamService(String serviceName) {
@@ -719,73 +727,10 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
 
   List<String> _serviceFallbackTags(String serviceName) {
     if (_isSteamService(serviceName)) {
-      return const [
-        'Action',
-        'Adventure',
-        'RPG',
-        'Indie',
-        'Strategy',
-        'Simulation',
-        'Casual',
-        'Puzzle',
-        'Platformer',
-        'Shooter',
-        'Roguelike',
-        'Open World',
-        'Horror',
-        'Comedy',
-        'Single-player',
-        'Multiplayer',
-        'Co-op',
-        'Online Co-op',
-        'Controller Support',
-        'Steam Deck',
-      ];
+      return RecommendationQuery.steamBrowsableTags;
     }
     if (_isAniListService(serviceName)) {
-      return const [
-        'Action',
-        'Adventure',
-        'Comedy',
-        'Drama',
-        'Ecchi',
-        'Fantasy',
-        'Horror',
-        'Magic',
-        'Mahou Shoujo',
-        'Mecha',
-        'Music',
-        'Mystery',
-        'Psychological',
-        'Romance',
-        'Sci-Fi',
-        'Slice of Life',
-        'Sports',
-        'Supernatural',
-        'Thriller',
-        'Time Manipulation',
-        'Time Skip',
-        'Yandere',
-        'Stalker',
-        'Unrequited Love',
-        'Obsession',
-        'Tragedy',
-        'Urban Fantasy',
-        'Coming of Age',
-        'Found Family',
-        'Anti-Hero',
-        'Villainess',
-        'Revenge',
-        'Survival',
-        'Isekai',
-        'Cyberpunk',
-        'Space',
-        'Demons',
-        'Vampire',
-        'Work',
-        'School',
-        'Hentai',
-      ];
+      return RecommendationQuery.aniListBrowsableTags;
     }
     return const [];
   }

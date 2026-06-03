@@ -84,6 +84,16 @@ void main() {
     expect(details?.startYear, 2016);
   });
 
+  test('exposes a broad Steam tag catalog for search prompts', () async {
+    final tags = await SteamService().fetchAvailableTags();
+
+    expect(tags, contains('Souls-like'));
+    expect(tags, contains('Action RPG'));
+    expect(tags, contains('Local Co-Op'));
+    expect(tags, contains('Controller Support'));
+    expect(tags, isNot(contains('Mahou Shoujo')));
+  });
+
   test('service resolves vanity and imports public library data', () async {
     final service = SteamService(
       apiKeyProvider: () async => 'test-key',

@@ -1,0 +1,262 @@
+{
+  "version": 1,
+  "purpose": "Regression and future live-model benchmark scenarios for Majika AI prompts.",
+  "scoring": {
+    "passThreshold": 0.8,
+    "required": [
+      "validJson",
+      "respectsService",
+      "usesRequestIntent",
+      "usesPersonalTasteWhenAvailable",
+      "doesNotOverweightTagsOrScores",
+      "doesNotLeakStaleAiTags",
+      "doesNotInventAdultRestriction"
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "steam_filter_no_anime_tags",
+      "service": "Steam",
+      "promptTier": "balanced",
+      "task": "search_filter",
+      "request": "single player role playing game with controller support",
+      "availableTags": [
+        "Action",
+        "Adventure",
+        "RPG",
+        "Strategy",
+        "Single-player",
+        "Controller Support"
+      ],
+      "mustContainPromptText": [
+        "Service context: Steam PC games",
+        "Steam play capability values",
+        "Known Steam tag subset",
+        "You may output any official Steam tag you confidently know"
+      ],
+      "mustNotContainPromptText": [
+        "Yandere",
+        "Mahou Shoujo",
+        "Previously AI selected tags",
+        "Adult content selected: false"
+      ],
+      "expectedJsonShape": {
+        "tags": ["RPG", "Controller Support"],
+        "formats": ["SINGLE_PLAYER", "CONTROLLER"],
+        "mediaTypes": ["GAME"],
+        "includeAdult": false,
+        "searchText": "role playing game"
+      }
+    },
+    {
+      "id": "steam_compact_preserves_official_tags_beyond_subset",
+      "service": "Steam",
+      "promptTier": "compact",
+      "task": "search_filter",
+      "request": "hard unforgiving boss fights with action rpg combat",
+      "availableTags": [
+        "Action",
+        "Adventure",
+        "RPG",
+        "Indie",
+        "Strategy",
+        "Simulation",
+        "Casual",
+        "Puzzle",
+        "Platformer",
+        "Shooter",
+        "Roguelike",
+        "Open World",
+        "Action RPG",
+        "Controller Support",
+        "Steam Deck",
+        "Souls-like"
+      ],
+      "mustContainPromptText": [
+        "High-signal Steam tag subset for this small-model prompt",
+        "For obscure official Steam tags that are not listed",
+        "Service context: Steam PC games"
+      ],
+      "mustNotContainPromptText": [
+        "Known AniList tags",
+        "Mahou Shoujo",
+        "Adult content selected: false"
+      ],
+      "expectedJsonShape": {
+        "tags": ["Souls-like", "Action RPG"],
+        "formats": ["SINGLE_PLAYER"],
+        "mediaTypes": ["GAME"],
+        "includeAdult": false,
+        "searchText": "hard unforgiving boss fights"
+      }
+    },
+    {
+      "id": "anilist_filter_keeps_specific_request_text",
+      "service": "AniList",
+      "promptTier": "rich",
+      "task": "search_filter",
+      "request": "anime like Monogatari with surreal mystery and unreliable narration",
+      "availableTags": [
+        "Mystery",
+        "Psychological",
+        "Supernatural",
+        "Surreal Comedy",
+        "Coming of Age"
+      ],
+      "mustContainPromptText": [
+        "Service context: AniList anime and manga",
+        "Preserve titles",
+        "A later AI prompt will personally pick"
+      ],
+      "expectedJsonShape": {
+        "tags": ["Mystery", "Psychological", "Supernatural"],
+        "formats": [],
+        "mediaTypes": ["ANIME"],
+        "includeAdult": false,
+        "searchText": "Monogatari surreal unreliable narration"
+      }
+    },
+    {
+      "id": "anilist_filter_uses_full_tag_catalog",
+      "service": "AniList",
+      "promptTier": "rich",
+      "task": "search_filter",
+      "request": "anime told out of order with romance at school",
+      "availableTags": [
+        "Romance",
+        "School",
+        "Achronological Order",
+        "Coming of Age",
+        "Urban Fantasy"
+      ],
+      "mustContainPromptText": [
+        "Known AniList tags fetched for this user/session",
+        "Achronological Order",
+        "School"
+      ],
+      "mustNotContainPromptText": [
+        "Known Steam tags",
+        "Adult content selected: false"
+      ],
+      "expectedJsonShape": {
+        "tags": ["Achronological Order", "Romance", "School"],
+        "formats": [],
+        "mediaTypes": ["ANIME"],
+        "includeAdult": false,
+        "searchText": "told out of order"
+      }
+    },
+    {
+      "id": "anilist_adult_request_infers_adult_without_false_warning",
+      "service": "AniList",
+      "promptTier": "balanced",
+      "task": "search_filter",
+      "request": "adult erotic ova romance",
+      "availableTags": [
+        "Romance",
+        "Ecchi",
+        "Hentai",
+        "School"
+      ],
+      "mustContainPromptText": [
+        "Adult/NSFW content is explicitly requested or enabled for this search",
+        "AniList release format values"
+      ],
+      "mustNotContainPromptText": [
+        "Adult content selected: false",
+        "Known Steam tags"
+      ],
+      "expectedJsonShape": {
+        "tags": ["Romance", "Hentai"],
+        "formats": ["OVA"],
+        "mediaTypes": ["ANIME"],
+        "includeAdult": true,
+        "searchText": "erotic romance"
+      }
+    },
+    {
+      "id": "steam_personal_pick_can_choose_lower_score",
+      "service": "Steam",
+      "promptTier": "rich",
+      "task": "top_pick",
+      "request": "a clever funny co-op game like Portal 2 for controllers",
+      "profileSignals": {
+        "favoriteTags": ["Puzzle", "Co-op"],
+        "highRated": ["Portal 2", "It Takes Two"]
+      },
+      "options": [
+        {
+          "id": "steam_high_score",
+          "title": "Generic Popular RPG",
+          "score": 95,
+          "tags": ["RPG", "Open World"]
+        },
+        {
+          "id": "steam_portal_like",
+          "title": "Puzzle Co-op Controller Game",
+          "score": 78,
+          "tags": ["Puzzle", "Co-op", "Controller Support"]
+        }
+      ],
+      "mustContainPromptText": [
+        "A lower-score option can win",
+        "Portal 2",
+        "It Takes Two",
+        "Steam PC games"
+      ],
+      "expectedJsonShape": {
+        "id": "steam_portal_like",
+        "reasonContains": ["co-op", "Portal", "controller"]
+      }
+    },
+    {
+      "id": "home_prefers_steam_for_pc_game_request",
+      "service": "Home",
+      "promptTier": "rich",
+      "task": "home_pick",
+      "request": "funny game on my pc",
+      "profiles": [
+        {"service": "AniList", "favoriteTags": ["Comedy"]},
+        {"service": "Steam", "favoriteTags": ["Co-op"]}
+      ],
+      "options": [
+        {
+          "id": "anilist_comedy",
+          "title": "Comedy Anime",
+          "service": "AniList",
+          "mediaType": "ANIME"
+        },
+        {
+          "id": "steam_funny",
+          "title": "Funny PC Game",
+          "service": "Steam",
+          "mediaType": "GAME"
+        }
+      ],
+      "mustContainPromptText": [
+        "compare AniList anime/manga with Steam games",
+        "If the user asks for a game, prefer Steam GAME options"
+      ],
+      "expectedJsonShape": {
+        "id": "steam_funny",
+        "reasonContains": ["game", "PC"]
+      }
+    },
+    {
+      "id": "compact_model_preserves_safety_and_scope",
+      "service": "AniList",
+      "promptTier": "compact",
+      "task": "top_pick",
+      "request": "surreal mystery anime",
+      "mustContainPromptText": [
+        "Prompt mode: compact",
+        "User taste:"
+      ],
+      "mustNotContainPromptText": [
+        "librarySample",
+        "highRated",
+        "Adult content selected: false"
+      ]
+    }
+  ]
+}

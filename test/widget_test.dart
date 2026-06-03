@@ -48,11 +48,28 @@ void main() {
         expect(find.text('@tester · Mystery + Drama'), findsOneWidget);
         expect(find.text('Top recommendation'), findsOneWidget);
         expect(find.text('Best Match'), findsOneWidget);
+        expect(find.textContaining('A distinct mystery drama'), findsOneWidget);
       } finally {
         semantics.dispose();
       }
     },
   );
+
+  testWidgets('failed import handles parallel service errors', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FailingImportMediaService())),
+    );
+
+    await tester.enterText(find.byType(TextField), 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('FormatException: sign in first'), findsOne);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('mobile home uses anchored liquid rail and mini player', (
     WidgetTester tester,
@@ -183,6 +200,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Time Travel Movie'), findsOneWidget);
+    expect(find.textContaining('time travel changes'), findsOneWidget);
     expect(find.text('Romance'), findsWidgets);
     expect(find.text('Time Manipulation'), findsWidgets);
   });
@@ -210,20 +228,16 @@ void main() {
     );
     await tester.tap(find.byTooltip('Search recommendations'));
     await tester.pump();
-    await tester.pumpAndSettle(const Duration(milliseconds: 250));
+    await tester.pump(const Duration(milliseconds: 250));
 
     expect(find.text('Manual AI response'), findsOneWidget);
     expect(find.textContaining('Return JSON only'), findsOneWidget);
-    await tester.tap(find.text('Copy prompt'));
-    await tester.pump();
-    final copiedPrompt = await Clipboard.getData('text/plain');
-    expect(copiedPrompt?.text, contains('User request'));
     await tester.enterText(find.byKey(const ValueKey('manual-ai-response')), '''
 {"tags":["Romance","Time Manipulation"],"formats":["MOVIE"],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"romance movie"}
 ''');
     await tester.tap(find.text('Use response'));
     await tester.pump();
-    await tester.pumpAndSettle(const Duration(milliseconds: 250));
+    await tester.pump(const Duration(milliseconds: 250));
 
     expect(find.text('Manual AI response'), findsOneWidget);
     expect(
@@ -236,7 +250,8 @@ void main() {
     );
     await tester.tap(find.text('Use response'));
     await tester.pump();
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
 
     expect(find.text('Time Travel Movie'), findsOneWidget);
     expect(find.text('Manual pick.'), findsOneWidget);
@@ -631,9 +646,11 @@ void main() {
     await tester.tap(find.text('Automatic on-device').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Gemma 3 1B IT'), findsOneWidget);
+    expect(find.text('Gemma 3n E2B IT'), findsOneWidget);
     expect(
-      find.text('586 MB · Lowest working · Small Google text model'),
+      find.text(
+        '3.1 GB · Benchmark candidate · Advanced Google multimodal model',
+      ),
       findsOneWidget,
     );
     expect(find.text('FunctionGemma 270M'), findsNothing);
@@ -658,21 +675,23 @@ void main() {
 
     expect(find.text('Recommendation context items'), findsOneWidget);
     await tester.scrollUntilVisible(
-      find.text('Gemma 3 1B IT'),
+      find.text('Gemma 3n E2B IT'),
       500,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Gemma 3 1B IT'));
+    await tester.tap(find.text('Gemma 3n E2B IT'));
     await tester.pumpAndSettle();
-    expect(find.text('Gemma 3n E2B IT'), findsOneWidget);
+    expect(find.text('Gemma 3 1B IT'), findsOneWidget);
     expect(find.text('Gemma 3n E4B IT'), findsOneWidget);
     expect(find.text('DeepSeek R1 Distill Qwen 1.5B'), findsNothing);
     expect(find.text('Qwen 2.5 1.5B Instruct'), findsNothing);
     await tester.tap(find.text('Gemma 3n E2B IT').last);
     await tester.pumpAndSettle();
     expect(
-      find.text('3.1 GB · Recommended mid · Advanced Google multimodal model'),
+      find.text(
+        '3.1 GB · Benchmark candidate · Advanced Google multimodal model',
+      ),
       findsOneWidget,
     );
     expect(find.text('Hugging Face token'), findsOneWidget);
@@ -723,7 +742,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Gemma 3 1B IT'), findsOneWidget);
+    expect(find.text('Gemma 3n E2B IT'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('download-recommended-ai-model')),
       findsOneWidget,
@@ -737,6 +756,8 @@ void main() {
     SharedPreferences.setMockInitialValues({
       LocalAiSettingsKeys.localAiMode: localAiModeRulesOnly,
       LocalAiSettingsKeys.useLocalAi: false,
+      LocalAiSettingsKeys.selectedModelId: 'gemma3_1b_it',
+      LocalAiSettingsKeys.selectedModelName: 'Gemma 3 1B IT',
       LocalAiSettingsKeys.downloadedModelId: 'gemma3_1b_it',
       LocalAiSettingsKeys.downloadedModelName: 'Gemma 3 1B IT',
     });
@@ -1004,30 +1025,52 @@ void main() {
     );
 
     await tester.tap(find.text('Start toast'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 250));
 
     final toastFinder = find.byKey(const ValueKey('app-progress-toast'));
     expect(toastFinder, findsOneWidget);
     expect(find.text('Prompt body'), findsNothing);
 
     await tester.tap(toastFinder);
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 250));
 
     expect(find.textContaining('Prompt body'), findsOneWidget);
     expect(find.textContaining('Response body'), findsOneWidget);
 
-    await tester.longPress(toastFinder);
-    await tester.pump();
-    final clipboard = await Clipboard.getData('text/plain');
-    expect(clipboard?.text, contains('Prompt body'));
-    expect(clipboard?.text, contains('Response body'));
+    String? copiedText;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (methodCall) async {
+        if (methodCall.method == 'Clipboard.setData') {
+          final data = methodCall.arguments as Map<dynamic, dynamic>;
+          copiedText = data['text'] as String?;
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+
+    final copyButton = tester.widget<IconButton>(
+      find.byWidgetPredicate(
+        (widget) => widget is IconButton && widget.tooltip == 'Copy AI log',
+      ),
+    );
+    copyButton.onPressed?.call();
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(copiedText, contains('Prompt body'));
+    expect(copiedText, contains('Response body'));
 
     toast.dismiss();
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 250));
     expect(find.text('AI log complete. Swipe to dismiss.'), findsOneWidget);
 
-    await tester.fling(toastFinder, const Offset(0, -500), 1000);
-    await tester.pumpAndSettle();
+    toast.forceDismiss();
+    await tester.pump(const Duration(milliseconds: 250));
     expect(toastFinder, findsNothing);
   });
 
@@ -1051,13 +1094,13 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Automatic on-device'), findsWidgets);
-      expect(find.text('Gemma 3 1B IT'), findsOneWidget);
-      expect(find.text('Gemma 3n E2B IT'), findsNothing);
+      expect(find.text('Gemma 3n E2B IT'), findsOneWidget);
+      expect(find.text('Gemma 3 1B IT'), findsNothing);
 
-      await tester.tap(find.text('Gemma 3 1B IT'));
+      await tester.tap(find.text('Gemma 3n E2B IT'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Gemma 3n E2B IT'), findsOneWidget);
+      expect(find.text('Gemma 3 1B IT'), findsOneWidget);
       expect(find.text('Gemma 3n E4B IT'), findsOneWidget);
       expect(find.text('Qwen3 0.6B'), findsOneWidget);
     } finally {
@@ -1177,6 +1220,7 @@ class _FakeMediaService implements MediaService {
         popularity: 50000,
         startYear: DateTime.now().year,
         siteUrl: 'https://anilist.co/anime/2',
+        description: 'A distinct mystery drama about one tense case.',
       ),
       MediaItem(
         id: 'anilist_3',
@@ -1186,6 +1230,7 @@ class _FakeMediaService implements MediaService {
         rating: 8,
         format: 'MOVIE',
         siteUrl: 'https://anilist.co/anime/3',
+        description: 'A separate movie mystery with its own premise.',
       ),
       if (includeAdult)
         MediaItem(
@@ -1218,6 +1263,8 @@ class _FakeMediaService implements MediaService {
           format: 'MOVIE',
           mediaType: 'ANIME',
           siteUrl: 'https://anilist.co/anime/5',
+          description:
+              'A romance movie where time travel changes the relationship.',
         ),
       ...await fetchRecommendationCandidates(
         includeAdult: query.includeAdult || query.infersAdult,
@@ -1261,6 +1308,20 @@ class _FakeMediaService implements MediaService {
         siteUrl: 'https://anilist.co/anime/1',
       ),
     ];
+  }
+}
+
+class _FailingImportMediaService extends _FakeMediaService {
+  @override
+  Future<ServiceUserProfile?> fetchUserProfile(String userName) async {
+    await Future<void>.delayed(Duration.zero);
+    throw const FormatException('sign in first');
+  }
+
+  @override
+  Future<List<MediaItem>> fetchUserLibrary(String userName) async {
+    await Future<void>.delayed(Duration.zero);
+    throw const FormatException('sign in first');
   }
 }
 

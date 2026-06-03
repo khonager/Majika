@@ -159,6 +159,20 @@ void main() {
       final service = AniListService(
         client: MockClient((request) async {
           final payload = jsonDecode(request.body) as Map<String, dynamic>;
+          final graphQuery = payload['query'] as String;
+          if (graphQuery.contains('GenreCollection')) {
+            return _json({
+              'data': {
+                'GenreCollection': ['Comedy'],
+                'MediaTagCollection': [
+                  {'name': 'Family Life'},
+                  {'name': 'Go'},
+                  {'name': 'Kids'},
+                ],
+              },
+            });
+          }
+
           final variables = Map<String, dynamic>.from(
             payload['variables'] as Map,
           );
@@ -229,6 +243,79 @@ void main() {
       expect(requests.last, isNot(contains('tagIn')));
     },
   );
+
+  test('search infers against the fetched AniList tag catalog', () async {
+    final requests = <Map<String, dynamic>>[];
+    final service = AniListService(
+      client: MockClient((request) async {
+        final payload = jsonDecode(request.body) as Map<String, dynamic>;
+        final graphQuery = payload['query'] as String;
+        if (graphQuery.contains('GenreCollection')) {
+          return _json({
+            'data': {
+              'GenreCollection': ['Romance'],
+              'MediaTagCollection': [
+                {'name': 'Achronological Order'},
+                {'name': "Boys' Love"},
+                {'name': 'School'},
+              ],
+            },
+          });
+        }
+
+        final variables = Map<String, dynamic>.from(
+          payload['variables'] as Map,
+        );
+        requests.add(variables);
+        return _json({
+          'data': {
+            'Page': {
+              'media': [
+                {
+                  'id': 11,
+                  'type': 'ANIME',
+                  'format': 'TV',
+                  'title': {
+                    'userPreferred': 'Out of Order',
+                    'romaji': 'Out of Order',
+                    'english': null,
+                  },
+                  'coverImage': {'large': 'https://example.com/order.jpg'},
+                  'genres': ['Romance'],
+                  'tags': [
+                    {
+                      'name': 'Achronological Order',
+                      'rank': 80,
+                      'isMediaSpoiler': false,
+                      'isAdult': false,
+                    },
+                  ],
+                  'siteUrl': 'https://anilist.co/anime/11',
+                  'characters': {'nodes': []},
+                  'studios': {'nodes': []},
+                  'averageScore': 80,
+                  'popularity': 20000,
+                  'episodes': 12,
+                  'chapters': null,
+                  'status': 'FINISHED',
+                  'startDate': {'year': 2024},
+                  'description': 'A story told out of order.',
+                },
+              ],
+            },
+          },
+        });
+      }),
+    );
+
+    final results = await service.searchRecommendationCandidates(
+      const RecommendationQuery(request: 'achronological order anime'),
+    );
+
+    expect(results.single.title, 'Out of Order');
+    expect(requests.single['tagIn'], contains('Achronological Order'));
+    expect(requests.single['search'], isNull);
+  });
 }
 
 http.Response _json(Map<String, Object?> body) {

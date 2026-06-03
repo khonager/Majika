@@ -220,28 +220,7 @@ class SteamService implements MediaService {
 
   @override
   Future<List<String>> fetchAvailableTags() async {
-    return const [
-      'Action',
-      'Adventure',
-      'RPG',
-      'Indie',
-      'Strategy',
-      'Simulation',
-      'Casual',
-      'Puzzle',
-      'Platformer',
-      'Shooter',
-      'Roguelike',
-      'Open World',
-      'Horror',
-      'Comedy',
-      'Single-player',
-      'Multiplayer',
-      'Co-op',
-      'Online Co-op',
-      'Controller Support',
-      'Steam Deck',
-    ];
+    return RecommendationQuery.steamBrowsableTags;
   }
 
   Future<String> resolveSteamId(String input) async {

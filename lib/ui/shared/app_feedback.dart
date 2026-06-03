@@ -144,6 +144,14 @@ class _ProgressToastBody extends StatelessWidget {
     required this.onDismissed,
   });
 
+  void _copyLog() {
+    final log = consoleLog?.value.trim();
+    final fallback = message.value.trim();
+    Clipboard.setData(
+      ClipboardData(text: log?.isNotEmpty == true ? log! : fallback),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Dismissible(
@@ -153,13 +161,7 @@ class _ProgressToastBody extends StatelessWidget {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => isExpanded.value = !isExpanded.value,
-        onLongPress: () {
-          final log = consoleLog?.value.trim();
-          final fallback = message.value.trim();
-          Clipboard.setData(
-            ClipboardData(text: log?.isNotEmpty == true ? log! : fallback),
-          );
-        },
+        onLongPress: _copyLog,
         child: Material(
           color: Colors.transparent,
           child: DecoratedBox(
@@ -232,6 +234,13 @@ class _ProgressToastBody extends StatelessWidget {
                               ),
                             ),
                             const SizedBox(width: 8),
+                            IconButton(
+                              tooltip: 'Copy AI log',
+                              visualDensity: VisualDensity.compact,
+                              onPressed: _copyLog,
+                              icon: const Icon(Icons.copy_rounded),
+                              color: Colors.white70,
+                            ),
                             Icon(
                               expanded
                                   ? Icons.expand_less_rounded
