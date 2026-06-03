@@ -45,6 +45,7 @@ const _downloadableLocalAiModels = [
         'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task',
     desktopUrl:
         'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/Gemma3-1B-IT_multi-prefill-seq_q4_ekv4096.litertlm',
+    accessUrl: 'https://huggingface.co/litert-community/Gemma3-1B-IT',
     description:
         'Best current default for this SDK: compact enough for newer phones while staying stronger than tiny fallback models.',
     modelType: ModelType.gemmaIt,
@@ -63,6 +64,7 @@ const _downloadableLocalAiModels = [
         'https://huggingface.co/google/gemma-3n-E2B-it-litert-preview/resolve/main/gemma-3n-E2B-it-int4.task',
     desktopUrl:
         'https://huggingface.co/google/gemma-3n-E2B-it-litert-lm/resolve/main/gemma-3n-E2B-it-int4.litertlm',
+    accessUrl: 'https://huggingface.co/google/gemma-3n-E2B-it-litert-preview',
     description:
         'Higher-capability Google model for newer devices with enough memory.',
     modelType: ModelType.gemmaIt,
@@ -82,6 +84,7 @@ const _downloadableLocalAiModels = [
         'https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-3n-E4B-it-int4.task',
     desktopUrl:
         'https://huggingface.co/google/gemma-3n-E4B-it-litert-lm/resolve/main/gemma-3n-E4B-it-int4.litertlm',
+    accessUrl: 'https://huggingface.co/google/gemma-3n-E4B-it-litert-preview',
     description:
         'Large model option for powerful devices; benchmark before making it your daily default.',
     modelType: ModelType.gemmaIt,
@@ -510,8 +513,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _downloadCancelToken = cancelToken;
     });
 
+    final modelToDownload = _effectiveSelectedModel;
     try {
-      final modelToDownload = _effectiveSelectedModel;
       final huggingFaceToken = _huggingFaceTokenController.text.trim();
       if (modelToDownload.needsHuggingFaceToken && huggingFaceToken.isEmpty) {
         throw const _HuggingFaceTokenRequiredException();
@@ -562,9 +565,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (error) {
       if (!mounted) return;
       if (CancelToken.isCancel(error) || cancelToken.isCancelled) return;
-      final message = error is _HuggingFaceTokenRequiredException
-          ? 'Add a Hugging Face token before downloading this gated model.'
-          : 'Could not download model: $error';
+      final message = _downloadModelErrorMessage(error, modelToDownload);
       showErrorToast(context, message);
     } finally {
       if (mounted && _downloadCancelToken == cancelToken) {
@@ -1198,6 +1199,7 @@ class _DownloadableModel {
   final String resourceLabel;
   final String mobileUrl;
   final String? desktopUrl;
+  final String? accessUrl;
   final String description;
   final ModelType modelType;
   final ModelFileType fileType;
@@ -1214,6 +1216,7 @@ class _DownloadableModel {
     required this.resourceLabel,
     required this.mobileUrl,
     this.desktopUrl,
+    this.accessUrl,
     required this.description,
     required this.modelType,
     this.fileType = ModelFileType.task,
@@ -1231,6 +1234,19 @@ class _DownloadableModel {
   String get storageFileName {
     final path = Uri.parse(url).pathSegments.last;
     return path.isEmpty ? url.split('/').last : path;
+  }
+
+  String get accessPageUrl {
+    final explicitUrl = accessUrl;
+    if (explicitUrl != null) return explicitUrl;
+    final uri = Uri.parse(url);
+    if (uri.host != 'huggingface.co' || uri.pathSegments.length < 2) {
+      return url;
+    }
+    return Uri.https(
+      uri.host,
+      '/${uri.pathSegments[0]}/${uri.pathSegments[1]}',
+    ).toString();
   }
 
   bool get isDesktop =>
@@ -1264,6 +1280,26 @@ class _ServerModelPreset {
 
 class _HuggingFaceTokenRequiredException implements Exception {
   const _HuggingFaceTokenRequiredException();
+}
+
+String _downloadModelErrorMessage(Object error, _DownloadableModel model) {
+  if (error is _HuggingFaceTokenRequiredException) {
+    return 'Add a Hugging Face read token before downloading ${model.name}.';
+  }
+
+  final normalizedError = error.toString().toLowerCase();
+  final looksLikeHuggingFaceAccessError =
+      model.needsHuggingFaceToken &&
+      (normalizedError.contains('http 403') ||
+          normalizedError.contains('access forbidden') ||
+          normalizedError.contains('does not have access') ||
+          normalizedError.contains('for gated models'));
+
+  if (looksLikeHuggingFaceAccessError) {
+    return 'Hugging Face blocked ${model.name}. Open Access model, accept or request access with the same account as your token, then retry.';
+  }
+
+  return 'Could not download ${model.name}: $error';
 }
 
 class _ServerModelPresetCard extends StatelessWidget {
@@ -1714,6 +1750,7 @@ class _ModelDownloadCard extends StatelessWidget {
           if (selectedModel.needsHuggingFaceToken) ...[
             const SizedBox(height: 12),
             _HuggingFaceTokenPanel(
+              model: selectedModel,
               controller: huggingFaceTokenController,
               onChanged: onHuggingFaceTokenChanged,
             ),
@@ -1764,10 +1801,12 @@ class _StatChip extends StatelessWidget {
 }
 
 class _HuggingFaceTokenPanel extends StatelessWidget {
+  final _DownloadableModel model;
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
 
   const _HuggingFaceTokenPanel({
+    required this.model,
     required this.controller,
     required this.onChanged,
   });
@@ -1796,6 +1835,19 @@ class _HuggingFaceTokenPanel extends StatelessWidget {
                     fontWeight: FontWeight.w800,
                   ),
                 ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              TextButton.icon(
+                key: const ValueKey('hugging-face-access-model'),
+                onPressed: () => _openHuggingFaceModelAccess(model),
+                icon: const Icon(Icons.fact_check_rounded, size: 16),
+                label: const Text('Access model'),
               ),
               TextButton.icon(
                 onPressed: _openHuggingFaceTokens,
@@ -1827,7 +1879,7 @@ class _HuggingFaceTokenPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Needed for gated Gemma downloads. Create a Hugging Face account, accept the model license, then create a fine-grained token with read access. Majika saves it locally and also adds it to your profile if you are signed in.',
+            'Before downloading ${model.name}, open Access model while signed into Hugging Face, accept or request the model license, then paste a read token from that same account. Majika saves it locally and also adds it to your profile if you are signed in.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: Colors.white70,
               height: 1.35,
@@ -1837,6 +1889,11 @@ class _HuggingFaceTokenPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+Future<void> _openHuggingFaceModelAccess(_DownloadableModel model) async {
+  final uri = Uri.parse(model.accessPageUrl);
+  await launchUrl(uri, mode: LaunchMode.externalApplication);
 }
 
 Future<void> _openHuggingFaceTokens() async {

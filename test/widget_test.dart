@@ -581,6 +581,10 @@ void main() {
     expect(find.text('FunctionGemma 270M'), findsNothing);
     expect(find.text('Hugging Face token'), findsOneWidget);
     expect(find.byKey(const ValueKey('hugging-face-token')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('hugging-face-access-model')),
+      findsOneWidget,
+    );
 
     expect(find.text('Use local model when available'), findsNothing);
     expect(find.text('AI search interpretation'), findsOneWidget);
@@ -614,6 +618,10 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Hugging Face token'), findsOneWidget);
+    expect(
+      find.textContaining('Before downloading Gemma 3n E2B IT'),
+      findsOneWidget,
+    );
 
     await tester.scrollUntilVisible(
       find.text('Advanced model choice'),
