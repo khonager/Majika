@@ -837,13 +837,63 @@ void main() {
     expect(find.text(changedEndpoint), findsOneWidget);
   });
 
-  testWidgets('settings hides unsupported on-device AI on Linux', (
+  testWidgets('settings can configure cloud AI providers', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      LocalAiSettingsKeys.localAiMode: localAiModeExternalCloud,
+      LocalAiSettingsKeys.useLocalAi: true,
+    });
+
+    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+
+    await tester.scrollUntilVisible(
+      find.text('Cloud AI provider'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cloud API key'), findsOneWidget);
+    expect(find.text('Google Gemini · gemini-3.1-flash-lite'), findsOneWidget);
+    expect(find.text('Cloud endpoint'), findsOneWidget);
+    expect(find.text('Cloud model'), findsOneWidget);
+    expect(find.textContaining('Cloud privacy note'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('cloud-ai-api-key')),
+      'gemini_test_key',
+    );
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString(LocalAiSettingsKeys.cloudApiKey), 'gemini_test_key');
+
+    await tester.tap(find.text('Google Gemini · gemini-3.1-flash-lite'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.text('OpenRouter · meta-llama/llama-3.2-3b-instruct:free').last,
+    );
+    await tester.pumpAndSettle();
+
+    expect(prefs.getString(LocalAiSettingsKeys.cloudAiProvider), 'OpenRouter');
+    expect(
+      prefs.getString(LocalAiSettingsKeys.cloudEndpoint),
+      'https://openrouter.ai/api/v1',
+    );
+    expect(
+      prefs.getString(LocalAiSettingsKeys.cloudModel),
+      'meta-llama/llama-3.2-3b-instruct:free',
+    );
+  });
+
+  testWidgets('settings supports downloadable on-device AI on Linux', (
     WidgetTester tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     try {
       SharedPreferences.setMockInitialValues({
-        LocalAiSettingsKeys.localAiMode: localAiModeExternalServer,
+        LocalAiSettingsKeys.localAiMode: localAiModeOnDevice,
         LocalAiSettingsKeys.useLocalAi: true,
       });
 
@@ -856,17 +906,16 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Automatic on-device'), findsNothing);
-      expect(find.text('Gemma 3 1B IT'), findsNothing);
-      expect(find.text('Server model preset'), findsOneWidget);
-      expect(find.text('qwen3:4b-instruct'), findsWidgets);
-      expect(find.text('Lowest working · qwen3:1.7b'), findsNothing);
+      expect(find.text('Automatic on-device'), findsWidgets);
+      expect(find.text('Gemma 3 1B IT'), findsOneWidget);
+      expect(find.text('Gemma 3n E2B IT'), findsNothing);
 
-      await tester.tap(find.text('Recommended mid · qwen3:4b-instruct'));
+      await tester.tap(find.text('Gemma 3 1B IT'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Lowest working · qwen3:1.7b'), findsOneWidget);
-      expect(find.text('Extra accurate · qwen3:8b'), findsOneWidget);
+      expect(find.text('Gemma 3n E2B IT'), findsOneWidget);
+      expect(find.text('Gemma 3n E4B IT'), findsOneWidget);
+      expect(find.text('Qwen3 0.6B'), findsOneWidget);
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }

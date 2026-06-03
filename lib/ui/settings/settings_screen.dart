@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 const _desktopOnDevicePlatforms = {
+  TargetPlatform.linux,
   TargetPlatform.macOS,
   TargetPlatform.windows,
 };
@@ -201,6 +202,40 @@ const _externalLocalServerModelPresets = [
   ),
 ];
 
+const _externalCloudAiPresets = [
+  _CloudAiProviderPreset(
+    provider: 'Google Gemini',
+    endpoint:
+        'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    model: 'gemini-3.1-flash-lite',
+    tier: _AiModelTier.recommended,
+    freeLabel: 'Free Gemini API tier',
+    keyUrl: 'https://aistudio.google.com/app/apikey',
+    description:
+        'Best default cloud fallback for Majika: low-cost search interpretation and recommendation explanations through Google AI Studio.',
+  ),
+  _CloudAiProviderPreset(
+    provider: 'Groq',
+    endpoint: 'https://api.groq.com/openai/v1',
+    model: 'llama-3.1-8b-instant',
+    tier: _AiModelTier.low,
+    freeLabel: 'Free developer limits',
+    keyUrl: 'https://console.groq.com/keys',
+    description:
+        'Very fast OpenAI-compatible API for lightweight structured prompts when local hardware is not enough.',
+  ),
+  _CloudAiProviderPreset(
+    provider: 'OpenRouter',
+    endpoint: 'https://openrouter.ai/api/v1',
+    model: 'meta-llama/llama-3.2-3b-instruct:free',
+    tier: _AiModelTier.low,
+    freeLabel: 'Free :free model variants',
+    keyUrl: 'https://openrouter.ai/settings/keys',
+    description:
+        'Aggregator option for users who want a rotating catalog of free models. Use model IDs ending in :free to avoid paid routing.',
+  ),
+];
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -234,6 +269,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _localServerModelController = TextEditingController(
     text: defaultLocalAiModel,
   );
+  final _cloudEndpointController = TextEditingController(
+    text: defaultCloudAiEndpoint,
+  );
+  final _cloudModelController = TextEditingController(
+    text: defaultCloudAiModel,
+  );
+  final _cloudApiKeyController = TextEditingController();
   final _huggingFaceTokenController = TextEditingController();
   Timer? _huggingFaceTokenSyncTimer;
 
@@ -244,12 +286,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool get _usesExternalServer => _localAiMode == localAiModeExternalServer;
 
+  bool get _usesExternalCloud => _localAiMode == localAiModeExternalCloud;
+
   bool get _supportsOnDeviceAi =>
       !kIsWeb && _onDevicePlatforms.contains(defaultTargetPlatform);
 
   List<String> get _localAiModeOptions => [
     if (_supportsOnDeviceAi) localAiModeOnDevice,
     localAiModeExternalServer,
+    localAiModeExternalCloud,
     localAiModeRulesOnly,
   ];
 
@@ -283,6 +328,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String get _effectiveServerModelName {
     final modelName = _localServerModelController.text.trim();
     return modelName.isEmpty ? defaultLocalAiModel : modelName;
+  }
+
+  _CloudAiProviderPreset get _effectiveCloudProviderPreset {
+    for (final preset in _externalCloudAiPresets) {
+      if (preset.provider == _localAiProvider) return preset;
+    }
+    return _externalCloudAiPresets.first;
   }
 
   String get _ollamaServeCommand => 'ollama run $_effectiveServerModelName';
@@ -337,7 +389,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _useLocalAi =
           prefs.getBool(LocalAiSettingsKeys.useLocalAi) ??
           (normalizedMode == localAiModeOnDevice ||
-              normalizedMode == localAiModeExternalServer);
+              normalizedMode == localAiModeExternalServer ||
+              normalizedMode == localAiModeExternalCloud);
       _useAiForSearch =
           prefs.getBool(LocalAiSettingsKeys.useAiForSearch) ?? _useAiForSearch;
       _localAiMode = normalizedMode;
@@ -347,8 +400,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (_localAiMode == localAiModeRulesOnly) {
         _useLocalAi = false;
       }
-      _localAiProvider =
-          legacyProvider ?? selectedModel?.providerLabel ?? _localAiProvider;
+      _localAiProvider = normalizedMode == localAiModeExternalCloud
+          ? (prefs.getString(LocalAiSettingsKeys.cloudAiProvider) ??
+                defaultCloudAiProvider)
+          : (legacyProvider ??
+                selectedModel?.providerLabel ??
+                _localAiProvider);
       _selectedModel = selectedModel ?? _selectedModel;
       _downloadedModelId = prefs.getString(
         LocalAiSettingsKeys.downloadedModelId,
@@ -367,6 +424,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _localServerModelController.text =
           prefs.getString(LocalAiSettingsKeys.localServerModel) ??
           _localServerModelController.text;
+      _cloudEndpointController.text =
+          prefs.getString(LocalAiSettingsKeys.cloudEndpoint) ??
+          _cloudEndpointController.text;
+      _cloudModelController.text =
+          prefs.getString(LocalAiSettingsKeys.cloudModel) ??
+          _cloudModelController.text;
+      _cloudApiKeyController.text =
+          prefs.getString(LocalAiSettingsKeys.cloudApiKey) ?? '';
       _huggingFaceTokenController.text =
           prefs.getString(LocalAiSettingsKeys.huggingFaceToken) ?? '';
     });
@@ -376,6 +441,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _modeFromLegacyProvider(String? provider) {
     return switch (provider) {
       externalLocalAiProvider => localAiModeExternalServer,
+      externalCloudAiProvider => localAiModeExternalCloud,
       fallbackRulesProvider => localAiModeRulesOnly,
       null => localAiModeRulesOnly,
       _ => localAiModeOnDevice,
@@ -441,6 +507,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
       localAiModeExternalServer,
     );
     await _saveBool(LocalAiSettingsKeys.useLocalAi, true);
+  }
+
+  Future<void> _useCloudProvider(_CloudAiProviderPreset preset) async {
+    setState(() {
+      _localAiMode = localAiModeExternalCloud;
+      _useLocalAi = true;
+      _localAiProvider = preset.provider;
+      _cloudEndpointController.text = preset.endpoint;
+      _cloudModelController.text = preset.model;
+    });
+    await _saveString(
+      LocalAiSettingsKeys.localAiMode,
+      localAiModeExternalCloud,
+    );
+    await _saveBool(LocalAiSettingsKeys.useLocalAi, true);
+    await _saveString(
+      LocalAiSettingsKeys.localAiProvider,
+      externalCloudAiProvider,
+    );
+    await _saveString(LocalAiSettingsKeys.cloudAiProvider, preset.provider);
+    await _saveString(LocalAiSettingsKeys.cloudEndpoint, preset.endpoint);
+    await _saveString(LocalAiSettingsKeys.cloudModel, preset.model);
   }
 
   Future<void> _saveDownloadedModel(_DownloadableModel model) async {
@@ -661,6 +749,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _huggingFaceTokenSyncTimer?.cancel();
     _localEndpointController.dispose();
     _localServerModelController.dispose();
+    _cloudEndpointController.dispose();
+    _cloudModelController.dispose();
+    _cloudApiKeyController.dispose();
     _huggingFaceTokenController.dispose();
     super.dispose();
   }
@@ -671,6 +762,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     if (_localAiMode == localAiModeExternalServer) {
       return 'External local server will handle AI requests with ${_localServerModelController.text.trim().isEmpty ? defaultLocalAiModel : _localServerModelController.text.trim()}.';
+    }
+    if (_localAiMode == localAiModeExternalCloud) {
+      final model = _cloudModelController.text.trim().isEmpty
+          ? defaultCloudAiModel
+          : _cloudModelController.text.trim();
+      final keyStatus = _cloudApiKeyController.text.trim().isEmpty
+          ? 'Add an API key before requests can run.'
+          : 'API key saved locally on this device.';
+      return '$_localAiProvider will handle AI requests with $model. $keyStatus';
     }
     if (_hasDownloadedModel) {
       return '${_downloadedModelName ?? 'On-device model'} is active for AI requests using $_localBackend backend.';
@@ -912,17 +1012,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     setState(() {
                       _localAiMode = value;
                       _useLocalAi = value != localAiModeRulesOnly;
-                      _localAiProvider = value == localAiModeOnDevice
-                          ? _selectedModel.providerLabel
-                          : value;
+                      _localAiProvider = switch (value) {
+                        localAiModeOnDevice => _selectedModel.providerLabel,
+                        localAiModeExternalCloud =>
+                          _effectiveCloudProviderPreset.provider,
+                        _ => value,
+                      };
                     });
                     _saveString(LocalAiSettingsKeys.localAiMode, value);
                     _saveString(
                       LocalAiSettingsKeys.localAiProvider,
-                      value == localAiModeOnDevice
-                          ? _selectedModel.providerLabel
-                          : value,
+                      value == localAiModeExternalCloud
+                          ? externalCloudAiProvider
+                          : _localAiProvider,
                     );
+                    if (value == localAiModeExternalCloud) {
+                      _saveString(
+                        LocalAiSettingsKeys.cloudAiProvider,
+                        _localAiProvider,
+                      );
+                    }
                     _saveBool(
                       LocalAiSettingsKeys.useLocalAi,
                       value != localAiModeRulesOnly,
@@ -1066,6 +1175,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         _copyServerCommand('Ollama', _ollamaServeCommand),
                     onCopyFlm: () =>
                         _copyServerCommand('FastFlowLM', _flmServeCommand),
+                  ),
+                if (_usesExternalCloud)
+                  _CloudAiProviderCard(
+                    presets: _externalCloudAiPresets,
+                    selectedPreset: _effectiveCloudProviderPreset,
+                    onPresetSelected: (preset) {
+                      unawaited(_useCloudProvider(preset));
+                      showInfoToast(
+                        context,
+                        '${preset.provider} cloud AI selected.',
+                      );
+                    },
+                  ),
+                if (_usesExternalCloud)
+                  _TextFieldRow(
+                    fieldKey: const ValueKey('cloud-ai-api-key'),
+                    icon: Icons.key_rounded,
+                    title: 'Cloud API key',
+                    subtitle:
+                        'Each user should paste their own key. Majika saves it locally on this device.',
+                    controller: _cloudApiKeyController,
+                    hintText: 'Paste provider API key',
+                    obscureText: true,
+                    onChanged: (value) => _saveString(
+                      LocalAiSettingsKeys.cloudApiKey,
+                      value.trim(),
+                    ),
+                  ),
+                if (_usesExternalCloud)
+                  _TextFieldRow(
+                    fieldKey: const ValueKey('cloud-ai-endpoint'),
+                    icon: Icons.cloud_queue_rounded,
+                    title: 'Cloud endpoint',
+                    subtitle:
+                        'OpenAI-compatible /chat/completions endpoint for the selected provider.',
+                    controller: _cloudEndpointController,
+                    hintText: _effectiveCloudProviderPreset.endpoint,
+                    onChanged: (value) =>
+                        _saveString(LocalAiSettingsKeys.cloudEndpoint, value),
+                  ),
+                if (_usesExternalCloud)
+                  _TextFieldRow(
+                    fieldKey: const ValueKey('cloud-ai-model'),
+                    icon: Icons.smart_toy_rounded,
+                    title: 'Cloud model',
+                    subtitle:
+                        'For OpenRouter free usage, use a model ID ending in :free.',
+                    controller: _cloudModelController,
+                    hintText: _effectiveCloudProviderPreset.model,
+                    onChanged: (value) {
+                      setState(() {});
+                      _saveString(LocalAiSettingsKeys.cloudModel, value);
+                    },
+                  ),
+                if (_usesExternalCloud)
+                  const _InfoRow(
+                    icon: Icons.privacy_tip_rounded,
+                    title: 'Cloud privacy note',
+                    subtitle:
+                        'Recommendation prompts and taste-profile signals are sent to the selected provider. Use rules-only or on-device AI to keep AI reasoning local.',
                   ),
                 _SwitchRow(
                   icon: Icons.manage_search_rounded,
@@ -1278,6 +1447,26 @@ class _ServerModelPreset {
   });
 }
 
+class _CloudAiProviderPreset {
+  final String provider;
+  final String endpoint;
+  final String model;
+  final _AiModelTier tier;
+  final String freeLabel;
+  final String keyUrl;
+  final String description;
+
+  const _CloudAiProviderPreset({
+    required this.provider,
+    required this.endpoint,
+    required this.model,
+    required this.tier,
+    required this.freeLabel,
+    required this.keyUrl,
+    required this.description,
+  });
+}
+
 class _HuggingFaceTokenRequiredException implements Exception {
   const _HuggingFaceTokenRequiredException();
 }
@@ -1300,6 +1489,118 @@ String _downloadModelErrorMessage(Object error, _DownloadableModel model) {
   }
 
   return 'Could not download ${model.name}: $error';
+}
+
+class _CloudAiProviderCard extends StatelessWidget {
+  final List<_CloudAiProviderPreset> presets;
+  final _CloudAiProviderPreset selectedPreset;
+  final ValueChanged<_CloudAiProviderPreset> onPresetSelected;
+
+  const _CloudAiProviderCard({
+    required this.presets,
+    required this.selectedPreset,
+    required this.onPresetSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.secondary.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.cloud_done_rounded,
+                  color: theme.colorScheme.secondary,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Cloud AI provider',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Bring your own free-tier API key.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonHideUnderline(
+            child: DropdownButton<_CloudAiProviderPreset>(
+              value: selectedPreset,
+              isExpanded: true,
+              dropdownColor: const Color(0xFF1A1F27),
+              iconEnabledColor: Colors.white70,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
+              items: [
+                for (final preset in presets)
+                  DropdownMenuItem(
+                    value: preset,
+                    child: Text(
+                      '${preset.provider} · ${preset.model}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (preset) {
+                if (preset != null) onPresetSelected(preset);
+              },
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${selectedPreset.freeLabel} · ${selectedPreset.tier.label}',
+            style: const TextStyle(color: Colors.white70),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            selectedPreset.description,
+            style: const TextStyle(color: Colors.white70, height: 1.35),
+          ),
+          const SizedBox(height: 10),
+          TextButton.icon(
+            onPressed: () => _openCloudProviderKeys(selectedPreset),
+            icon: const Icon(Icons.open_in_new_rounded, size: 16),
+            label: const Text('Get API key'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ServerModelPresetCard extends StatelessWidget {
@@ -1463,7 +1764,7 @@ class _ServerRuntimeHelpCard extends StatelessWidget {
           _ServerCommandRow(
             title: 'Ollama',
             subtitle:
-                'Endpoint ${defaultLocalAiEndpoint}; model follows the preset above.',
+                'Endpoint $defaultLocalAiEndpoint; model follows the preset above.',
             command: ollamaCommand,
             onUse: onUseOllama,
             onCopy: onCopyOllama,
@@ -1901,6 +2202,11 @@ Future<void> _openHuggingFaceTokens() async {
   await launchUrl(uri, mode: LaunchMode.externalApplication);
 }
 
+Future<void> _openCloudProviderKeys(_CloudAiProviderPreset preset) async {
+  final uri = Uri.parse(preset.keyUrl);
+  await launchUrl(uri, mode: LaunchMode.externalApplication);
+}
+
 Future<void> _openOllamaDownload() async {
   final uri = Uri.parse('https://ollama.com/download');
   await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -2005,6 +2311,7 @@ class _TextFieldRow extends StatelessWidget {
   final String subtitle;
   final TextEditingController controller;
   final String hintText;
+  final bool obscureText;
   final ValueChanged<String>? onChanged;
 
   const _TextFieldRow({
@@ -2014,6 +2321,7 @@ class _TextFieldRow extends StatelessWidget {
     required this.subtitle,
     required this.controller,
     required this.hintText,
+    this.obscureText = false,
     this.onChanged,
   });
 
@@ -2039,6 +2347,7 @@ class _TextFieldRow extends StatelessWidget {
           TextField(
             key: fieldKey,
             controller: controller,
+            obscureText: obscureText,
             onChanged: onChanged,
             style: const TextStyle(color: Colors.white),
             decoration: _fieldDecoration(context).copyWith(hintText: hintText),

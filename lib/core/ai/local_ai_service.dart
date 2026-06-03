@@ -267,16 +267,12 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
       return generator(prompt, maxTokens);
     }
 
-    if (settings.usesExternalServer) {
+    if (settings.usesExternalServer || settings.usesExternalCloud) {
       return _generateExternalText(
         prompt,
         maxTokens: maxTokens,
         settings: settings,
       );
-    }
-
-    if (_shouldSkipOnDeviceInference(settings)) {
-      throw StateError('On-device local AI is unavailable on Linux desktop.');
     }
 
     if (!isConfigured) {
@@ -337,23 +333,32 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
     return preferredBackend;
   }
 
-  bool _shouldSkipOnDeviceInference(LocalAiRuntimeSettings settings) {
-    return settings.usesOnDeviceModel &&
-        !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.linux;
-  }
-
   Future<String> _generateExternalText(
     String prompt, {
     required int maxTokens,
     required LocalAiRuntimeSettings settings,
   }) async {
     final post = httpPost ?? http.post;
+    final isCloud = settings.usesExternalCloud;
+    final apiKey = settings.cloudApiKey.trim();
+    if (isCloud && apiKey.isEmpty) {
+      throw StateError('No ${settings.cloudProvider} API key is configured.');
+    }
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (isCloud) 'Authorization': 'Bearer $apiKey',
+      if (isCloud && settings.cloudProvider == 'OpenRouter') ...{
+        'HTTP-Referer': 'https://majika.local',
+        'X-OpenRouter-Title': 'Majika',
+      },
+    };
     final response = await post(
-      settings.chatCompletionsUri,
-      headers: const {'Content-Type': 'application/json'},
+      isCloud
+          ? settings.cloudChatCompletionsUri
+          : settings.localChatCompletionsUri,
+      headers: headers,
       body: jsonEncode({
-        'model': settings.serverModel,
+        'model': isCloud ? settings.cloudModel : settings.serverModel,
         'messages': [
           {'role': 'user', 'content': prompt},
         ],
@@ -365,7 +370,7 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError(
-        'Local AI server returned HTTP ${response.statusCode}: ${response.body}',
+        '${isCloud ? settings.cloudProvider : 'Local AI server'} returned HTTP ${response.statusCode}: ${response.body}',
       );
     }
 

@@ -295,6 +295,65 @@ void main() {
     expect(interpreted.formats, contains('MOVIE'));
   });
 
+  test('local AI service sends bearer auth for cloud providers', () async {
+    Object? requestBody;
+    Uri? requestUrl;
+    Map<String, String>? requestHeaders;
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        mode: localAiModeExternalCloud,
+        provider: externalCloudAiProvider,
+        endpoint: defaultLocalAiEndpoint,
+        serverModel: defaultLocalAiModel,
+        cloudProvider: 'Google Gemini',
+        cloudEndpoint:
+            'https://generativelanguage.googleapis.com/v1beta/openai',
+        cloudModel: 'gemini-3.1-flash-lite',
+        cloudApiKey: 'gemini_test_key',
+        contextItems: 24,
+      ),
+      httpPost: (url, {headers, body}) async {
+        requestUrl = url;
+        requestHeaders = headers;
+        requestBody = jsonDecode(body.toString());
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {
+                  'role': 'assistant',
+                  'content':
+                      '{"tags":["Mystery"],"formats":["TV"],"mediaTypes":["ANIME"],"includeAdult":false}',
+                },
+              },
+            ],
+          }),
+          200,
+        );
+      },
+    );
+
+    final interpreted = await service.interpretRecommendationRequest(
+      const RecommendationQuery(request: 'mystery tv'),
+      availableTags: const ['Mystery', 'Romance'],
+    );
+
+    expect(
+      requestUrl.toString(),
+      'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    );
+    expect(requestHeaders?['Authorization'], 'Bearer gemini_test_key');
+    expect(requestBody, isA<Map<String, dynamic>>());
+    expect(
+      (requestBody as Map<String, dynamic>)['model'],
+      'gemini-3.1-flash-lite',
+    );
+    expect(interpreted.aiSelectedTags, contains('Mystery'));
+    expect(interpreted.formats, contains('TV'));
+  });
+
   test('local AI service respects the configured context budget', () async {
     late String capturedPrompt;
     final service = FlutterGemmaLocalAiService(
@@ -499,6 +558,39 @@ void main() {
     expect(settings.backend, localAiBackendGpu);
     expect(settings.preferredBackend, PreferredBackend.gpu);
   });
+
+  test(
+    'local AI runtime settings loads external cloud provider fields',
+    () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        LocalAiSettingsKeys.localAiMode,
+        localAiModeExternalCloud,
+      );
+      await prefs.setString(LocalAiSettingsKeys.cloudAiProvider, 'OpenRouter');
+      await prefs.setString(
+        LocalAiSettingsKeys.cloudEndpoint,
+        'https://openrouter.ai/api/v1',
+      );
+      await prefs.setString(
+        LocalAiSettingsKeys.cloudModel,
+        'meta-llama/llama-3.2-3b-instruct:free',
+      );
+      await prefs.setString(LocalAiSettingsKeys.cloudApiKey, 'or_test_key');
+
+      final settings = await LocalAiRuntimeSettings.load();
+
+      expect(settings.useLocalAi, isTrue);
+      expect(settings.usesExternalCloud, isTrue);
+      expect(settings.cloudProvider, 'OpenRouter');
+      expect(
+        settings.cloudChatCompletionsUri.toString(),
+        'https://openrouter.ai/api/v1/chat/completions',
+      );
+      expect(settings.cloudModel, 'meta-llama/llama-3.2-3b-instruct:free');
+      expect(settings.cloudApiKey, 'or_test_key');
+    },
+  );
 }
 
 TasteProfile _profile({String serviceName = 'AniList'}) {
