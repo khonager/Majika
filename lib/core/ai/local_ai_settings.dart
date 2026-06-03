@@ -57,6 +57,7 @@ class LocalAiRuntimeSettings {
   final String cloudEndpoint;
   final String cloudModel;
   final String cloudApiKey;
+  final String deviceModelName;
   final String backend;
   final double contextItems;
 
@@ -71,6 +72,7 @@ class LocalAiRuntimeSettings {
     this.cloudEndpoint = defaultCloudAiEndpoint,
     this.cloudModel = defaultCloudAiModel,
     this.cloudApiKey = '',
+    this.deviceModelName = '',
     this.backend = localAiBackendAuto,
     required this.contextItems,
   });
@@ -86,6 +88,7 @@ class LocalAiRuntimeSettings {
       cloudEndpoint = defaultCloudAiEndpoint,
       cloudModel = defaultCloudAiModel,
       cloudApiKey = '',
+      deviceModelName = '',
       backend = localAiBackendAuto,
       contextItems = 24;
 
@@ -176,6 +179,10 @@ class LocalAiRuntimeSettings {
           prefs.getString(LocalAiSettingsKeys.cloudModel) ??
           defaultCloudAiModel,
       cloudApiKey: prefs.getString(LocalAiSettingsKeys.cloudApiKey) ?? '',
+      deviceModelName:
+          prefs.getString(LocalAiSettingsKeys.selectedModelName) ??
+          prefs.getString(LocalAiSettingsKeys.downloadedModelName) ??
+          '',
       backend:
           prefs.getString(LocalAiSettingsKeys.localBackend) ??
           localAiBackendAuto,

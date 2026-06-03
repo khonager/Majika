@@ -592,14 +592,10 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
   }
 
   _AiPromptTier _promptTier(LocalAiRuntimeSettings settings) {
-    final modelName = [
-      settings.provider,
-      settings.serverModel,
-      settings.cloudModel,
-    ].join(' ').toLowerCase();
     if (settings.usesManualAi || settings.usesExternalCloud) {
       return _AiPromptTier.rich;
     }
+    final modelName = _activePromptModelName(settings);
     if (_looksTinyModel(modelName) || settings.contextItemLimit <= 12) {
       return _AiPromptTier.compact;
     }
@@ -609,11 +605,22 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
     return _AiPromptTier.balanced;
   }
 
+  String _activePromptModelName(LocalAiRuntimeSettings settings) {
+    if (settings.usesExternalServer) {
+      return '${settings.provider} ${settings.serverModel}'.toLowerCase();
+    }
+    if (settings.usesOnDeviceModel) {
+      return '${settings.provider} ${settings.deviceModelName}'.toLowerCase();
+    }
+    return settings.provider.toLowerCase();
+  }
+
   bool _looksTinyModel(String modelName) {
     return modelName.contains('270m') ||
         modelName.contains('0.5b') ||
         modelName.contains('0.6b') ||
-        modelName.contains('1b');
+        modelName.contains('1b') ||
+        modelName.contains('1 b');
   }
 
   bool _looksStrongModel(String modelName) {

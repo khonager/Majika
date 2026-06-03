@@ -678,6 +678,187 @@ void main() {
     expect(chosen?.reason, 'Best PC fit.');
   });
 
+  test(
+    'prompt benchmark: rich Steam picker includes personal game evidence',
+    () async {
+      late String capturedPrompt;
+      final service = FlutterGemmaLocalAiService(
+        settingsLoader: () async => const LocalAiRuntimeSettings(
+          useLocalAi: true,
+          useAiForSearch: true,
+          mode: localAiModeManual,
+          provider: localAiModeManual,
+          endpoint: defaultLocalAiEndpoint,
+          serverModel: defaultLocalAiModel,
+          contextItems: 24,
+        ),
+        textGenerator: (prompt, maxTokens) async {
+          capturedPrompt = prompt;
+          return '{"id":"steam_portal_like","reason":"Fits their puzzle co-op history and the request."}';
+        },
+      );
+
+      final profile = _profile(
+        serviceName: 'Steam',
+        favoriteGenres: const ['Puzzle', 'Co-op'],
+        library: [
+          _mediaItem(
+            'steam_portal_2',
+            'Portal 2',
+            tags: const ['Puzzle', 'Co-op', 'Comedy'],
+            mediaType: 'GAME',
+            format: 'CO_OP',
+            sourceId: 'com.majika.service.steam',
+            playtimeMinutes: 1800,
+          ),
+        ],
+        highRatedItems: [
+          _mediaItem(
+            'steam_it_takes_two',
+            'It Takes Two',
+            tags: const ['Co-op', 'Adventure', 'Controller Support'],
+            mediaType: 'GAME',
+            format: 'CO_OP',
+            sourceId: 'com.majika.service.steam',
+          ),
+        ],
+        tagWeights: const {'Puzzle': 4.5, 'Co-op': 4.0},
+      );
+
+      await service.chooseTopRecommendation(
+        profile,
+        [
+          _recommendation(
+            'steam_high_score',
+            'Generic Popular RPG',
+            tags: const ['RPG', 'Open World'],
+            format: 'SINGLE_PLAYER',
+            mediaType: 'GAME',
+            sourceId: 'com.majika.service.steam',
+          ),
+          _recommendation(
+            'steam_portal_like',
+            'Puzzle Co-op Controller Game',
+            tags: const ['Puzzle', 'Co-op', 'Controller Support'],
+            format: 'CO_OP',
+            mediaType: 'GAME',
+            sourceId: 'com.majika.service.steam',
+          ),
+        ],
+        query: const RecommendationQuery(
+          request: 'a clever funny co-op game like Portal 2 for controllers',
+          mediaTypes: {'GAME'},
+          formats: {'CO_OP', 'CONTROLLER'},
+        ),
+      );
+
+      expect(capturedPrompt, contains('Prompt mode: rich'));
+      expect(capturedPrompt, contains('Steam PC games'));
+      expect(capturedPrompt, contains('librarySample'));
+      expect(capturedPrompt, contains('Portal 2'));
+      expect(capturedPrompt, contains('It Takes Two'));
+      expect(capturedPrompt, contains('A lower-score option can win'));
+      expect(capturedPrompt, isNot(contains('favoriteCharacters')));
+    },
+  );
+
+  test(
+    'prompt benchmark: tiny selected on-device model gets compact context',
+    () async {
+      late String capturedPrompt;
+      final service = FlutterGemmaLocalAiService(
+        settingsLoader: () async => const LocalAiRuntimeSettings(
+          useLocalAi: true,
+          useAiForSearch: true,
+          mode: localAiModeOnDevice,
+          provider: 'Gemma',
+          endpoint: defaultLocalAiEndpoint,
+          serverModel: defaultLocalAiModel,
+          deviceModelName: 'Gemma 3 1B IT',
+          contextItems: 24,
+        ),
+        textGenerator: (prompt, maxTokens) async {
+          capturedPrompt = prompt;
+          return '{"id":"anilist_1","reason":"Compact pick."}';
+        },
+      );
+
+      await service.chooseTopRecommendation(
+        _profile(
+          highRatedItems: [
+            _mediaItem('anilist_monogatari', 'Monogatari Series'),
+          ],
+        ),
+        [
+          for (var index = 0; index < 8; index++)
+            _recommendation('anilist_$index', 'Anime $index'),
+        ],
+        query: const RecommendationQuery(request: 'surreal mystery anime'),
+      );
+
+      expect(capturedPrompt, contains('Prompt mode: compact'));
+      expect(capturedPrompt, contains('User taste:'));
+      expect(capturedPrompt, isNot(contains('librarySample')));
+      expect(capturedPrompt, isNot(contains('Monogatari Series')));
+    },
+  );
+
+  test(
+    'prompt benchmark: Home prompt carries cross-service decision rules',
+    () async {
+      late String capturedPrompt;
+      final service = FlutterGemmaLocalAiService(
+        settingsLoader: () async => const LocalAiRuntimeSettings(
+          useLocalAi: true,
+          useAiForSearch: true,
+          mode: localAiModeExternalCloud,
+          provider: externalCloudAiProvider,
+          endpoint: defaultLocalAiEndpoint,
+          serverModel: defaultLocalAiModel,
+          cloudProvider: 'Google Gemini',
+          cloudModel: 'gemini-3.1-flash-lite',
+          contextItems: 24,
+        ),
+        textGenerator: (prompt, maxTokens) async {
+          capturedPrompt = prompt;
+          return '{"id":"steam_funny","reason":"The request asks for a funny PC game."}';
+        },
+      );
+
+      await service.chooseHomeRecommendation(
+        [
+          _profile(serviceName: 'AniList', favoriteGenres: const ['Comedy']),
+          _profile(serviceName: 'Steam', favoriteGenres: const ['Co-op']),
+        ],
+        [
+          _recommendation('anilist_comedy', 'Comedy Anime'),
+          _recommendation(
+            'steam_funny',
+            'Funny PC Game',
+            tags: const ['Comedy', 'Co-op'],
+            mediaType: 'GAME',
+            format: 'CO_OP',
+            sourceId: 'com.majika.service.steam',
+          ),
+        ],
+        query: const RecommendationQuery(request: 'funny game on my pc'),
+      );
+
+      expect(capturedPrompt, contains('Prompt mode: rich'));
+      expect(
+        capturedPrompt,
+        contains('compare AniList anime/manga with Steam games'),
+      );
+      expect(
+        capturedPrompt,
+        contains('If the user asks for a game, prefer Steam GAME options'),
+      );
+      expect(capturedPrompt, contains('AniList: Comedy'));
+      expect(capturedPrompt, contains('Steam: Co-op'));
+      expect(capturedPrompt, isNot(contains('AI-selected tags')));
+    },
+  );
+
   test('local AI runtime settings resolves backend preference', () async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(LocalAiSettingsKeys.localBackend, localAiBackendGpu);
@@ -687,6 +868,21 @@ void main() {
     expect(settings.backend, localAiBackendGpu);
     expect(settings.preferredBackend, PreferredBackend.gpu);
   });
+
+  test(
+    'local AI runtime settings loads selected on-device model name',
+    () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        LocalAiSettingsKeys.selectedModelName,
+        'Gemma 3 1B IT',
+      );
+
+      final settings = await LocalAiRuntimeSettings.load();
+
+      expect(settings.deviceModelName, 'Gemma 3 1B IT');
+    },
+  );
 
   test(
     'local AI runtime settings loads external cloud provider fields',
@@ -722,23 +918,52 @@ void main() {
   );
 }
 
-TasteProfile _profile({String serviceName = 'AniList'}) {
+TasteProfile _profile({
+  String serviceName = 'AniList',
+  List<MediaItem> library = const [],
+  List<String> favoriteGenres = const ['Mystery'],
+  Map<String, double> tagWeights = const {},
+  Map<String, double> formatWeights = const {},
+  List<MediaItem> highRatedItems = const [],
+  MediaItem? recentActivity,
+}) {
   return TasteProfile(
     userName: 'tester',
-    library: const [],
-    favoriteGenres: const ['Mystery'],
-    tagWeights: const {},
-    formatWeights: const {},
+    library: library,
+    favoriteGenres: favoriteGenres,
+    tagWeights: tagWeights,
+    formatWeights: formatWeights,
     formatCounts: const {},
     favoriteCharacters: const [],
     favoriteStaff: const [],
     favoriteStudios: const [],
-    highRatedItems: const [],
-    recentActivity: null,
+    highRatedItems: highRatedItems,
+    recentActivity: recentActivity,
     completedCount: 0,
     currentCount: 0,
     importedAt: DateTime(2026),
     serviceName: serviceName,
+  );
+}
+
+MediaItem _mediaItem(
+  String id,
+  String title, {
+  List<String> tags = const ['Mystery'],
+  String format = 'TV',
+  String mediaType = 'ANIME',
+  String sourceId = 'com.majika.service.anilist',
+  int? playtimeMinutes,
+}) {
+  return MediaItem(
+    id: id,
+    title: title,
+    coverUrl: '',
+    tags: tags,
+    format: format,
+    mediaType: mediaType,
+    sourceId: sourceId,
+    playtimeMinutes: playtimeMinutes,
   );
 }
 
@@ -751,10 +976,9 @@ Recommendation _recommendation(
   String sourceId = 'com.majika.service.anilist',
 }) {
   return Recommendation(
-    item: MediaItem(
-      id: id,
-      title: title,
-      coverUrl: '',
+    item: _mediaItem(
+      id,
+      title,
       tags: tags,
       format: format,
       mediaType: mediaType,
