@@ -60,12 +60,41 @@ void main() {
       allowedFormats: RecommendationQuery.steamFormats,
     );
 
-    expect(capturedPrompt, contains('structured Steam filters'));
-    expect(capturedPrompt, contains('Allowed mediaTypes: GAME'));
+    expect(capturedPrompt, contains('Service context: Steam PC games'));
+    expect(capturedPrompt, contains('Service source values: GAME'));
+    expect(capturedPrompt, contains('Steam play capability values'));
+    expect(capturedPrompt, isNot(contains('Yandere')));
+    expect(capturedPrompt, isNot(contains('Mahou Shoujo')));
     expect(interpreted.mediaTypes, contains('GAME'));
     expect(interpreted.formats, contains('SINGLE_PLAYER'));
     expect(interpreted.aiSelectedTags, contains('RPG'));
   });
+
+  test(
+    'local AI search prompt omits stale AI tags and false adult state',
+    () async {
+      late String capturedPrompt;
+      final service = FlutterGemmaLocalAiService(
+        textGenerator: (prompt, maxTokens) async {
+          capturedPrompt = prompt;
+          return '{"tags":["Mystery"],"formats":[],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"moody mystery"}';
+        },
+      );
+
+      await service.interpretRecommendationRequest(
+        const RecommendationQuery(
+          request: 'moody mystery',
+          aiSelectedTags: {'Yandere'},
+        ),
+        availableTags: const ['Mystery', 'Romance'],
+      );
+
+      expect(capturedPrompt, isNot(contains('Previously AI selected tags')));
+      expect(capturedPrompt, isNot(contains('AI-selected tags')));
+      expect(capturedPrompt, isNot(contains('Adult content selected: false')));
+      expect(capturedPrompt, contains('infer it from the request text only'));
+    },
+  );
 
   test('flutter gemma service keeps rule-inferred Steam constraints', () async {
     final service = FlutterGemmaLocalAiService(
@@ -187,45 +216,88 @@ void main() {
     expect(chosen?.reason, 'Actual fit from the options.');
   });
 
-  test('flutter gemma service uses compact tag prompts', () async {
-    late String capturedPrompt;
-    late int capturedMaxTokens;
-    final availableTags = [
-      'Magic',
-      'School',
-      for (var index = 0; index < 80; index++) 'Generated Tag $index',
-    ];
-    final service = FlutterGemmaLocalAiService(
-      settingsLoader: () async => const LocalAiRuntimeSettings(
-        useLocalAi: true,
-        useAiForSearch: true,
-        mode: localAiModeOnDevice,
-        provider: 'FunctionGemma',
-        endpoint: defaultLocalAiEndpoint,
-        serverModel: defaultLocalAiModel,
-        contextItems: 8,
-      ),
-      textGenerator: (prompt, maxTokens) async {
-        capturedPrompt = prompt;
-        capturedMaxTokens = maxTokens;
-        return '{"tags":["Fantasy"],"formats":[],"mediaTypes":[],"includeAdult":false}';
-      },
-    );
+  test(
+    'flutter gemma service uses compact tag prompts for tiny models',
+    () async {
+      late String capturedPrompt;
+      late int capturedMaxTokens;
+      final availableTags = [
+        'Fantasy',
+        'Magic',
+        'School',
+        for (var index = 0; index < 80; index++) 'Generated Tag $index',
+      ];
+      final service = FlutterGemmaLocalAiService(
+        settingsLoader: () async => const LocalAiRuntimeSettings(
+          useLocalAi: true,
+          useAiForSearch: true,
+          mode: localAiModeOnDevice,
+          provider: 'FunctionGemma',
+          endpoint: defaultLocalAiEndpoint,
+          serverModel: defaultLocalAiModel,
+          contextItems: 8,
+        ),
+        textGenerator: (prompt, maxTokens) async {
+          capturedPrompt = prompt;
+          capturedMaxTokens = maxTokens;
+          return '{"tags":["Fantasy"],"formats":[],"mediaTypes":[],"includeAdult":false}';
+        },
+      );
 
-    await service.interpretRecommendationRequest(
-      const RecommendationQuery(request: 'like harry potter'),
-      availableTags: availableTags,
-    );
+      await service.interpretRecommendationRequest(
+        const RecommendationQuery(request: 'like harry potter'),
+        availableTags: availableTags,
+      );
 
-    expect(capturedMaxTokens, 1024);
-    expect(capturedPrompt, contains('Allowed tags:'));
-    expect(capturedPrompt, contains('Fantasy'));
-    expect(capturedPrompt, contains('Magic'));
-    expect(capturedPrompt, contains('School'));
-    expect(capturedPrompt, isNot(contains('{"tags":["Romance"]')));
-    expect(capturedPrompt, contains('Use empty arrays'));
-    expect(capturedPrompt, isNot(contains('Generated Tag 40')));
-  });
+      expect(capturedMaxTokens, 1024);
+      expect(capturedPrompt, contains('High-signal AniList tags'));
+      expect(capturedPrompt, contains('Prompt mode: compact'));
+      expect(capturedPrompt, contains('Fantasy'));
+      expect(capturedPrompt, contains('Magic'));
+      expect(capturedPrompt, contains('School'));
+      expect(capturedPrompt, isNot(contains('{"tags":["Romance"]')));
+      expect(capturedPrompt, contains('Use empty arrays'));
+      expect(capturedPrompt, isNot(contains('Generated Tag 40')));
+    },
+  );
+
+  test(
+    'manual and advanced AI search prompts include rich tag context',
+    () async {
+      late String capturedPrompt;
+      final availableTags = [
+        'Romance',
+        for (var index = 0; index < 90; index++) 'Generated Tag $index',
+      ];
+      final service = FlutterGemmaLocalAiService(
+        settingsLoader: () async => const LocalAiRuntimeSettings(
+          useLocalAi: true,
+          useAiForSearch: true,
+          mode: localAiModeManual,
+          provider: localAiModeManual,
+          endpoint: defaultLocalAiEndpoint,
+          serverModel: defaultLocalAiModel,
+          contextItems: 24,
+        ),
+        textGenerator: (prompt, maxTokens) async {
+          capturedPrompt = prompt;
+          return '{"tags":["Romance"],"formats":[],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"romance"}';
+        },
+      );
+
+      await service.interpretRecommendationRequest(
+        const RecommendationQuery(request: 'romance'),
+        availableTags: availableTags,
+      );
+
+      expect(capturedPrompt, contains('Prompt mode: rich'));
+      expect(capturedPrompt, contains('Generated Tag 89'));
+      expect(
+        capturedPrompt,
+        contains('A later AI prompt will personally pick'),
+      );
+    },
+  );
 
   test(
     'flutter gemma service uses the last query-shaped JSON object',
@@ -475,7 +547,7 @@ void main() {
       ),
     ], query: const RecommendationQuery(request: 'like harry potter'));
 
-    expect(capturedPrompt, contains('Prioritize the search request'));
+    expect(capturedPrompt, contains("Prioritize the user's request"));
     expect(capturedPrompt, contains('Request-inferred tags:'));
     expect(
       capturedPrompt,
