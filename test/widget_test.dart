@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:majika/core/ai/ai_console_log.dart';
+import 'package:majika/core/ai/local_ai_service.dart';
 import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation_query.dart';
@@ -230,6 +231,51 @@ void main() {
     expect(find.textContaining('time travel changes'), findsOneWidget);
     expect(find.text('Romance'), findsWidgets);
     expect(find.text('Time Manipulation'), findsWidgets);
+  });
+
+  testWidgets('direct AI pick can resolve a title outside fetched candidates', (
+    WidgetTester tester,
+  ) async {
+    final aiService = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        if (prompt.contains('You turn an anime or manga request')) {
+          return '{"tags":[],"formats":[],"mediaTypes":[],"searchText":"unfetched personal pick"}';
+        }
+        if (prompt.contains('Personally recommend exactly one real anime')) {
+          return '{"title":"AI Outside Pick","reason":"A personal recommendation beyond the fetched tag results."}';
+        }
+        return '{"id":"anilist_2","reason":"Initial candidate pick."}';
+      },
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          mediaService: _DirectPickMediaService(),
+          aiService: aiService,
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search a vibe, tag, format, or request'),
+      'find a deeply personal mystery recommendation',
+    );
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('AI Outside Pick'), findsOneWidget);
+    expect(find.text('AI recommendation'), findsOneWidget);
+    expect(
+      find.text('A personal recommendation beyond the fetched tag results.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('manual AI mode prompts for pasted search responses', (
@@ -1356,6 +1402,30 @@ class _FailingImportMediaService extends _FakeMediaService {
   Future<List<MediaItem>> fetchUserLibrary(String userName) async {
     await Future<void>.delayed(Duration.zero);
     throw const FormatException('sign in first');
+  }
+}
+
+class _DirectPickMediaService extends _FakeMediaService {
+  @override
+  Future<List<MediaItem>> searchRecommendationCandidates(
+    RecommendationQuery query,
+  ) async {
+    if (query.request == 'AI Outside Pick') {
+      return [
+        MediaItem(
+          id: 'anilist_direct_pick',
+          title: 'AI Outside Pick',
+          coverUrl: '',
+          tags: const ['Mystery', 'Psychological'],
+          rating: 8.9,
+          format: 'TV',
+          mediaType: 'ANIME',
+          siteUrl: 'https://anilist.co/anime/direct-pick',
+          description: 'A unique resolved title absent from the fetched pool.',
+        ),
+      ];
+    }
+    return super.searchRecommendationCandidates(query);
   }
 }
 

@@ -343,6 +343,98 @@ void main() {
     expect(chosen?.reason, 'Best fit from the AI pass.');
   });
 
+  test('AI can directly suggest a Steam game outside fetched options', () async {
+    late String capturedPrompt;
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        capturedPrompt = prompt;
+        return '{"title":"Outer Wilds","reason":"Its discovery-driven exploration fits the request and profile."}';
+      },
+    );
+
+    final suggestion = await service.suggestRecommendation(
+      _profile(
+        serviceName: 'Steam',
+        library: [
+          _mediaItem(
+            'steam_owned',
+            'Portal 2',
+            mediaType: 'GAME',
+            format: 'CO_OP',
+            sourceId: 'com.majika.service.steam',
+          ),
+        ],
+      ),
+      [
+        _recommendation(
+          'steam_known',
+          'Known Search Result',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+        ),
+      ],
+      query: const RecommendationQuery(
+        request: 'a game about uncovering a mystery through exploration',
+        mediaTypes: {'GAME'},
+      ),
+    );
+
+    expect(suggestion?.title, 'Outer Wilds');
+    expect(suggestion?.serviceName, 'Steam');
+    expect(
+      capturedPrompt,
+      contains('Personally recommend exactly one real Steam PC game'),
+    );
+    expect(
+      capturedPrompt,
+      contains('not tag selection and not option reranking'),
+    );
+    expect(capturedPrompt, contains('outside the known search-result hints'));
+    expect(capturedPrompt, contains('Portal 2'));
+    expect(capturedPrompt, contains('Known Search Result'));
+    expect(
+      capturedPrompt,
+      isNot(contains('Only the listed Steam game options are eligible')),
+    );
+  });
+
+  test('AI has a distinct direct Home recommendation prompt', () async {
+    late String capturedPrompt;
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        capturedPrompt = prompt;
+        return '{"service":"AniList","title":"Odd Taxi","reason":"The strongest cross-service mystery fit."}';
+      },
+    );
+
+    final suggestion = await service.suggestHomeRecommendation(
+      [
+        _profile(serviceName: 'AniList'),
+        _profile(serviceName: 'Steam', favoriteGenres: const ['Puzzle']),
+      ],
+      [
+        _recommendation('anilist_known', 'Known Anime'),
+        _recommendation(
+          'steam_known',
+          'Known Game',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+        ),
+      ],
+      query: const RecommendationQuery(request: 'surprise me with a mystery'),
+    );
+
+    expect(suggestion?.serviceName, 'AniList');
+    expect(suggestion?.title, 'Odd Taxi');
+    expect(capturedPrompt, contains('direct Home recommendation'));
+    expect(capturedPrompt, contains('across the user\'s imported services'));
+    expect(
+      capturedPrompt,
+      contains('Choose only from these services: AniList, Steam'),
+    );
+    expect(capturedPrompt, contains('Known cross-service search-result hints'));
+  });
+
   test('flutter gemma service ignores echoed JSON examples', () async {
     final service = FlutterGemmaLocalAiService(
       textGenerator: (prompt, maxTokens) async {

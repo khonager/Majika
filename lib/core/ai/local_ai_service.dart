@@ -104,6 +104,18 @@ class ManualAiRequest {
   });
 }
 
+class AiRecommendationSuggestion {
+  final String title;
+  final String serviceName;
+  final String reason;
+
+  const AiRecommendationSuggestion({
+    required this.title,
+    required this.serviceName,
+    required this.reason,
+  });
+}
+
 abstract class LocalAiService {
   bool get isConfigured;
 
@@ -121,6 +133,18 @@ abstract class LocalAiService {
     TasteProfile profile,
     Recommendation recommendation,
   );
+
+  Future<AiRecommendationSuggestion?> suggestRecommendation(
+    TasteProfile profile,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+  });
+
+  Future<AiRecommendationSuggestion?> suggestHomeRecommendation(
+    List<TasteProfile> profiles,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+  });
 
   Future<Recommendation?> chooseTopRecommendation(
     TasteProfile profile,
@@ -163,6 +187,24 @@ class DeterministicLocalAiService implements LocalAiService {
     Recommendation recommendation,
   ) async {
     return recommendation.reason;
+  }
+
+  @override
+  Future<AiRecommendationSuggestion?> suggestRecommendation(
+    TasteProfile profile,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+  }) async {
+    return null;
+  }
+
+  @override
+  Future<AiRecommendationSuggestion?> suggestHomeRecommendation(
+    List<TasteProfile> profiles,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+  }) async {
+    return null;
   }
 
   @override
@@ -1515,6 +1557,248 @@ AniList options: ${jsonEncode(options)}
       'format': item.format,
       'mediaType': item.mediaType,
     };
+  }
+
+  List<Map<String, Object?>> _directPickHints(
+    Iterable<Recommendation> recommendations,
+    int limit,
+  ) {
+    return [
+      for (final recommendation in recommendations.take(limit))
+        {
+          'title': recommendation.item.title,
+          'service': recommendation.item.serviceLabel,
+          'mediaType': recommendation.item.mediaType,
+          'format': recommendation.item.format,
+        },
+    ];
+  }
+
+  String _adultRecommendationGuidance(
+    RecommendationQuery query, {
+    required bool supportsAdultContent,
+  }) {
+    if (!supportsAdultContent) return '';
+    if (query.includeAdult || query.infersAdult) {
+      return 'Adult titles are allowed for this request. Consider them normally when they are the best fit.';
+    }
+    return 'Do not choose an adult-only title unless the request explicitly asks for one.';
+  }
+
+  String _serviceDirectRecommendationPrompt({
+    required TasteProfile profile,
+    required _AiPromptTier tier,
+    required _PromptLimits limits,
+    required RecommendationQuery query,
+    required List<Map<String, Object?>> knownHints,
+  }) {
+    final ownedTitles = profile.library
+        .take(limits.profileItemLimit)
+        .map((item) => item.title)
+        .toList();
+    if (_isSteamService(profile.serviceName)) {
+      return '''
+Prompt mode: ${tier.name}.
+${_promptScopeInstruction(tier)}
+${_servicePromptContext('Steam')}
+Personally recommend exactly one real Steam PC game from your own knowledge for this user.
+This is a direct recommendation, not tag selection and not option reranking. You may choose a game outside the known search-result hints. Use the request, the user's game taste, and your knowledge of games as the decision.
+The title must be an exact game title that Majika can search for on Steam. Do not invent a game and do not recommend a game the user already owns.
+Respect required play capabilities when they are present.
+Return JSON only. Use exactly these keys: title, reason.
+${_profilePromptEvidence(profile, tier, limits)}
+Game request: ${query.request}
+Required Steam play capabilities: ${query.effectiveFormats().join(', ')}
+Known owned-game titles to avoid: ${jsonEncode(ownedTitles)}
+Known Steam search-result hints, optional and non-exhaustive: ${jsonEncode(knownHints)}
+''';
+    }
+    if (_isAniListService(profile.serviceName)) {
+      return '''
+Prompt mode: ${tier.name}.
+${_promptScopeInstruction(tier)}
+${_servicePromptContext('AniList')}
+Personally recommend exactly one real anime or manga title from your own knowledge for this user.
+This is a direct recommendation, not tag selection and not option reranking. You may choose a title outside the known search-result hints. Use the request, the user's anime/manga taste, and your knowledge of titles as the decision.
+The title must be an exact canonical title that Majika can search for on AniList. Do not invent a title and do not recommend a title already in the user's library.
+Respect requested media types and release formats when they are present.
+${_adultRecommendationGuidance(query, supportsAdultContent: true)}
+Return JSON only. Use exactly these keys: title, reason.
+${_profilePromptEvidence(profile, tier, limits)}
+Anime or manga request: ${query.request}
+Requested AniList media types: ${query.effectiveMediaTypes().join(', ')}
+Requested AniList release formats: ${query.effectiveFormats().join(', ')}
+Known library titles to avoid: ${jsonEncode(ownedTitles)}
+Known AniList search-result hints, optional and non-exhaustive: ${jsonEncode(knownHints)}
+''';
+    }
+    return '''
+Prompt mode: ${tier.name}.
+${_promptScopeInstruction(tier)}
+${_servicePromptContext(profile.serviceName)}
+Personally recommend exactly one real title from your own knowledge for this user.
+This is a direct recommendation, not tag selection and not option reranking. You may choose a title outside the known search-result hints.
+The title must be exact and searchable through ${profile.serviceName}. Do not invent a title and do not recommend a title already in the user's library.
+${_adultRecommendationGuidance(query, supportsAdultContent: true)}
+Return JSON only. Use exactly these keys: title, reason.
+${_profilePromptEvidence(profile, tier, limits)}
+User request: ${query.request}
+Requested source types: ${query.effectiveMediaTypes().join(', ')}
+Requested formats: ${query.effectiveFormats().join(', ')}
+Known library titles to avoid: ${jsonEncode(ownedTitles)}
+Known search-result hints, optional and non-exhaustive: ${jsonEncode(knownHints)}
+''';
+  }
+
+  String _homeDirectRecommendationPrompt({
+    required List<TasteProfile> profiles,
+    required _AiPromptTier tier,
+    required _PromptLimits limits,
+    required RecommendationQuery query,
+    required List<Map<String, Object?>> knownHints,
+  }) {
+    final availableServices = profiles
+        .map((profile) => profile.serviceName)
+        .toSet()
+        .toList();
+    final ownedTitles = {
+      for (final profile in profiles)
+        profile.serviceName: profile.library
+            .take(limits.profileItemLimit)
+            .map((item) => item.title)
+            .toList(),
+    };
+    final profileEvidence = profiles
+        .map((profile) => _profilePromptEvidence(profile, tier, limits))
+        .join('\n');
+    return '''
+Prompt mode: ${tier.name}.
+${_promptScopeInstruction(tier)}
+Personally recommend exactly one real title from your own knowledge across the user's imported services.
+This is the direct Home recommendation, not tag selection and not option reranking. You may choose a title outside the known search-result hints. Use the request, the relevant personal profile, and your knowledge of games, anime, and manga as the decision.
+Choose only from these services: ${availableServices.join(', ')}.
+If the request asks for a game, choose Steam. If it asks for anime or manga, choose AniList. For a broad request, choose the strongest personal fit across the available services.
+Return an exact title searchable through the chosen service. Do not invent a title and do not recommend anything already in the corresponding library.
+Respect hard media-type and format/play-capability requirements when they apply to the chosen service.
+${_adultRecommendationGuidance(query, supportsAdultContent: availableServices.any(_isAniListService))}
+Return JSON only. Use exactly these keys: service, title, reason. The service must exactly match one available service.
+$profileEvidence
+Home request: ${query.request}
+Requested media types: ${query.effectiveMediaTypes().join(', ')}
+Requested formats or play capabilities: ${query.effectiveFormats().join(', ')}
+Known library titles to avoid by service: ${jsonEncode(ownedTitles)}
+Known cross-service search-result hints, optional and non-exhaustive: ${jsonEncode(knownHints)}
+''';
+  }
+
+  AiRecommendationSuggestion? _suggestionFromResponse(
+    String response, {
+    required String fallbackServiceName,
+    Iterable<String> allowedServices = const [],
+  }) {
+    final serviceLookup = {
+      for (final service in allowedServices) _canonicalKey(service): service,
+    };
+    AiRecommendationSuggestion? suggestion;
+    for (final candidate in _jsonObjects(response)) {
+      final title = candidate['title']?.toString().trim() ?? '';
+      if (title.isEmpty) continue;
+      final rawService = candidate['service']?.toString().trim() ?? '';
+      final serviceName = rawService.isEmpty
+          ? fallbackServiceName
+          : serviceLookup[_canonicalKey(rawService)] ?? '';
+      if (serviceName.isEmpty) continue;
+      final reason = candidate['reason']?.toString().trim() ?? '';
+      suggestion = AiRecommendationSuggestion(
+        title: title,
+        serviceName: serviceName,
+        reason: reason.isEmpty
+            ? 'Chosen as the strongest direct AI recommendation.'
+            : reason,
+      );
+    }
+    return suggestion;
+  }
+
+  @override
+  Future<AiRecommendationSuggestion?> suggestRecommendation(
+    TasteProfile profile,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+  }) async {
+    if (!query.isActive) return null;
+    final settings = await _runtimeSettings();
+    if (!settings.useLocalAi && textGenerator == null) return null;
+
+    final budget = _promptBudget(settings, responseTokens: 768);
+    try {
+      final packed = _packPrompt(
+        budget: budget,
+        initialLimits: _promptLimits(budget.tier),
+        build: (limits) => _serviceDirectRecommendationPrompt(
+          profile: profile,
+          tier: budget.tier,
+          limits: limits,
+          query: query,
+          knownHints: _directPickHints(
+            knownRecommendations,
+            limits.optionLimit,
+          ),
+        ),
+      );
+      final response = await _generateText(
+        packed.prompt,
+        maxTokens: budget.responseTokens,
+        settings: settings,
+      );
+      return _suggestionFromResponse(
+        response,
+        fallbackServiceName: profile.serviceName,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<AiRecommendationSuggestion?> suggestHomeRecommendation(
+    List<TasteProfile> profiles,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+  }) async {
+    if (!query.isActive || profiles.isEmpty) return null;
+    final settings = await _runtimeSettings();
+    if (!settings.useLocalAi && textGenerator == null) return null;
+
+    final budget = _promptBudget(settings, responseTokens: 768);
+    try {
+      final packed = _packPrompt(
+        budget: budget,
+        initialLimits: _promptLimits(budget.tier),
+        build: (limits) => _homeDirectRecommendationPrompt(
+          profiles: profiles,
+          tier: budget.tier,
+          limits: limits,
+          query: query,
+          knownHints: _directPickHints(
+            knownRecommendations,
+            limits.optionLimit,
+          ),
+        ),
+      );
+      final response = await _generateText(
+        packed.prompt,
+        maxTokens: budget.responseTokens,
+        settings: settings,
+      );
+      return _suggestionFromResponse(
+        response,
+        fallbackServiceName: '',
+        allowedServices: profiles.map((profile) => profile.serviceName),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   @override

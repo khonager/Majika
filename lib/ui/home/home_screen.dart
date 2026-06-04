@@ -219,16 +219,22 @@ class _HomeScreenState extends State<HomeScreen> {
         avatarUrl: serviceProfile?.avatarUrl ?? '',
         profileUrl: serviceProfile?.profileUrl ?? '',
       );
-      final recommendations = await _withChosenTopRecommendation(
+      final selection = await _withChosenTopRecommendation(
+        service,
         profile,
         _tasteEngine.rankCandidates(profile, candidates, query: initialQuery),
         initialQuery,
       );
+      final recommendations = selection.recommendations;
+      final storedCandidates = _dedupeCandidates([
+        ...candidates,
+        if (selection.discoveredItem != null) selection.discoveredItem!,
+      ]);
 
       if (!mounted) return;
       setState(() {
         workspace.profile = profile;
-        workspace.candidates = candidates;
+        workspace.candidates = storedCandidates;
         workspace.serviceTags = serviceTags;
         workspace.recommendations = recommendations;
         workspace.query = initialQuery;
@@ -351,11 +357,19 @@ class _HomeScreenState extends State<HomeScreen> {
             query: query,
           );
           progressToast.update('Choosing the lead recommendation...');
-          final orderedRecommendations = await _withChosenTopRecommendation(
+          final selection = await _withChosenTopRecommendation(
+            workspace.service,
             profile,
             recommendations,
             query,
           );
+          final orderedRecommendations = selection.recommendations;
+          if (selection.discoveredItem != null) {
+            candidates = _dedupeCandidates([
+              ...candidates,
+              selection.discoveredItem!,
+            ]);
+          }
 
           if (!mounted ||
               workspace.activeRecommendationSearchRunId != searchRunId) {
@@ -512,8 +526,59 @@ class _HomeScreenState extends State<HomeScreen> {
 
           merged.sort((a, b) => b.matchScore.compareTo(a.matchScore));
           progressToast.update('Choosing the best Home recommendation...');
-          final chosen = await _aiService.chooseHomeRecommendation(
-            importedWorkspaces.map((workspace) => workspace.profile!).toList(),
+          final profiles = importedWorkspaces
+              .map((workspace) => workspace.profile!)
+              .toList();
+          final suggestion = await _aiService.suggestHomeRecommendation(
+            profiles,
+            merged,
+            query: chooserQuery,
+          );
+          Recommendation? chosen;
+          if (suggestion != null) {
+            final targetWorkspace = _workspaceForSuggestedService(
+              importedWorkspaces,
+              suggestion.serviceName,
+            );
+            final targetProfile = targetWorkspace?.profile;
+            if (targetWorkspace != null && targetProfile != null) {
+              final resolved = await _resolveDirectSuggestion(
+                service: targetWorkspace.service,
+                profile: targetProfile,
+                knownRecommendations:
+                    byService[targetWorkspace.service.id] ?? const [],
+                query: chooserQuery,
+                suggestion: suggestion,
+              );
+              chosen = resolved.recommendation;
+              if (chosen != null) {
+                final directChosen = chosen;
+                final serviceRecommendations = <Recommendation>[
+                  directChosen,
+                  for (final recommendation
+                      in byService[targetWorkspace.service.id] ??
+                          const <Recommendation>[])
+                    if (recommendation.item.id != directChosen.item.id)
+                      recommendation,
+                ];
+                byService[targetWorkspace.service.id] = serviceRecommendations;
+                merged.removeWhere(
+                  (recommendation) =>
+                      recommendation.item.id == directChosen.item.id,
+                );
+                merged.add(directChosen);
+                if (resolved.discoveredItem != null) {
+                  targetWorkspace.candidates = _dedupeCandidates([
+                    ...targetWorkspace.candidates,
+                    resolved.discoveredItem!,
+                  ]);
+                  unawaited(_persistWorkspace(targetWorkspace));
+                }
+              }
+            }
+          }
+          chosen ??= await _aiService.chooseHomeRecommendation(
+            profiles,
             merged,
             query: chooserQuery,
           );
@@ -676,26 +741,171 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<List<Recommendation>> _withChosenTopRecommendation(
+  Future<({List<Recommendation> recommendations, MediaItem? discoveredItem})>
+  _withChosenTopRecommendation(
+    MediaService service,
     TasteProfile profile,
     List<Recommendation> recommendations,
     RecommendationQuery query,
   ) async {
-    if (recommendations.isEmpty) return recommendations;
+    final suggestion = await _aiService.suggestRecommendation(
+      profile,
+      recommendations,
+      query: query,
+    );
+    if (suggestion != null) {
+      final resolved = await _resolveDirectSuggestion(
+        service: service,
+        profile: profile,
+        knownRecommendations: recommendations,
+        query: query,
+        suggestion: suggestion,
+      );
+      final direct = resolved.recommendation;
+      if (direct != null) {
+        return (
+          recommendations: [
+            direct.copyWith(isTopPick: true),
+            for (final recommendation in recommendations)
+              if (recommendation.item.id != direct.item.id)
+                recommendation.copyWith(isTopPick: false),
+          ],
+          discoveredItem: resolved.discoveredItem,
+        );
+      }
+    }
+
+    if (recommendations.isEmpty) {
+      return (recommendations: recommendations, discoveredItem: null);
+    }
 
     final chosen = await _aiService.chooseTopRecommendation(
       profile,
       recommendations,
       query: query,
     );
-    if (chosen == null) return recommendations;
+    if (chosen == null) {
+      return (recommendations: recommendations, discoveredItem: null);
+    }
 
-    return [
-      chosen.copyWith(isTopPick: true),
-      for (final recommendation in recommendations)
-        if (recommendation.item.id != chosen.item.id)
-          recommendation.copyWith(isTopPick: false),
-    ];
+    return (
+      recommendations: [
+        chosen.copyWith(isTopPick: true),
+        for (final recommendation in recommendations)
+          if (recommendation.item.id != chosen.item.id)
+            recommendation.copyWith(isTopPick: false),
+      ],
+      discoveredItem: null,
+    );
+  }
+
+  _ServiceWorkspace? _workspaceForSuggestedService(
+    Iterable<_ServiceWorkspace> workspaces,
+    String serviceName,
+  ) {
+    final target = _normalizedTitle(serviceName);
+    for (final workspace in workspaces) {
+      if (_normalizedTitle(workspace.service.displayName) == target ||
+          _normalizedTitle(workspace.service.id) == target) {
+        return workspace;
+      }
+    }
+    return null;
+  }
+
+  Future<({Recommendation? recommendation, MediaItem? discoveredItem})>
+  _resolveDirectSuggestion({
+    required MediaService service,
+    required TasteProfile profile,
+    required List<Recommendation> knownRecommendations,
+    required RecommendationQuery query,
+    required AiRecommendationSuggestion suggestion,
+  }) async {
+    final titleKey = _normalizedTitle(suggestion.title);
+    if (titleKey.isEmpty) {
+      return (recommendation: null, discoveredItem: null);
+    }
+
+    for (final recommendation in knownRecommendations) {
+      if (_normalizedTitle(recommendation.item.title) == titleKey) {
+        return (
+          recommendation: recommendation.copyWith(
+            reason: suggestion.reason,
+            isAiPick: true,
+          ),
+          discoveredItem: null,
+        );
+      }
+    }
+
+    try {
+      final searchResults = await service.searchRecommendationCandidates(
+        RecommendationQuery(
+          request: suggestion.title,
+          includeAdult: query.includeAdult || query.infersAdult,
+        ),
+      );
+      MediaItem? item;
+      for (final result in searchResults) {
+        if (_normalizedTitle(result.title) == titleKey) {
+          item = result;
+          break;
+        }
+      }
+      if (item == null) {
+        return (recommendation: null, discoveredItem: null);
+      }
+      final resolvedItem = item;
+      if (profile.library.any(
+        (owned) =>
+            owned.id == resolvedItem.id ||
+            _normalizedTitle(owned.title) ==
+                _normalizedTitle(resolvedItem.title),
+      )) {
+        return (recommendation: null, discoveredItem: null);
+      }
+
+      final requiredMediaTypes = query.effectiveMediaTypes();
+      if (requiredMediaTypes.isNotEmpty &&
+          !requiredMediaTypes.contains(resolvedItem.mediaType)) {
+        return (recommendation: null, discoveredItem: null);
+      }
+      if (resolvedItem.isAdult && !(query.includeAdult || query.infersAdult)) {
+        return (recommendation: null, discoveredItem: null);
+      }
+      final applicableFormats = query
+          .effectiveFormats()
+          .where(service.supportedFormats.contains)
+          .toSet();
+      final applicableMediaTypes = requiredMediaTypes
+          .where(service.supportedMediaTypes.contains)
+          .toSet();
+      final validated = _tasteEngine.rankCandidates(
+        profile,
+        [resolvedItem],
+        query: RecommendationQuery(
+          includeAdult: query.includeAdult || query.infersAdult,
+          mediaTypes: applicableMediaTypes,
+          formats: applicableFormats,
+        ),
+      );
+      if (validated.isEmpty) {
+        return (recommendation: null, discoveredItem: null);
+      }
+      return (
+        recommendation: validated.first.copyWith(
+          reason: suggestion.reason,
+          isAiPick: true,
+        ),
+        discoveredItem: resolvedItem,
+      );
+    } catch (_) {
+      return (recommendation: null, discoveredItem: null);
+    }
+  }
+
+  String _normalizedTitle(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
   }
 
   Future<void> _loadSavedSessions() async {
