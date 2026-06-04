@@ -71,6 +71,33 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('explicit-content preference expands imported candidates', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      LocalAiSettingsKeys.allowExplicitContent: true,
+    });
+    final service = _TrackingAdultMediaService();
+
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: service)),
+    );
+    await tester.enterText(find.byType(TextField), 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(service.includeAdultRequests, contains(true));
+    final adultChip = tester.widget<FilterChip>(
+      find.descendant(
+        of: find.byKey(const ValueKey('filter-adult')),
+        matching: find.byType(FilterChip),
+      ),
+    );
+    expect(adultChip.selected, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('mobile home uses anchored liquid rail and mini player', (
     WidgetTester tester,
   ) async {
@@ -240,10 +267,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 250));
 
     expect(find.text('Manual AI response'), findsOneWidget);
-    expect(
-      find.textContaining('Pick the single best recommendation'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('Pick the single best AniList'), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('manual-ai-response')),
       '{"id":"anilist_5","reason":"Manual pick."}',
@@ -637,7 +661,8 @@ void main() {
     expect(find.text('AI mode'), findsOneWidget);
     expect(find.text('Provider'), findsNothing);
     expect(find.text('FastVLM 0.5B'), findsNothing);
-    expect(find.textContaining('token'), findsNothing);
+    expect(find.text('Hugging Face token'), findsNothing);
+    expect(find.text('Resolved AI context window'), findsOneWidget);
     expect(find.text('Local server endpoint'), findsNothing);
     expect(find.text('Local server model'), findsNothing);
 
@@ -667,13 +692,14 @@ void main() {
     expect(find.text('On-device backend'), findsOneWidget);
 
     await tester.scrollUntilVisible(
-      find.text('Recommendation context items'),
+      find.text('AI context window override'),
       500,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Recommendation context items'), findsOneWidget);
+    expect(find.text('AI context window override'), findsOneWidget);
+    expect(find.text('Resolved AI context window'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('Gemma 3n E2B IT'),
       500,
@@ -1108,41 +1134,49 @@ void main() {
     }
   });
 
-  testWidgets('settings persists recommendation context items', (
+  testWidgets('settings persists AI context window override', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
-      find.text('Recommendation context items'),
+      find.text('AI context window override'),
       500,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('24'), findsOneWidget);
-
-    await tester.drag(find.byType(Slider).last, const Offset(300, 0));
+    await tester.enterText(
+      find.byKey(const ValueKey('ai-context-window-tokens')),
+      '32768',
+    );
     await tester.pumpAndSettle();
 
     final prefs = await SharedPreferences.getInstance();
-    final savedContextItems = prefs.getDouble('settings.aiContextItems');
-    expect(savedContextItems, isNotNull);
-    expect(savedContextItems, isNot(equals(24)));
+    expect(prefs.getInt(LocalAiSettingsKeys.aiContextWindowTokens), 32768);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
-      find.text('Recommendation context items'),
+      find.text('AI context window override'),
       500,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
 
-    expect(find.text(savedContextItems!.round().toString()), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(
+            find.byKey(const ValueKey('ai-context-window-tokens')),
+          )
+          .controller
+          ?.text,
+      '32768',
+    );
+    expect(find.textContaining('32K tokens'), findsOneWidget);
   });
 
   testWidgets('settings points Steam API key storage to Firebase Functions', (
@@ -1322,6 +1356,18 @@ class _FailingImportMediaService extends _FakeMediaService {
   Future<List<MediaItem>> fetchUserLibrary(String userName) async {
     await Future<void>.delayed(Duration.zero);
     throw const FormatException('sign in first');
+  }
+}
+
+class _TrackingAdultMediaService extends _FakeMediaService {
+  final List<bool> includeAdultRequests = [];
+
+  @override
+  Future<List<MediaItem>> fetchRecommendationCandidates({
+    bool includeAdult = false,
+  }) {
+    includeAdultRequests.add(includeAdult);
+    return super.fetchRecommendationCandidates(includeAdult: includeAdult);
   }
 }
 

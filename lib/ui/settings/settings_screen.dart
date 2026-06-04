@@ -264,7 +264,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _downloadedModelId;
   String? _downloadedModelName;
   double _imageQuality = 0.85;
-  double _aiContextItems = 24;
   double? _downloadProgress;
   CancelToken? _downloadCancelToken;
   final _localEndpointController = TextEditingController(
@@ -280,6 +279,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     text: defaultCloudAiModel,
   );
   final _cloudApiKeyController = TextEditingController();
+  final _contextWindowController = TextEditingController();
   final _huggingFaceTokenController = TextEditingController();
   Timer? _huggingFaceTokenSyncTimer;
 
@@ -345,6 +345,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String get _ollamaServeCommand => 'ollama run $_effectiveServerModelName';
 
   String get _flmServeCommand => 'flm serve $_flmDefaultModel';
+
+  int get _resolvedContextWindowTokens {
+    final override = int.tryParse(_contextWindowController.text.trim());
+    if (override != null) {
+      return override.clamp(
+        minimumAiContextWindowTokens,
+        maximumAiContextWindowTokens,
+      );
+    }
+    final modelName = switch (_localAiMode) {
+      localAiModeExternalCloud => _cloudModelController.text.trim(),
+      localAiModeExternalServer => _effectiveServerModelName,
+      localAiModeOnDevice =>
+        _downloadedModelName ?? _effectiveSelectedModel.name,
+      _ => '',
+    };
+    return resolveAiContextWindowTokens(
+      mode: _localAiMode,
+      modelName: modelName,
+      cloudProvider: _localAiProvider,
+    );
+  }
 
   @override
   void initState() {
@@ -421,9 +443,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
       _imageQuality =
           prefs.getDouble(LocalAiSettingsKeys.imageQuality) ?? _imageQuality;
-      _aiContextItems =
-          prefs.getDouble(LocalAiSettingsKeys.aiContextItems) ??
-          _aiContextItems;
+      _contextWindowController.text =
+          prefs.getInt(LocalAiSettingsKeys.aiContextWindowTokens)?.toString() ??
+          '';
       _localEndpointController.text =
           prefs.getString(LocalAiSettingsKeys.localEndpoint) ??
           _localEndpointController.text;
@@ -468,6 +490,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveString(String key, String value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(key, value);
+  }
+
+  Future<void> _saveContextWindowOverride(String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    final parsed = int.tryParse(value.trim());
+    if (parsed == null) {
+      await prefs.remove(LocalAiSettingsKeys.aiContextWindowTokens);
+      return;
+    }
+    await prefs.setInt(
+      LocalAiSettingsKeys.aiContextWindowTokens,
+      parsed.clamp(minimumAiContextWindowTokens, maximumAiContextWindowTokens),
+    );
   }
 
   Future<void> _copyServerCommand(String label, String command) async {
@@ -759,6 +794,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _cloudEndpointController.dispose();
     _cloudModelController.dispose();
     _cloudApiKeyController.dispose();
+    _contextWindowController.dispose();
     _huggingFaceTokenController.dispose();
     super.dispose();
   }
@@ -953,7 +989,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   icon: Icons.visibility_off_rounded,
                   title: 'Hide explicit content',
                   subtitle:
-                      'Saved preference; feed filtering is not wired yet.',
+                      'Exclude adult titles from imported recommendation feeds and AI searches.',
                   value: !_allowExplicitContent,
                   onChanged: (value) {
                     setState(() => _allowExplicitContent = !value);
@@ -1268,25 +1304,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     );
                   },
                 ),
-                _SliderRow(
+                _TextFieldRow(
+                  fieldKey: const ValueKey('ai-context-window-tokens'),
                   icon: Icons.dataset_rounded,
-                  title: 'Recommendation context items',
+                  title: 'AI context window override',
                   subtitle:
-                      'How many profile and candidate signals to pass to the local model.',
-                  value: _aiContextItems,
-                  min: 8,
-                  max: 48,
-                  divisions: 5,
-                  label: _aiContextItems.round().toString(),
-                  valueText: _aiContextItems.round().toString(),
-                  onChanged: (value) => setState(() => _aiContextItems = value),
-                  onChangeEnd: (value) {
-                    _saveDouble(LocalAiSettingsKeys.aiContextItems, value);
-                    showInfoToast(
-                      context,
-                      'Local AI context limit set to ${value.round()} items.',
-                    );
+                      'Optional token limit for custom models. Leave blank to use Majika’s conservative model-specific limit.',
+                  controller: _contextWindowController,
+                  hintText: _resolvedContextWindowTokens.toString(),
+                  keyboardType: TextInputType.number,
+                  onChanged: (value) {
+                    setState(() {});
+                    _saveContextWindowOverride(value);
                   },
+                ),
+                _InfoRow(
+                  icon: Icons.data_usage_rounded,
+                  title: 'Resolved AI context window',
+                  subtitle:
+                      '${formatAiTokenCount(_resolvedContextWindowTokens)} tokens. Majika reserves response and safety space, then packs the highest-value evidence that fits.',
                 ),
                 _InfoRow(
                   icon: Icons.offline_bolt_rounded,
@@ -2327,6 +2363,7 @@ class _TextFieldRow extends StatelessWidget {
   final TextEditingController controller;
   final String hintText;
   final bool obscureText;
+  final TextInputType? keyboardType;
   final ValueChanged<String>? onChanged;
 
   const _TextFieldRow({
@@ -2337,6 +2374,7 @@ class _TextFieldRow extends StatelessWidget {
     required this.controller,
     required this.hintText,
     this.obscureText = false,
+    this.keyboardType,
     this.onChanged,
   });
 
@@ -2363,6 +2401,7 @@ class _TextFieldRow extends StatelessWidget {
             key: fieldKey,
             controller: controller,
             obscureText: obscureText,
+            keyboardType: keyboardType,
             onChanged: onChanged,
             style: const TextStyle(color: Colors.white),
             decoration: _fieldDecoration(context).copyWith(hintText: hintText),
@@ -2378,11 +2417,6 @@ class _SliderRow extends StatelessWidget {
   final String title;
   final String subtitle;
   final double value;
-  final double min;
-  final double max;
-  final int? divisions;
-  final String? label;
-  final String? valueText;
   final ValueChanged<double> onChanged;
   final ValueChanged<double> onChangeEnd;
 
@@ -2391,11 +2425,6 @@ class _SliderRow extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.value,
-    this.min = 0,
-    this.max = 1,
-    this.divisions,
-    this.label,
-    this.valueText,
     required this.onChanged,
     required this.onChangeEnd,
   });
@@ -2417,20 +2446,12 @@ class _SliderRow extends StatelessWidget {
                 style: const TextStyle(color: Colors.white70),
               ),
               trailing: Text(
-                valueText ?? '${(100 * value).round()}%',
+                '${(100 * value).round()}%',
                 style: const TextStyle(color: Colors.white),
               ),
             ),
           ),
-          Slider(
-            value: value,
-            min: min,
-            max: max,
-            divisions: divisions,
-            label: label,
-            onChanged: onChanged,
-            onChangeEnd: onChangeEnd,
-          ),
+          Slider(value: value, onChanged: onChanged, onChangeEnd: onChangeEnd),
         ],
       ),
     );

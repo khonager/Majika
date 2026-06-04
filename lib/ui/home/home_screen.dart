@@ -5,6 +5,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:majika/core/ai/ai_console_log.dart';
+import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/ai/local_ai_service.dart';
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation.dart';
@@ -20,6 +21,7 @@ import 'package:majika/core/storage/local_profile_store.dart';
 import 'package:majika/ui/settings/settings_screen.dart';
 import 'package:majika/ui/profile/profile_screen.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 enum _ActiveSurface { home, service }
@@ -189,11 +191,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final service = workspace.service;
+      final initialQuery = RecommendationQuery(
+        includeAdult:
+            service.supportsAdultContent && await _allowsExplicitContent(),
+      );
       final importResults = await Future.wait<Object?>([
         service.fetchUserProfile(userName),
         service.fetchUserLibrary(userName),
         service.fetchTasteSignals(userName),
-        service.fetchRecommendationCandidates(),
+        service.fetchRecommendationCandidates(
+          includeAdult: initialQuery.includeAdult,
+        ),
         service.fetchAvailableTags(),
       ]);
       final serviceProfile = importResults[0] as ServiceUserProfile?;
@@ -213,8 +221,8 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       final recommendations = await _withChosenTopRecommendation(
         profile,
-        _tasteEngine.rankCandidates(profile, candidates),
-        const RecommendationQuery(),
+        _tasteEngine.rankCandidates(profile, candidates, query: initialQuery),
+        initialQuery,
       );
 
       if (!mounted) return;
@@ -223,8 +231,8 @@ class _HomeScreenState extends State<HomeScreen> {
         workspace.candidates = candidates;
         workspace.serviceTags = serviceTags;
         workspace.recommendations = recommendations;
-        workspace.query = const RecommendationQuery();
-        workspace.adultCandidatesLoaded = false;
+        workspace.query = initialQuery;
+        workspace.adultCandidatesLoaded = initialQuery.includeAdult;
         workspace.isLoading = false;
         workspace.userNameDraft = userName;
       });
@@ -277,10 +285,17 @@ class _HomeScreenState extends State<HomeScreen> {
     final workspace = _activeWorkspace;
     final profile = workspace.profile;
     if (profile == null) return;
+    final requestQuery = rawQuery.copyWith(
+      includeAdult:
+          rawQuery.includeAdult ||
+          (workspace.service.supportsAdultContent &&
+              await _allowsExplicitContent()),
+    );
+    if (!mounted) return;
     final searchRunId = ++_nextSearchRunId;
 
     setState(() {
-      workspace.query = rawQuery;
+      workspace.query = requestQuery;
       workspace.isRefreshingRecommendations = true;
       workspace.activeRecommendationSearchRunId = searchRunId;
     });
@@ -299,7 +314,7 @@ class _HomeScreenState extends State<HomeScreen> {
             'Interpreting request with local AI or rules...',
           );
           final query = await _aiService.interpretRecommendationRequest(
-            rawQuery,
+            requestQuery,
             availableTags: _availableTags,
             serviceName: workspace.service.displayName,
             allowedMediaTypes: workspace.service.supportedMediaTypes,
@@ -385,15 +400,20 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _updateHomeRecommendationQuery(
     RecommendationQuery rawQuery,
   ) async {
+    final allowExplicitContent = await _allowsExplicitContent();
+    final homeRequestQuery = rawQuery.copyWith(
+      includeAdult: rawQuery.includeAdult || allowExplicitContent,
+    );
+    if (!mounted) return;
     final importedWorkspaces = _importedWorkspaces;
     if (importedWorkspaces.isEmpty) {
-      setState(() => _homeQuery = rawQuery);
+      setState(() => _homeQuery = homeRequestQuery);
       return;
     }
     final searchRunId = ++_nextSearchRunId;
 
     setState(() {
-      _homeQuery = rawQuery;
+      _homeQuery = homeRequestQuery;
       _isRefreshingHome = true;
       _homeError = null;
       _activeHomeSearchRunId = searchRunId;
@@ -411,16 +431,22 @@ class _HomeScreenState extends State<HomeScreen> {
         () async {
           final byService = <String, List<Recommendation>>{};
           final merged = <Recommendation>[];
-          var chooserQuery = rawQuery;
+          var chooserQuery = homeRequestQuery;
 
           for (final workspace in importedWorkspaces) {
             final profile = workspace.profile;
             if (profile == null) continue;
+            final serviceRequestQuery = rawQuery.copyWith(
+              includeAdult:
+                  rawQuery.includeAdult ||
+                  (allowExplicitContent &&
+                      workspace.service.supportsAdultContent),
+            );
             progressToast.update(
               'Interpreting ${workspace.service.displayName} filters...',
             );
             final query = await _aiService.interpretRecommendationRequest(
-              rawQuery,
+              serviceRequestQuery,
               availableTags: _availableTagsFor(workspace),
               serviceName: workspace.service.displayName,
               allowedMediaTypes: workspace.service.supportedMediaTypes,
@@ -495,7 +521,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
           if (!mounted || _activeHomeSearchRunId != searchRunId) return;
           setState(() {
-            _homeQuery = rawQuery;
+            _homeQuery = homeRequestQuery;
             _homeRecommendationsByService = byService;
             _homeRecommendations = ordered;
             _isRefreshingHome = false;
@@ -675,18 +701,69 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadSavedSessions() async {
     final sessions = await _profileStore.loadSessions();
     if (!mounted || sessions.isEmpty) return;
+    final allowExplicitContent = await _allowsExplicitContent();
+    if (!mounted) return;
 
     setState(() {
       for (final entry in sessions.entries) {
         final workspace = _workspaces[entry.key];
         if (workspace == null) continue;
-        workspace.restore(entry.value, tasteEngine: _tasteEngine);
+        final session = entry.value;
+        workspace.restore(
+          allowExplicitContent && workspace.service.supportsAdultContent
+              ? session.copyWith(
+                  query: session.query.copyWith(includeAdult: true),
+                )
+              : session,
+          tasteEngine: _tasteEngine,
+        );
       }
       final activeWorkspace = _activeWorkspace;
       _userNameController.text = activeWorkspace.userNameDraft.isNotEmpty
           ? activeWorkspace.userNameDraft
           : activeWorkspace.profile?.userName ?? '';
     });
+    _rebuildHomeRecommendationsSync();
+    if (allowExplicitContent) {
+      unawaited(_loadAllowedExplicitCandidates());
+    }
+  }
+
+  Future<bool> _allowsExplicitContent() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(LocalAiSettingsKeys.allowExplicitContent) ?? false;
+  }
+
+  Future<void> _loadAllowedExplicitCandidates() async {
+    for (final workspace in _importedWorkspaces) {
+      if (!workspace.service.supportsAdultContent ||
+          workspace.adultCandidatesLoaded) {
+        continue;
+      }
+      try {
+        final adultCandidates = await workspace.service
+            .fetchRecommendationCandidates(includeAdult: true);
+        if (!mounted) return;
+        final query = workspace.query.copyWith(includeAdult: true);
+        final candidates = _dedupeCandidates([
+          ...workspace.candidates,
+          ...adultCandidates,
+        ]);
+        setState(() {
+          workspace.query = query;
+          workspace.candidates = candidates;
+          workspace.recommendations = _tasteEngine.rankCandidates(
+            workspace.profile!,
+            candidates,
+            query: query,
+          );
+          workspace.adultCandidatesLoaded = true;
+        });
+        unawaited(_persistWorkspace(workspace));
+      } catch (_) {
+        // A saved feed remains usable if an adult-candidate refresh fails.
+      }
+    }
     _rebuildHomeRecommendationsSync();
   }
 

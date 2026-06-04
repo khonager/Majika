@@ -86,17 +86,59 @@ void main() {
     );
 
     expect(capturedPrompt, contains('Service context: Steam PC games'));
-    expect(capturedPrompt, contains('Service source values: GAME'));
     expect(capturedPrompt, contains('Steam play capability values'));
     expect(
       capturedPrompt,
-      contains('You may output any official Steam tag you confidently know'),
+      contains('exactly these keys: tags, formats, searchText'),
+    );
+    expect(capturedPrompt, isNot(contains('includeAdult')));
+    expect(capturedPrompt, isNot(contains('mediaTypes')));
+    expect(capturedPrompt, isNot(contains('AniList release format values')));
+    expect(
+      capturedPrompt,
+      contains('For obscure official Steam tags that are not listed'),
     );
     expect(capturedPrompt, isNot(contains('Yandere')));
     expect(capturedPrompt, isNot(contains('Mahou Shoujo')));
     expect(interpreted.mediaTypes, contains('GAME'));
     expect(interpreted.formats, contains('SINGLE_PLAYER'));
     expect(interpreted.aiSelectedTags, contains('RPG'));
+  });
+
+  test('AniList search prompt uses only the AniList search contract', () async {
+    late String capturedPrompt;
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        capturedPrompt = prompt;
+        return '{"tags":["Romance"],"formats":["TV"],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"school romance"}';
+      },
+    );
+
+    await service.interpretRecommendationRequest(
+      const RecommendationQuery(request: 'school romance anime'),
+      availableTags: const ['Romance', 'School'],
+      serviceName: 'AniList',
+      allowedMediaTypes: RecommendationQuery.aniListMediaTypes,
+      allowedFormats: RecommendationQuery.aniListFormats,
+    );
+
+    expect(
+      capturedPrompt,
+      contains('Service context: AniList anime and manga'),
+    );
+    expect(capturedPrompt, contains('AniList media type values'));
+    expect(capturedPrompt, contains('AniList release format values'));
+    expect(
+      capturedPrompt,
+      contains(
+        'exactly these keys: tags, formats, mediaTypes, includeAdult, searchText',
+      ),
+    );
+    expect(
+      capturedPrompt,
+      isNot(contains("formats field is Majika's transport field")),
+    );
+    expect(capturedPrompt, isNot(contains('Steam play capability values')));
   });
 
   test('flutter gemma service accepts broader official Steam tags', () async {
@@ -163,6 +205,41 @@ void main() {
       expect(capturedPrompt, isNot(contains('AI-selected tags')));
       expect(capturedPrompt, isNot(contains('Adult content selected: false')));
       expect(capturedPrompt, contains('infer it from the request text only'));
+    },
+  );
+
+  test(
+    'local AI search honors explicit-content permission from settings',
+    () async {
+      late String capturedPrompt;
+      final service = FlutterGemmaLocalAiService(
+        settingsLoader: () async => const LocalAiRuntimeSettings(
+          useLocalAi: true,
+          useAiForSearch: true,
+          mode: localAiModeManual,
+          provider: localAiModeManual,
+          endpoint: defaultLocalAiEndpoint,
+          serverModel: defaultLocalAiModel,
+          contextItems: 24,
+          allowExplicitContent: true,
+        ),
+        textGenerator: (prompt, maxTokens) async {
+          capturedPrompt = prompt;
+          return '{"tags":["Romance"],"formats":[],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"romance"}';
+        },
+      );
+
+      final interpreted = await service.interpretRecommendationRequest(
+        const RecommendationQuery(request: 'romance'),
+        availableTags: const ['Romance', 'Hentai'],
+      );
+
+      expect(
+        capturedPrompt,
+        contains('Adult/NSFW content is allowed by the user settings'),
+      );
+      expect(capturedPrompt, isNot(contains('Adult content selected: false')));
+      expect(interpreted.includeAdult, isTrue);
     },
   );
 
@@ -245,7 +322,7 @@ void main() {
   test('flutter gemma service can choose an AI top recommendation', () async {
     final service = FlutterGemmaLocalAiService(
       textGenerator: (prompt, maxTokens) async {
-        expect(prompt, contains('Pick the single best recommendation'));
+        expect(prompt, contains('Pick the single best AniList'));
         return '{"id":"anilist_2","reason":"Best fit from the AI pass."}';
       },
     );
@@ -589,6 +666,77 @@ void main() {
     expect(capturedPrompt, isNot(contains('anilist_3')));
   });
 
+  test('small model context packs prompts within a token budget', () async {
+    late String capturedPrompt;
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        mode: localAiModeExternalServer,
+        provider: externalLocalAiProvider,
+        endpoint: defaultLocalAiEndpoint,
+        serverModel: 'custom-small-model',
+        contextItems: 48,
+        contextWindowOverrideTokens: 4096,
+      ),
+      textGenerator: (prompt, maxTokens) async {
+        capturedPrompt = prompt;
+        return '{"id":"anilist_0","reason":"Packed fit."}';
+      },
+    );
+
+    await service.chooseTopRecommendation(
+      _profile(
+        library: [
+          for (var index = 0; index < 100; index++)
+            _mediaItem(
+              'history_$index',
+              'Very Long History Evidence $index ${'details ' * 30}',
+            ),
+        ],
+      ),
+      [
+        for (var index = 0; index < 30; index++)
+          _recommendation(
+            'anilist_$index',
+            'Very Long Candidate $index ${'details ' * 30}',
+          ),
+      ],
+      query: const RecommendationQuery(request: 'mystery'),
+    );
+
+    expect(capturedPrompt, contains('Token budget: 4K context'));
+    expect(capturedPrompt, contains('Prompt mode: compact'));
+    expect(capturedPrompt, contains('anilist_2'));
+    expect(capturedPrompt, isNot(contains('anilist_3')));
+    expect((utf8.encode(capturedPrompt).length / 3).ceil(), lessThan(2816));
+  });
+
+  test('context-window resolver chooses tiers from active model capacity', () {
+    expect(
+      resolveAiContextWindowTokens(
+        mode: localAiModeOnDevice,
+        modelName: 'Gemma 3 1B IT',
+      ),
+      4096,
+    );
+    expect(
+      resolveAiContextWindowTokens(
+        mode: localAiModeExternalServer,
+        modelName: 'qwen3:4b-instruct',
+      ),
+      32768,
+    );
+    expect(
+      resolveAiContextWindowTokens(
+        mode: localAiModeExternalCloud,
+        modelName: 'gemini-3.1-flash-lite',
+        cloudProvider: 'Google Gemini',
+      ),
+      1048576,
+    );
+  });
+
   test('local AI top-pick prompt emphasizes request fit', () async {
     late String capturedPrompt;
     final service = FlutterGemmaLocalAiService(
@@ -621,10 +769,10 @@ void main() {
     ], query: const RecommendationQuery(request: 'like harry potter'));
 
     expect(capturedPrompt, contains("Prioritize the user's request"));
-    expect(capturedPrompt, contains('Request-inferred tags:'));
+    expect(capturedPrompt, contains('Request-inferred AniList tags:'));
     expect(
       capturedPrompt,
-      contains('"requestTags":["Fantasy","Magic","School"]'),
+      contains('"matchedRequestAniListTags":["Fantasy","Magic","School"]'),
     );
   });
 
@@ -664,8 +812,11 @@ void main() {
       ),
     );
 
-    expect(capturedPrompt, contains('missingFormats'));
-    expect(capturedPrompt, contains('Only the listed options are eligible'));
+    expect(capturedPrompt, contains('missingPlayCapabilities'));
+    expect(
+      capturedPrompt,
+      contains('Only the listed Steam game options are eligible'),
+    );
     expect(capturedPrompt, isNot(contains('Grand Theft Auto V Legacy')));
     expect(chosen?.item.id, 'steam_coop');
     expect(chosen?.isAiPick, isFalse);
@@ -831,9 +982,201 @@ void main() {
       expect(capturedPrompt, contains('Portal 2'));
       expect(capturedPrompt, contains('It Takes Two'));
       expect(capturedPrompt, contains('A lower-score option can win'));
+      expect(capturedPrompt, contains('"steamTags"'));
+      expect(capturedPrompt, contains('"playCapability"'));
+      expect(capturedPrompt, contains('"playtimeMinutes"'));
       expect(capturedPrompt, isNot(contains('favoriteCharacters')));
+      expect(capturedPrompt, isNot(contains('"aniListTags"')));
+      expect(capturedPrompt, isNot(contains('"releaseFormat"')));
+      expect(capturedPrompt, isNot(contains('"isAdult"')));
     },
   );
+
+  test('rich AniList picker omits Steam-only evidence', () async {
+    late String capturedPrompt;
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        mode: localAiModeManual,
+        provider: localAiModeManual,
+        endpoint: defaultLocalAiEndpoint,
+        serverModel: defaultLocalAiModel,
+        contextItems: 24,
+      ),
+      textGenerator: (prompt, maxTokens) async {
+        capturedPrompt = prompt;
+        return '{"id":"anilist_pick","reason":"Fits the AniList profile."}';
+      },
+    );
+
+    await service.chooseTopRecommendation(
+      _profile(
+        library: [
+          _mediaItem(
+            'anilist_history',
+            'History Title',
+            tags: const ['Romance', 'School'],
+          ),
+        ],
+      ),
+      [
+        _recommendation(
+          'anilist_pick',
+          'AniList Pick',
+          tags: const ['Romance', 'School'],
+        ),
+      ],
+      query: const RecommendationQuery(request: 'school romance anime'),
+    );
+
+    expect(capturedPrompt, contains('"aniListTags"'));
+    expect(capturedPrompt, contains('"releaseFormat"'));
+    expect(capturedPrompt, contains('"isAdult"'));
+    expect(capturedPrompt, isNot(contains('"steamTags"')));
+    expect(capturedPrompt, isNot(contains('"playCapability"')));
+    expect(capturedPrompt, isNot(contains('"playtimeMinutes"')));
+  });
+
+  test(
+    'profile summaries and explanations use service-specific prompts',
+    () async {
+      final capturedPrompts = <String>[];
+      final service = FlutterGemmaLocalAiService(
+        textGenerator: (prompt, maxTokens) async {
+          capturedPrompts.add(prompt);
+          return 'Service-specific result.';
+        },
+      );
+      final steamProfile = _profile(
+        serviceName: 'Steam',
+        library: [
+          _mediaItem(
+            'steam_played',
+            'Played Game',
+            sourceId: 'com.majika.service.steam',
+            mediaType: 'GAME',
+            format: 'SINGLE_PLAYER',
+            playtimeMinutes: 600,
+          ),
+        ],
+      );
+      final aniListProfile = _profile();
+
+      await service.summarizeProfile(steamProfile);
+      await service.explainRecommendation(
+        steamProfile,
+        _recommendation(
+          'steam_pick',
+          'Steam Pick',
+          sourceId: 'com.majika.service.steam',
+          mediaType: 'GAME',
+          format: 'SINGLE_PLAYER',
+        ),
+      );
+      await service.summarizeProfile(aniListProfile);
+      await service.explainRecommendation(
+        aniListProfile,
+        _recommendation('anilist_pick', 'AniList Pick'),
+      );
+
+      expect(capturedPrompts[0], contains('Steam game taste profile'));
+      expect(capturedPrompts[0], contains('Most-played games'));
+      expect(capturedPrompts[0], isNot(contains('Favorite characters')));
+      expect(capturedPrompts[1], contains('Playtime evidence'));
+      expect(capturedPrompts[1], isNot(contains('Favorite characters')));
+      expect(capturedPrompts[2], contains('AniList anime and manga taste'));
+      expect(capturedPrompts[2], contains('Favorite characters'));
+      expect(capturedPrompts[2], isNot(contains('Most-played games')));
+      expect(capturedPrompts[3], contains('Release format'));
+      expect(capturedPrompts[3], isNot(contains('Playtime evidence')));
+    },
+  );
+
+  test(
+    'rich manual picker includes all supplied profile and option evidence',
+    () async {
+      late String capturedPrompt;
+      final service = FlutterGemmaLocalAiService(
+        settingsLoader: () async => const LocalAiRuntimeSettings(
+          useLocalAi: true,
+          useAiForSearch: true,
+          mode: localAiModeManual,
+          provider: localAiModeManual,
+          endpoint: defaultLocalAiEndpoint,
+          serverModel: defaultLocalAiModel,
+          contextItems: 24,
+        ),
+        textGenerator: (prompt, maxTokens) async {
+          capturedPrompt = prompt;
+          return '{"id":"anilist_candidate_24","reason":"Best full-context match."}';
+        },
+      );
+
+      final chosen = await service.chooseTopRecommendation(
+        _profile(
+          library: [
+            for (var index = 0; index < 45; index++)
+              _mediaItem('anilist_library_$index', 'Library Evidence $index'),
+          ],
+        ),
+        [
+          for (var index = 0; index < 25; index++)
+            _recommendation(
+              'anilist_candidate_$index',
+              'Candidate Evidence $index',
+            ),
+        ],
+        query: const RecommendationQuery(request: 'use my complete history'),
+      );
+
+      expect(capturedPrompt, contains('Prompt mode: rich'));
+      expect(capturedPrompt, contains('Full-context scope'));
+      expect(capturedPrompt, contains('Library Evidence 44'));
+      expect(capturedPrompt, contains('Candidate Evidence 24'));
+      expect(chosen?.item.id, 'anilist_candidate_24');
+    },
+  );
+
+  test('rich Home picker includes every eligible cross-service option', () async {
+    late String capturedPrompt;
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        mode: localAiModeExternalCloud,
+        provider: externalCloudAiProvider,
+        endpoint: defaultLocalAiEndpoint,
+        serverModel: defaultLocalAiModel,
+        cloudProvider: 'Google Gemini',
+        cloudModel: 'gemini-3.1-flash-lite',
+        contextItems: 24,
+      ),
+      textGenerator: (prompt, maxTokens) async {
+        capturedPrompt = prompt;
+        return '{"id":"steam_candidate_21","reason":"Best cross-service fit."}';
+      },
+    );
+
+    final chosen = await service.chooseHomeRecommendation(
+      [_profile(serviceName: 'AniList'), _profile(serviceName: 'Steam')],
+      [
+        for (var index = 0; index < 21; index++)
+          _recommendation('anilist_candidate_$index', 'Anime Candidate $index'),
+        _recommendation(
+          'steam_candidate_21',
+          'Steam Candidate 21',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+        ),
+      ],
+      query: const RecommendationQuery(request: 'pick across everything'),
+    );
+
+    expect(capturedPrompt, contains('Full-context scope'));
+    expect(capturedPrompt, contains('Steam Candidate 21'));
+    expect(chosen?.item.id, 'steam_candidate_21');
+  });
 
   test(
     'prompt benchmark: tiny selected on-device model gets compact context',
@@ -956,6 +1299,25 @@ void main() {
       expect(settings.deviceModelName, 'Gemma 3 1B IT');
     },
   );
+
+  test('local AI runtime settings loads explicit-content permission', () async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(LocalAiSettingsKeys.allowExplicitContent, true);
+
+    final settings = await LocalAiRuntimeSettings.load();
+
+    expect(settings.allowExplicitContent, isTrue);
+  });
+
+  test('local AI runtime settings loads context-window override', () async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(LocalAiSettingsKeys.aiContextWindowTokens, 32768);
+
+    final settings = await LocalAiRuntimeSettings.load();
+
+    expect(settings.contextWindowOverrideTokens, 32768);
+    expect(settings.contextWindowTokens, 32768);
+  });
 
   test(
     'local AI runtime settings loads external cloud provider fields',

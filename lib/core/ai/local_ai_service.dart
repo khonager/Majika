@@ -16,6 +16,8 @@ final Object manualAiRequestHandlerZoneKey = Object();
 
 enum _AiPromptTier { compact, balanced, rich }
 
+const _fullPromptLimit = 0x3fffffff;
+
 class _PromptLimits {
   final int tagLimit;
   final int optionLimit;
@@ -29,6 +31,59 @@ class _PromptLimits {
     required this.optionTagLimit,
     required this.signalLimit,
     required this.profileItemLimit,
+  });
+
+  bool get canShrink =>
+      tagLimit > 8 ||
+      optionLimit > 2 ||
+      optionTagLimit > 3 ||
+      signalLimit > 2 ||
+      profileItemLimit > 3;
+
+  _PromptLimits shrink() {
+    int next(int value, int minimum, int firstStep) {
+      if (value >= _fullPromptLimit) return firstStep;
+      return (value * 0.7).floor().clamp(minimum, value - 1);
+    }
+
+    return _PromptLimits(
+      tagLimit: next(tagLimit, 8, 512),
+      optionLimit: next(optionLimit, 2, 128),
+      optionTagLimit: next(optionTagLimit, 3, 32),
+      signalLimit: next(signalLimit, 2, 24),
+      profileItemLimit: next(profileItemLimit, 3, 128),
+    );
+  }
+}
+
+class _PromptBudget {
+  final _AiPromptTier tier;
+  final int contextWindowTokens;
+  final int responseTokens;
+  final int promptTokens;
+
+  const _PromptBudget({
+    required this.tier,
+    required this.contextWindowTokens,
+    required this.responseTokens,
+    required this.promptTokens,
+  });
+
+  String get instruction =>
+      'Token budget: ${formatAiTokenCount(contextWindowTokens)} context, '
+      '${formatAiTokenCount(promptTokens)} maximum estimated prompt, '
+      '${formatAiTokenCount(responseTokens)} reserved response.';
+}
+
+class _PackedPrompt {
+  final String prompt;
+  final _PromptLimits limits;
+  final int estimatedTokens;
+
+  const _PackedPrompt({
+    required this.prompt,
+    required this.limits,
+    required this.estimatedTokens,
   });
 }
 
@@ -164,19 +219,18 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       return fallback.summarizeProfile(profile);
     }
 
-    final prompt =
-        '''
-Summarize this ${profile.serviceName} taste profile in one concise sentence.
-Favorite tags: ${profile.favoriteGenres.join(', ')}
-Favorite characters: ${profile.favoriteCharacters.take(settings.contextItemLimit).join(', ')}
-Favorite studios: ${profile.favoriteStudios.take(settings.contextItemLimit).join(', ')}
-High rated examples: ${profile.highRatedItems.map((item) => item.title).take(settings.contextItemLimit).join(', ')}
-''';
+    final budget = _promptBudget(settings, responseTokens: 512);
 
     try {
+      final packed = _packPrompt(
+        budget: budget,
+        initialLimits: _promptLimits(budget.tier),
+        build: (limits) =>
+            _profileSummaryPrompt(profile, limits.profileItemLimit),
+      );
       final text = await _generateText(
-        prompt,
-        maxTokens: 512,
+        packed.prompt,
+        maxTokens: budget.responseTokens,
         settings: settings,
       );
       return text.trim().isEmpty ? profile.summary : text.trim();
@@ -194,11 +248,16 @@ High rated examples: ${profile.highRatedItems.map((item) => item.title).take(set
     Iterable<String> allowedFormats = RecommendationQuery.aniListFormats,
   }) async {
     final settings = await _runtimeSettings();
+    final explicitAllowedBySettings =
+        settings.allowExplicitContent && !_isSteamService(serviceName);
+    final effectiveQuery = query.copyWith(
+      includeAdult: query.includeAdult || explicitAllowedBySettings,
+    );
     if (!query.isActive ||
         (!settings.useLocalAi && textGenerator == null) ||
         !settings.useAiForSearch) {
       return fallback.interpretRecommendationRequest(
-        query,
+        effectiveQuery,
         availableTags: availableTags,
         serviceName: serviceName,
         allowedMediaTypes: allowedMediaTypes,
@@ -206,60 +265,58 @@ High rated examples: ${profile.highRatedItems.map((item) => item.title).take(set
       );
     }
 
-    final promptTier = _promptTier(settings);
-    final promptLimits = _promptLimits(promptTier, settings);
-    final tagList = _promptTagList(
-      query: query,
-      availableTags: availableTags,
-      serviceName: serviceName,
-      limit: promptLimits.tagLimit,
-    ).join(', ');
-    final selectedTagsLine = query.selectedTags.isEmpty
+    final budget = _promptBudget(settings, responseTokens: 1024);
+    final selectedTagsLine = effectiveQuery.selectedTags.isEmpty
         ? ''
-        : 'User-selected tags already active: ${query.selectedTags.join(', ')}\n';
-    final selectedFormatsLine = query.formats.isEmpty
+        : 'User-selected tags already active: ${effectiveQuery.selectedTags.join(', ')}\n';
+    final selectedFormatsLine = effectiveQuery.formats.isEmpty
         ? ''
-        : 'User-selected ${_formatLabel(serviceName)} filters already active: ${query.formats.join(', ')}\n';
-    final selectedMediaLine = query.mediaTypes.isEmpty
+        : 'User-selected ${_formatLabel(serviceName)} filters already active: ${effectiveQuery.formats.join(', ')}\n';
+    final selectedMediaLine = effectiveQuery.mediaTypes.isEmpty
         ? ''
-        : 'User-selected source filters already active: ${query.mediaTypes.join(', ')}\n';
+        : 'User-selected source filters already active: ${effectiveQuery.mediaTypes.join(', ')}\n';
     final adultGuidance = (query.includeAdult || query.infersAdult)
         ? 'Adult/NSFW content is explicitly requested or enabled for this search; include it only when it improves the requested match.'
+        : explicitAllowedBySettings
+        ? 'Adult/NSFW content is allowed by the user settings. Do not exclude a fitting result merely because it is adult; keep includeAdult true so Majika can include those candidates.'
         : 'The includeAdult output field means the request explicitly asks for adult/NSFW content; infer it from the request text only.';
-    final prompt =
-        '''
-Prompt mode: ${promptTier.name}.
-${_servicePromptContext(serviceName)}
-You turn recommendation search text into structured search help for Majika.
-This is not the final recommendation prompt. Preserve titles, game names, franchise names, and unusual taste words in searchText so Majika can fetch candidates beyond tag matches. A later AI prompt will personally pick the best candidate.
-Return JSON only. No markdown. No explanation.
-Return one object with exactly these keys: tags, formats, mediaTypes, includeAdult, searchText.
-Use empty arrays when no known tag, ${_formatLabel(serviceName)}, or source type clearly matches.
-Keep leftover natural-language terms in searchText.
-Service source values: ${allowedMediaTypes.join(', ')}
-${_formatInstruction(serviceName, allowedFormats)}
-${_tagInstruction(serviceName, promptTier, tagList)}
-$adultGuidance
-User request: ${query.request}
-$selectedTagsLine$selectedFormatsLine$selectedMediaLine
-''';
-
     try {
+      final packed = _packPrompt(
+        budget: budget,
+        initialLimits: _promptLimits(budget.tier),
+        build: (limits) => _searchInterpretationPrompt(
+          serviceName: serviceName,
+          tier: budget.tier,
+          query: effectiveQuery,
+          allowedMediaTypes: allowedMediaTypes,
+          allowedFormats: allowedFormats,
+          tagList: _promptTagList(
+            query: effectiveQuery,
+            availableTags: availableTags,
+            serviceName: serviceName,
+            limit: limits.tagLimit,
+          ).join(', '),
+          adultGuidance: adultGuidance,
+          selectedTagsLine: selectedTagsLine,
+          selectedFormatsLine: selectedFormatsLine,
+          selectedMediaLine: selectedMediaLine,
+        ),
+      );
       final response = await _generateText(
-        prompt,
-        maxTokens: 1024,
+        packed.prompt,
+        maxTokens: budget.responseTokens,
         settings: settings,
       );
       final interpreted = _queryFromModelJson(
         response,
-        original: query,
+        original: effectiveQuery,
         availableTags: availableTags,
         allowedMediaTypes: allowedMediaTypes,
         allowedFormats: allowedFormats,
       );
       if (interpreted == null) {
         return fallback.interpretRecommendationRequest(
-          query,
+          effectiveQuery,
           availableTags: availableTags,
           serviceName: serviceName,
           allowedMediaTypes: allowedMediaTypes,
@@ -269,7 +326,7 @@ $selectedTagsLine$selectedFormatsLine$selectedMediaLine
       return interpreted;
     } catch (_) {
       return fallback.interpretRecommendationRequest(
-        query,
+        effectiveQuery,
         availableTags: availableTags,
         serviceName: serviceName,
         allowedMediaTypes: allowedMediaTypes,
@@ -288,22 +345,21 @@ $selectedTagsLine$selectedFormatsLine$selectedMediaLine
       return fallback.explainRecommendation(profile, recommendation);
     }
 
-    final prompt =
-        '''
-Explain in one short sentence why this recommendation fits.
-Profile: ${profile.primaryTaste}
-Favorite tags: ${profile.favoriteGenres.join(', ')}
-Favorite characters: ${profile.favoriteCharacters.take(settings.contextItemLimit).join(', ')}
-Favorite studios: ${profile.favoriteStudios.take(settings.contextItemLimit).join(', ')}
-Recommendation: ${recommendation.item.title}
-Tags: ${recommendation.item.tags.take(settings.contextItemLimit).join(', ')}
-Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
-''';
+    final budget = _promptBudget(settings, responseTokens: 384);
 
     try {
+      final packed = _packPrompt(
+        budget: budget,
+        initialLimits: _promptLimits(budget.tier),
+        build: (limits) => _recommendationExplanationPrompt(
+          profile,
+          recommendation,
+          limits.profileItemLimit,
+        ),
+      );
       final text = await _generateText(
-        prompt,
-        maxTokens: 384,
+        packed.prompt,
+        maxTokens: budget.responseTokens,
         settings: settings,
       );
       return text.trim().isEmpty ? recommendation.reason : text.trim();
@@ -360,7 +416,8 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
     try {
       final response = await _generateOnDeviceText(
         prompt,
-        maxTokens: maxTokens,
+        contextWindowTokens: settings.contextWindowTokens,
+        responseTokens: maxTokens,
         preferredBackend: preferredBackend,
       );
       log?.addSection('Response', response);
@@ -372,7 +429,8 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
       }
       final response = await _generateOnDeviceText(
         prompt,
-        maxTokens: maxTokens,
+        contextWindowTokens: settings.contextWindowTokens,
+        responseTokens: maxTokens,
         preferredBackend: PreferredBackend.cpu,
       );
       log?.addSection('Response', response);
@@ -382,20 +440,29 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
 
   Future<String> _generateOnDeviceText(
     String prompt, {
-    required int maxTokens,
+    required int contextWindowTokens,
+    required int responseTokens,
     required PreferredBackend? preferredBackend,
   }) async {
     final model = await FlutterGemma.getActiveModel(
-      maxTokens: maxTokens,
+      maxTokens: contextWindowTokens,
       preferredBackend: preferredBackend,
     );
     try {
       final chat = await model.createChat(
         temperature: 0.1,
         topK: 1,
-        tokenBuffer: 128,
+        tokenBuffer: responseTokens,
         modelType: _activeModelType(),
       );
+      final exactPromptTokens = await chat.session.sizeInTokens(prompt);
+      if (exactPromptTokens + responseTokens > contextWindowTokens) {
+        throw StateError(
+          'Prompt requires $exactPromptTokens tokens plus a '
+          '$responseTokens-token response reserve, exceeding the '
+          '$contextWindowTokens-token model context.',
+        );
+      }
       await chat.addQueryChunk(Message.text(text: prompt, isUser: true));
       final response = await chat.generateChatResponse();
       return switch (response) {
@@ -592,55 +659,16 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
   }
 
   _AiPromptTier _promptTier(LocalAiRuntimeSettings settings) {
-    if (settings.usesManualAi || settings.usesExternalCloud) {
-      return _AiPromptTier.rich;
-    }
-    final modelName = _activePromptModelName(settings);
-    if (_looksTinyModel(modelName) || settings.contextItemLimit <= 12) {
-      return _AiPromptTier.compact;
-    }
-    if (_looksStrongModel(modelName) || settings.contextItemLimit >= 40) {
-      return _AiPromptTier.rich;
-    }
-    return _AiPromptTier.balanced;
+    final context = settings.contextWindowTokens;
+    if (context <= 8192) return _AiPromptTier.compact;
+    if (context <= 32768) return _AiPromptTier.balanced;
+    return _AiPromptTier.rich;
   }
 
-  String _activePromptModelName(LocalAiRuntimeSettings settings) {
-    if (settings.usesExternalServer) {
-      return '${settings.provider} ${settings.serverModel}'.toLowerCase();
-    }
-    if (settings.usesOnDeviceModel) {
-      return '${settings.provider} ${settings.deviceModelName}'.toLowerCase();
-    }
-    return settings.provider.toLowerCase();
-  }
-
-  bool _looksTinyModel(String modelName) {
-    return modelName.contains('270m') ||
-        modelName.contains('0.5b') ||
-        modelName.contains('0.6b') ||
-        modelName.contains('1b') ||
-        modelName.contains('1 b');
-  }
-
-  bool _looksStrongModel(String modelName) {
-    return modelName.contains('gemini') ||
-        modelName.contains('gpt') ||
-        modelName.contains('claude') ||
-        modelName.contains('llama-3.1') ||
-        modelName.contains('llama-3.2') ||
-        modelName.contains('4b') ||
-        modelName.contains('8b') ||
-        modelName.contains('70b');
-  }
-
-  _PromptLimits _promptLimits(
-    _AiPromptTier tier,
-    LocalAiRuntimeSettings settings,
-  ) {
+  _PromptLimits _promptLimits(_AiPromptTier tier) {
     return switch (tier) {
-      _AiPromptTier.compact => _PromptLimits(
-        tagLimit: settings.contextItemLimit.clamp(8, 18).toInt(),
+      _AiPromptTier.compact => const _PromptLimits(
+        tagLimit: 18,
         optionLimit: 3,
         optionTagLimit: 5,
         signalLimit: 3,
@@ -654,13 +682,61 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
         profileItemLimit: 10,
       ),
       _AiPromptTier.rich => const _PromptLimits(
-        tagLimit: 240,
-        optionLimit: 18,
-        optionTagLimit: 18,
-        signalLimit: 12,
-        profileItemLimit: 30,
+        tagLimit: _fullPromptLimit,
+        optionLimit: _fullPromptLimit,
+        optionTagLimit: _fullPromptLimit,
+        signalLimit: _fullPromptLimit,
+        profileItemLimit: _fullPromptLimit,
       ),
     };
+  }
+
+  _PromptBudget _promptBudget(
+    LocalAiRuntimeSettings settings, {
+    required int responseTokens,
+  }) {
+    final context = settings.contextWindowTokens;
+    final safeResponse = responseTokens.clamp(256, (context * 0.25).floor());
+    final safetyReserve = (context * 0.1).round().clamp(256, 4096);
+    return _PromptBudget(
+      tier: _promptTier(settings),
+      contextWindowTokens: context,
+      responseTokens: safeResponse,
+      promptTokens: (context - safeResponse - safetyReserve).clamp(
+        1024,
+        context,
+      ),
+    );
+  }
+
+  int _estimatePromptTokens(String prompt) {
+    return (utf8.encode(prompt).length / 3).ceil();
+  }
+
+  _PackedPrompt _packPrompt({
+    required _PromptBudget budget,
+    required _PromptLimits initialLimits,
+    required String Function(_PromptLimits limits) build,
+  }) {
+    var limits = initialLimits;
+    var prompt = '${budget.instruction}\n${build(limits)}';
+    var estimatedTokens = _estimatePromptTokens(prompt);
+    while (estimatedTokens > budget.promptTokens && limits.canShrink) {
+      limits = limits.shrink();
+      prompt = '${budget.instruction}\n${build(limits)}';
+      estimatedTokens = _estimatePromptTokens(prompt);
+    }
+    if (estimatedTokens > budget.promptTokens) {
+      throw StateError(
+        'Required AI instructions exceed the configured '
+        '${budget.contextWindowTokens}-token context window.',
+      );
+    }
+    return _PackedPrompt(
+      prompt: prompt,
+      limits: limits,
+      estimatedTokens: estimatedTokens,
+    );
   }
 
   String _servicePromptContext(String serviceName) {
@@ -671,6 +747,91 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
       return 'Service context: AniList anime and manga. Tags are AniList genres and media tags. Formats are AniList release formats such as TV, movie, OVA, manga, and novel.';
     }
     return 'Service context: $serviceName recommendations. Use the service tags and filters below.';
+  }
+
+  String _profileSummaryPrompt(TasteProfile profile, int itemLimit) {
+    final highRated = profile.highRatedItems
+        .map((item) => item.title)
+        .take(itemLimit)
+        .join(', ');
+    if (_isSteamService(profile.serviceName)) {
+      final played = profile.library
+          .where((item) => (item.playtimeMinutes ?? 0) > 0)
+          .take(itemLimit)
+          .map((item) => '${item.title} (${item.playtimeMinutes} minutes)')
+          .join(', ');
+      return '''
+Summarize this Steam game taste profile in one concise sentence.
+Favorite Steam tags: ${profile.favoriteGenres.join(', ')}
+Most-played games: $played
+High-rated games: $highRated
+''';
+    }
+    if (_isAniListService(profile.serviceName)) {
+      return '''
+Summarize this AniList anime and manga taste profile in one concise sentence.
+Favorite AniList tags: ${profile.favoriteGenres.join(', ')}
+Favorite characters: ${profile.favoriteCharacters.take(itemLimit).join(', ')}
+Favorite studios: ${profile.favoriteStudios.take(itemLimit).join(', ')}
+High-rated anime or manga: $highRated
+''';
+    }
+    return '''
+Summarize this ${profile.serviceName} taste profile in one concise sentence.
+Favorite tags: ${profile.favoriteGenres.join(', ')}
+High-rated examples: $highRated
+''';
+  }
+
+  String _recommendationExplanationPrompt(
+    TasteProfile profile,
+    Recommendation recommendation,
+    int itemLimit,
+  ) {
+    final item = recommendation.item;
+    if (_isSteamService(profile.serviceName)) {
+      return '''
+Explain in one short sentence why this Steam game fits this user's request and game taste. Only use supplied facts.
+Game taste: ${profile.primaryTaste}
+Favorite Steam tags: ${profile.favoriteGenres.join(', ')}
+Recommended game: ${item.title}
+Steam tags: ${item.tags.take(itemLimit).join(', ')}
+Play capability: ${item.format}
+Playtime evidence: ${item.playtimeMinutes ?? 0} total minutes, ${item.recentPlaytimeMinutes ?? 0} recent minutes
+Match signals: ${recommendation.signals.take(itemLimit).join(', ')}
+''';
+    }
+    if (_isAniListService(profile.serviceName)) {
+      return '''
+Explain in one short sentence why this AniList anime or manga title fits this user's request and taste. Only use supplied facts.
+Anime and manga taste: ${profile.primaryTaste}
+Favorite AniList tags: ${profile.favoriteGenres.join(', ')}
+Favorite characters: ${profile.favoriteCharacters.take(itemLimit).join(', ')}
+Favorite studios: ${profile.favoriteStudios.take(itemLimit).join(', ')}
+Recommended title: ${item.title}
+AniList tags: ${item.tags.take(itemLimit).join(', ')}
+Release format: ${item.format}
+Match signals: ${recommendation.signals.take(itemLimit).join(', ')}
+''';
+    }
+    return '''
+Explain in one short sentence why this recommendation fits. Only use supplied facts.
+Profile: ${profile.primaryTaste}
+Recommendation: ${item.title}
+Tags: ${item.tags.take(itemLimit).join(', ')}
+Signals: ${recommendation.signals.take(itemLimit).join(', ')}
+''';
+  }
+
+  String _promptScopeInstruction(_AiPromptTier tier) {
+    return switch (tier) {
+      _AiPromptTier.compact =>
+        'Compact scope: use only the highest-signal evidence supplied and follow the JSON schema exactly.',
+      _AiPromptTier.balanced =>
+        'Balanced scope: use a broad but bounded selection of profile and candidate evidence.',
+      _AiPromptTier.rich =>
+        'Full-context scope: all available service tags, eligible candidates, and supplied user-preference evidence are included. Consider the complete evidence before deciding.',
+    };
   }
 
   String _formatLabel(String serviceName) {
@@ -712,6 +873,144 @@ Signals: ${recommendation.signals.take(settings.contextItemLimit).join(', ')}
         'You may output any official $source tag from this fetched catalog/session tag set; keep uncertain or extra wording in searchText.',
     };
     return '$prefix: $tags\n$catalogGuidance\nYou may keep any specific title, franchise, creator, trope, or genre wording that is not in this list in searchText; Majika will use that text to fetch candidates.';
+  }
+
+  String _searchInterpretationPrompt({
+    required String serviceName,
+    required _AiPromptTier tier,
+    required RecommendationQuery query,
+    required Iterable<String> allowedMediaTypes,
+    required Iterable<String> allowedFormats,
+    required String tagList,
+    required String adultGuidance,
+    required String selectedTagsLine,
+    required String selectedFormatsLine,
+    required String selectedMediaLine,
+  }) {
+    if (_isSteamService(serviceName)) {
+      return _steamSearchInterpretationPrompt(
+        tier: tier,
+        query: query,
+        allowedFormats: allowedFormats,
+        tagList: tagList,
+        selectedTagsLine: selectedTagsLine,
+        selectedFormatsLine: selectedFormatsLine,
+      );
+    }
+    if (_isAniListService(serviceName)) {
+      return _aniListSearchInterpretationPrompt(
+        tier: tier,
+        query: query,
+        allowedMediaTypes: allowedMediaTypes,
+        allowedFormats: allowedFormats,
+        tagList: tagList,
+        adultGuidance: adultGuidance,
+        selectedTagsLine: selectedTagsLine,
+        selectedFormatsLine: selectedFormatsLine,
+        selectedMediaLine: selectedMediaLine,
+      );
+    }
+    return _genericSearchInterpretationPrompt(
+      serviceName: serviceName,
+      tier: tier,
+      query: query,
+      allowedMediaTypes: allowedMediaTypes,
+      allowedFormats: allowedFormats,
+      tagList: tagList,
+      adultGuidance: adultGuidance,
+      selectedTagsLine: selectedTagsLine,
+      selectedFormatsLine: selectedFormatsLine,
+      selectedMediaLine: selectedMediaLine,
+    );
+  }
+
+  String _steamSearchInterpretationPrompt({
+    required _AiPromptTier tier,
+    required RecommendationQuery query,
+    required Iterable<String> allowedFormats,
+    required String tagList,
+    required String selectedTagsLine,
+    required String selectedFormatsLine,
+  }) {
+    return '''
+Prompt mode: ${tier.name}.
+${_promptScopeInstruction(tier)}
+${_servicePromptContext('Steam')}
+You turn a Steam game request into Steam store-search help for Majika.
+This is not the final recommendation prompt. Preserve game titles, franchises, developers, unusual mechanics, and specific taste words in searchText so Majika can fetch candidates beyond tag matches. A later AI prompt will personally pick the best game.
+Return JSON only. No markdown. No explanation.
+Return one object with exactly these keys: tags, formats, searchText.
+The formats field is Majika's transport field for Steam play capabilities only.
+Use empty arrays when no known Steam tag or play capability clearly matches.
+Do not return AniList media types, AniList release formats, or adult-content fields.
+Keep leftover natural-language game terms in searchText.
+${_formatInstruction('Steam', allowedFormats)}
+${_tagInstruction('Steam', tier, tagList)}
+User request: ${query.request}
+$selectedTagsLine$selectedFormatsLine
+''';
+  }
+
+  String _aniListSearchInterpretationPrompt({
+    required _AiPromptTier tier,
+    required RecommendationQuery query,
+    required Iterable<String> allowedMediaTypes,
+    required Iterable<String> allowedFormats,
+    required String tagList,
+    required String adultGuidance,
+    required String selectedTagsLine,
+    required String selectedFormatsLine,
+    required String selectedMediaLine,
+  }) {
+    return '''
+Prompt mode: ${tier.name}.
+${_promptScopeInstruction(tier)}
+${_servicePromptContext('AniList')}
+You turn an anime or manga request into AniList search help for Majika.
+This is not the final recommendation prompt. Preserve titles, franchises, creators, unusual tropes, and specific taste words in searchText so Majika can fetch candidates beyond tag matches. A later AI prompt will personally pick the best title.
+Return JSON only. No markdown. No explanation.
+Return one object with exactly these keys: tags, formats, mediaTypes, includeAdult, searchText.
+Use empty arrays when no known AniList tag, release format, or media type clearly matches.
+Do not return Steam store tags or Steam play capabilities.
+Keep leftover natural-language anime or manga terms in searchText.
+AniList media type values: ${allowedMediaTypes.join(', ')}
+${_formatInstruction('AniList', allowedFormats)}
+${_tagInstruction('AniList', tier, tagList)}
+$adultGuidance
+User request: ${query.request}
+$selectedTagsLine$selectedFormatsLine$selectedMediaLine
+''';
+  }
+
+  String _genericSearchInterpretationPrompt({
+    required String serviceName,
+    required _AiPromptTier tier,
+    required RecommendationQuery query,
+    required Iterable<String> allowedMediaTypes,
+    required Iterable<String> allowedFormats,
+    required String tagList,
+    required String adultGuidance,
+    required String selectedTagsLine,
+    required String selectedFormatsLine,
+    required String selectedMediaLine,
+  }) {
+    return '''
+Prompt mode: ${tier.name}.
+${_promptScopeInstruction(tier)}
+${_servicePromptContext(serviceName)}
+You turn recommendation search text into structured search help for Majika.
+This is not the final recommendation prompt. Preserve titles, franchise names, and unusual taste words in searchText so Majika can fetch candidates beyond tag matches. A later AI prompt will personally pick the best candidate.
+Return JSON only. No markdown. No explanation.
+Return one object with exactly these keys: tags, formats, mediaTypes, includeAdult, searchText.
+Use empty arrays when no known tag, ${_formatLabel(serviceName)}, or source type clearly matches.
+Keep leftover natural-language terms in searchText.
+Service source values: ${allowedMediaTypes.join(', ')}
+${_formatInstruction(serviceName, allowedFormats)}
+${_tagInstruction(serviceName, tier, tagList)}
+$adultGuidance
+User request: ${query.request}
+$selectedTagsLine$selectedFormatsLine$selectedMediaLine
+''';
   }
 
   bool _isSteamService(String serviceName) {
@@ -780,31 +1079,61 @@ Favorite tags: ${profile.favoriteGenres.take(limits.profileItemLimit).join(', ')
 ''';
     }
 
+    final isSteam = _isSteamService(profile.serviceName);
     final evidence = {
       'service': profile.serviceName,
       'summary': profile.summary,
-      'favoriteTags': profile.favoriteGenres
-          .take(limits.profileItemLimit)
-          .toList(),
-      'tagWeights': _topEntries(profile.tagWeights, limits.profileItemLimit),
-      'formatWeights': _topEntries(
-        profile.formatWeights,
-        limits.profileItemLimit,
-      ),
+      if (isSteam) ...{
+        'favoriteSteamTags': profile.favoriteGenres
+            .take(limits.profileItemLimit)
+            .toList(),
+        'steamTagWeights': _topEntries(
+          profile.tagWeights,
+          limits.profileItemLimit,
+        ),
+        'playCapabilityWeights': _topEntries(
+          profile.formatWeights,
+          limits.profileItemLimit,
+        ),
+        'playCapabilityCounts': profile.formatCounts,
+      } else ...{
+        'favoriteAniListTags': profile.favoriteGenres
+            .take(limits.profileItemLimit)
+            .toList(),
+        'aniListTagWeights': _topEntries(
+          profile.tagWeights,
+          limits.profileItemLimit,
+        ),
+        'releaseFormatWeights': _topEntries(
+          profile.formatWeights,
+          limits.profileItemLimit,
+        ),
+        'releaseFormatCounts': profile.formatCounts,
+      },
+      'completedCount': profile.completedCount,
+      'currentCount': profile.currentCount,
       'highRated': profile.highRatedItems
           .take(limits.profileItemLimit)
-          .map(_mediaEvidence)
+          .map((item) => _mediaEvidence(item, serviceName: profile.serviceName))
           .toList(),
       'recentActivity': profile.recentActivity == null
           ? null
-          : _mediaEvidence(profile.recentActivity!),
+          : _mediaEvidence(
+              profile.recentActivity!,
+              serviceName: profile.serviceName,
+            ),
       if (tier == _AiPromptTier.rich)
         'librarySample': profile.library
             .take(limits.profileItemLimit)
-            .map(_mediaEvidence)
+            .map(
+              (item) => _mediaEvidence(item, serviceName: profile.serviceName),
+            )
             .toList(),
-      if (!_isSteamService(profile.serviceName)) ...{
+      if (!isSteam) ...{
         'favoriteCharacters': profile.favoriteCharacters
+            .take(limits.profileItemLimit)
+            .toList(),
+        'favoriteStaff': profile.favoriteStaff
             .take(limits.profileItemLimit)
             .toList(),
         'favoriteStudios': profile.favoriteStudios
@@ -825,17 +1154,52 @@ Favorite tags: ${profile.favoriteGenres.take(limits.profileItemLimit).join(', ')
     ];
   }
 
-  Map<String, Object?> _mediaEvidence(MediaItem item) {
-    return {
+  Map<String, Object?> _mediaEvidence(
+    MediaItem item, {
+    required String serviceName,
+  }) {
+    final common = <String, Object?>{
       'title': item.title,
       'service': item.serviceLabel,
+      'rating': item.rating,
+      'description': item.description,
+    };
+    if (_isSteamService(serviceName)) {
+      return {
+        ...common,
+        'steamTags': item.tags,
+        'playCapability': item.format,
+        'playtimeMinutes': item.playtimeMinutes,
+        'recentPlaytimeMinutes': item.recentPlaytimeMinutes,
+      };
+    }
+    if (_isAniListService(serviceName)) {
+      return {
+        ...common,
+        'aniListTags': item.tags,
+        'releaseFormat': item.format,
+        'mediaType': item.mediaType,
+        'status': item.status,
+        'startYear': item.startYear,
+        'popularity': item.popularity,
+        'isAdult': item.isAdult,
+        'characters': item.characters,
+        'studios': item.studios,
+      };
+    }
+    return {
+      ...common,
       'tags': item.tags,
       'format': item.format,
       'mediaType': item.mediaType,
-      'rating': item.rating,
+      'status': item.status,
+      'startYear': item.startYear,
+      'popularity': item.popularity,
+      'isAdult': item.isAdult,
       'playtimeMinutes': item.playtimeMinutes,
       'recentPlaytimeMinutes': item.recentPlaytimeMinutes,
-      'description': item.description,
+      'characters': item.characters,
+      'studios': item.studios,
     };
   }
 
@@ -894,6 +1258,265 @@ Favorite tags: ${profile.favoriteGenres.take(limits.profileItemLimit).join(', ')
     }
   }
 
+  Map<String, Object?> _serviceTopOptionEvidence({
+    required String serviceName,
+    required Recommendation recommendation,
+    required _AiPromptTier tier,
+    required Set<String> requestedFormats,
+    required bool requireLocalCoOp,
+    required Set<String> requestTags,
+    required int tagLimit,
+    required int signalLimit,
+  }) {
+    final item = recommendation.item;
+    final matchedFormats = _matchedRequestedFormats(
+      item,
+      requestedFormats,
+      requireLocalCoOp: requireLocalCoOp,
+    );
+    final missingFormats = _missingRequestedFormats(
+      item,
+      requestedFormats,
+      requireLocalCoOp: requireLocalCoOp,
+    );
+    final matchedRequestTags = item.tags
+        .where(requestTags.contains)
+        .take(tagLimit)
+        .toList();
+    final common = <String, Object?>{
+      'id': item.id,
+      'title': item.title,
+      'score': recommendation.matchScore.round(),
+      'signals': recommendation.signals.take(signalLimit).toList(),
+      if (tier != _AiPromptTier.compact) ...{
+        'rating': item.rating,
+        'description': item.description,
+        'reasonFromRanker': recommendation.reason,
+      },
+    };
+    if (_isSteamService(serviceName)) {
+      return {
+        ...common,
+        'steamTags': item.tags.take(tagLimit).toList(),
+        'matchedRequestSteamTags': matchedRequestTags,
+        'playCapability': item.format,
+        'requestedPlayCapabilities': requestedFormats.toList(),
+        'matchedPlayCapabilities': matchedFormats,
+        'missingPlayCapabilities': missingFormats,
+        if (tier == _AiPromptTier.rich) ...{
+          'playtimeMinutes': item.playtimeMinutes,
+          'recentPlaytimeMinutes': item.recentPlaytimeMinutes,
+        },
+      };
+    }
+    if (_isAniListService(serviceName)) {
+      return {
+        ...common,
+        'aniListTags': item.tags.take(tagLimit).toList(),
+        'matchedRequestAniListTags': matchedRequestTags,
+        'releaseFormat': item.format,
+        'requestedReleaseFormats': requestedFormats.toList(),
+        'matchedReleaseFormats': matchedFormats,
+        'missingReleaseFormats': missingFormats,
+        if (tier != _AiPromptTier.compact) 'mediaType': item.mediaType,
+        if (tier == _AiPromptTier.rich) ...{
+          'status': item.status,
+          'startYear': item.startYear,
+          'popularity': item.popularity,
+          'isAdult': item.isAdult,
+          'characters': item.characters,
+          'studios': item.studios,
+        },
+      };
+    }
+    return {
+      ...common,
+      'tags': item.tags.take(tagLimit).toList(),
+      'requestTags': matchedRequestTags,
+      'format': item.format,
+      'requestedFormats': requestedFormats.toList(),
+      'matchedFormats': matchedFormats,
+      'missingFormats': missingFormats,
+      if (tier != _AiPromptTier.compact) 'mediaType': item.mediaType,
+    };
+  }
+
+  String _serviceTopRecommendationPrompt({
+    required TasteProfile profile,
+    required _AiPromptTier tier,
+    required _PromptLimits limits,
+    required RecommendationQuery query,
+    required Set<String> requestedFormats,
+    required bool requireLocalCoOp,
+    required Iterable<String> inferredTags,
+    required List<Map<String, Object?>> options,
+  }) {
+    if (_isSteamService(profile.serviceName)) {
+      return _steamTopRecommendationPrompt(
+        profile: profile,
+        tier: tier,
+        limits: limits,
+        query: query,
+        requestedFormats: requestedFormats,
+        requireLocalCoOp: requireLocalCoOp,
+        inferredTags: inferredTags,
+        options: options,
+      );
+    }
+    if (_isAniListService(profile.serviceName)) {
+      return _aniListTopRecommendationPrompt(
+        profile: profile,
+        tier: tier,
+        limits: limits,
+        query: query,
+        requestedFormats: requestedFormats,
+        inferredTags: inferredTags,
+        options: options,
+      );
+    }
+    return '''
+Prompt mode: ${tier.name}.
+${_promptScopeInstruction(tier)}
+${_servicePromptContext(profile.serviceName)}
+Pick the single best recommendation for this user from the options.
+Treat tags, requestTags, scores, and ranker reasons as evidence, not as the decision itself.
+Prioritize the user's request and personal taste. A lower-score option can win when it better satisfies the request or resembles a named title, franchise, or trope.
+Only the listed options are eligible for this request.
+Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
+${_profilePromptEvidence(profile, tier, limits)}
+Search request: ${query.request}
+User-selected tags: ${query.selectedTags.join(', ')}
+Requested formats: ${requestedFormats.join(', ')}
+Request-inferred tags: ${inferredTags.join(', ')}
+Options: ${jsonEncode(options)}
+''';
+  }
+
+  String _steamTopRecommendationPrompt({
+    required TasteProfile profile,
+    required _AiPromptTier tier,
+    required _PromptLimits limits,
+    required RecommendationQuery query,
+    required Set<String> requestedFormats,
+    required bool requireLocalCoOp,
+    required Iterable<String> inferredTags,
+    required List<Map<String, Object?>> options,
+  }) {
+    return '''
+Prompt mode: ${tier.name}.
+${_promptScopeInstruction(tier)}
+${_servicePromptContext('Steam')}
+Pick the single best Steam game for this user from the Steam game options.
+Treat Steam store tags, matchedRequestSteamTags, scores, playtime, and ranker reasons as evidence, not as the decision itself.
+Prioritize the game request and the user's personal game taste. A lower-score option can win when it better satisfies the request or resembles a named game, franchise, mechanic, or mood.
+Only the listed Steam game options are eligible for this request.
+If missingPlayCapabilities is empty, that game satisfies every required Steam play capability.
+Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
+${_profilePromptEvidence(profile, tier, limits)}
+Game request: ${query.request}
+User-selected Steam tags: ${query.selectedTags.join(', ')}
+Required Steam play capabilities: ${requestedFormats.join(', ')}
+Local co-op required: $requireLocalCoOp
+Request-inferred Steam tags: ${inferredTags.join(', ')}
+Steam game options: ${jsonEncode(options)}
+''';
+  }
+
+  String _aniListTopRecommendationPrompt({
+    required TasteProfile profile,
+    required _AiPromptTier tier,
+    required _PromptLimits limits,
+    required RecommendationQuery query,
+    required Set<String> requestedFormats,
+    required Iterable<String> inferredTags,
+    required List<Map<String, Object?>> options,
+  }) {
+    return '''
+Prompt mode: ${tier.name}.
+${_promptScopeInstruction(tier)}
+${_servicePromptContext('AniList')}
+Pick the single best AniList anime or manga recommendation for this user from the AniList options.
+Treat AniList tags, matchedRequestAniListTags, scores, staff, studios, and ranker reasons as evidence, not as the decision itself.
+Prioritize the user's request and personal anime or manga taste. A lower-score option can win when it better satisfies the request or resembles a named title, franchise, creator, trope, or mood.
+Only the listed AniList options are eligible for this request.
+If missingReleaseFormats is empty, that title satisfies the requested AniList release-format constraint.
+Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
+${_profilePromptEvidence(profile, tier, limits)}
+Anime or manga request: ${query.request}
+User-selected AniList tags: ${query.selectedTags.join(', ')}
+Requested AniList release formats: ${requestedFormats.join(', ')}
+Requested AniList media types: ${query.mediaTypes.join(', ')}
+Request-inferred AniList tags: ${inferredTags.join(', ')}
+AniList options: ${jsonEncode(options)}
+''';
+  }
+
+  Map<String, Object?> _homeOptionEvidence({
+    required Recommendation recommendation,
+    required _AiPromptTier tier,
+    required Set<String> requestedFormats,
+    required bool requireLocalCoOp,
+    required int tagLimit,
+  }) {
+    final item = recommendation.item;
+    final common = <String, Object?>{
+      'id': item.id,
+      'title': item.title,
+      'service': item.serviceLabel,
+      'score': recommendation.matchScore.round(),
+      'requestedConstraints': requestedFormats.toList(),
+      'matchedConstraints': _matchedRequestedFormats(
+        item,
+        requestedFormats,
+        requireLocalCoOp: requireLocalCoOp,
+      ),
+      'missingConstraints': _missingRequestedFormats(
+        item,
+        requestedFormats,
+        requireLocalCoOp: requireLocalCoOp,
+      ),
+      'reasonFromRanker': recommendation.reason,
+      if (tier != _AiPromptTier.compact) ...{
+        'rating': item.rating,
+        'description': item.description,
+      },
+      if (tier == _AiPromptTier.rich) 'signals': recommendation.signals,
+    };
+    if (_isSteamService(item.serviceLabel)) {
+      return {
+        ...common,
+        'steamTags': item.tags.take(tagLimit).toList(),
+        'playCapability': item.format,
+        if (tier == _AiPromptTier.rich) ...{
+          'playtimeMinutes': item.playtimeMinutes,
+          'recentPlaytimeMinutes': item.recentPlaytimeMinutes,
+        },
+      };
+    }
+    if (_isAniListService(item.serviceLabel)) {
+      return {
+        ...common,
+        'aniListTags': item.tags.take(tagLimit).toList(),
+        'releaseFormat': item.format,
+        'mediaType': item.mediaType,
+        if (tier == _AiPromptTier.rich) ...{
+          'status': item.status,
+          'startYear': item.startYear,
+          'popularity': item.popularity,
+          'isAdult': item.isAdult,
+          'characters': item.characters,
+          'studios': item.studios,
+        },
+      };
+    }
+    return {
+      ...common,
+      'tags': item.tags.take(tagLimit).toList(),
+      'format': item.format,
+      'mediaType': item.mediaType,
+    };
+  }
+
   @override
   Future<Recommendation?> chooseTopRecommendation(
     TasteProfile profile,
@@ -917,11 +1540,7 @@ Favorite tags: ${profile.favoriteGenres.take(limits.profileItemLimit).join(', ')
       );
     }
 
-    final promptTier = _promptTier(settings);
-    final promptLimits = _promptLimits(promptTier, settings);
-    final optionLimit = promptLimits.optionLimit;
-    final tagLimit = promptLimits.optionTagLimit;
-    final signalLimit = promptLimits.signalLimit;
+    final budget = _promptBudget(settings, responseTokens: 1024);
     final optionTags = {
       for (final recommendation in selectableRecommendations)
         for (final tag in recommendation.item.tags) tag,
@@ -931,65 +1550,51 @@ Favorite tags: ${profile.favoriteGenres.take(limits.profileItemLimit).join(', ')
       ...query.aiSelectedTags,
       ...query.inferredTags(optionTags),
     };
-    final options = selectableRecommendations.take(optionLimit).map((
-      recommendation,
-    ) {
-      final item = recommendation.item;
-      final matchedFormats = _matchedRequestedFormats(
-        item,
-        requestedFormats,
-        requireLocalCoOp: requireLocalCoOp,
-      );
-      final missingFormats = _missingRequestedFormats(
-        item,
-        requestedFormats,
-        requireLocalCoOp: requireLocalCoOp,
-      );
-      return {
-        'id': item.id,
-        'title': item.title,
-        'score': recommendation.matchScore.round(),
-        'tags': item.tags.take(tagLimit).toList(),
-        'requestTags': item.tags
-            .where(requestTags.contains)
-            .take(tagLimit)
-            .toList(),
-        'format': item.format,
-        'requestedFormats': requestedFormats.toList(),
-        'matchedFormats': matchedFormats,
-        'missingFormats': missingFormats,
-        'signals': recommendation.signals.take(signalLimit).toList(),
-        if (promptTier != _AiPromptTier.compact) ...{
-          'mediaType': item.mediaType,
-          'rating': item.rating,
-          'description': item.description,
-          'reasonFromRanker': recommendation.reason,
+    late final _PackedPrompt packed;
+    try {
+      packed = _packPrompt(
+        budget: budget,
+        initialLimits: _promptLimits(budget.tier),
+        build: (limits) {
+          final options = selectableRecommendations
+              .take(limits.optionLimit)
+              .map(
+                (recommendation) => _serviceTopOptionEvidence(
+                  serviceName: profile.serviceName,
+                  recommendation: recommendation,
+                  tier: budget.tier,
+                  requestedFormats: requestedFormats,
+                  requireLocalCoOp: requireLocalCoOp,
+                  requestTags: requestTags,
+                  tagLimit: limits.optionTagLimit,
+                  signalLimit: limits.signalLimit,
+                ),
+              )
+              .toList();
+          return _serviceTopRecommendationPrompt(
+            profile: profile,
+            tier: budget.tier,
+            limits: limits,
+            query: query,
+            requestedFormats: requestedFormats,
+            requireLocalCoOp: requireLocalCoOp,
+            inferredTags: query.inferredTags(optionTags),
+            options: options,
+          );
         },
-      };
-    }).toList();
-    final prompt =
-        '''
-Prompt mode: ${promptTier.name}.
-${_servicePromptContext(profile.serviceName)}
-Pick the single best recommendation for this user from the options.
-Treat tags, requestTags, scores, and ranker reasons as evidence, not as the decision itself.
-Prioritize the user's request and personal taste. A lower-score option can win when it better satisfies the request or resembles a named title/franchise/trope.
-Only the listed options are eligible for this request.
-If missingFormats is empty, that option satisfies all requested play modes.
-Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
-${_profilePromptEvidence(profile, promptTier, promptLimits)}
-Search request: ${query.request}
-User-selected tags: ${query.selectedTags.join(', ')}
-Requested formats: ${requestedFormats.join(', ')}
-Local co-op required: $requireLocalCoOp
-Request-inferred tags: ${query.inferredTags(optionTags).join(', ')}
-Options: ${jsonEncode(options)}
-''';
+      );
+    } catch (_) {
+      return fallback.chooseTopRecommendation(
+        profile,
+        selectableRecommendations,
+        query: query,
+      );
+    }
 
     try {
       final response = await _generateText(
-        prompt,
-        maxTokens: 1024,
+        packed.prompt,
+        maxTokens: budget.responseTokens,
         settings: settings,
       );
       Recommendation? chosen;
@@ -1044,57 +1649,45 @@ Options: ${jsonEncode(options)}
       );
     }
 
-    final promptTier = _promptTier(settings);
-    final promptLimits = _promptLimits(promptTier, settings);
-    final optionLimit = promptLimits.optionLimit.clamp(4, 18).toInt();
-    final tagLimit = promptLimits.optionTagLimit;
-    final profilesSummary = profiles
-        .map((profile) => '${profile.serviceName}: ${profile.primaryTaste}')
-        .join(' | ');
-    final profileEvidence = profiles
-        .map(
-          (profile) =>
-              _profilePromptEvidence(profile, promptTier, promptLimits),
-        )
-        .join('\n');
-    final options = selectableRecommendations.take(optionLimit).map((
-      recommendation,
-    ) {
-      final item = recommendation.item;
-      return {
-        'id': item.id,
-        'title': item.title,
-        'service': item.serviceLabel,
-        'score': recommendation.matchScore.round(),
-        'tags': item.tags.take(tagLimit).toList(),
-        'format': item.format,
-        'requestedFormats': requestedFormats.toList(),
-        'matchedFormats': _matchedRequestedFormats(
-          item,
-          requestedFormats,
-          requireLocalCoOp: requireLocalCoOp,
-        ),
-        'missingFormats': _missingRequestedFormats(
-          item,
-          requestedFormats,
-          requireLocalCoOp: requireLocalCoOp,
-        ),
-        'mediaType': item.mediaType,
-        'reason': recommendation.reason,
-        if (promptTier != _AiPromptTier.compact) ...{
-          'rating': item.rating,
-          'description': item.description,
-        },
-      };
-    }).toList();
-    final prompt =
-        '''
-Prompt mode: ${promptTier.name}.
+    final budget = _promptBudget(settings, responseTokens: 1024);
+    late final _PackedPrompt packed;
+    try {
+      packed = _packPrompt(
+        budget: budget,
+        initialLimits: _promptLimits(budget.tier),
+        build: (limits) {
+          final profilesSummary = profiles
+              .map(
+                (profile) => '${profile.serviceName}: ${profile.primaryTaste}',
+              )
+              .join(' | ');
+          final profileEvidence = profiles
+              .map(
+                (profile) =>
+                    _profilePromptEvidence(profile, budget.tier, limits),
+              )
+              .join('\n');
+          final options = selectableRecommendations
+              .take(limits.optionLimit)
+              .map(
+                (recommendation) => _homeOptionEvidence(
+                  recommendation: recommendation,
+                  tier: budget.tier,
+                  requestedFormats: requestedFormats,
+                  requireLocalCoOp: requireLocalCoOp,
+                  tagLimit: limits.optionTagLimit,
+                ),
+              )
+              .toList();
+          return '''
+Prompt mode: ${budget.tier.name}.
+${_promptScopeInstruction(budget.tier)}
 Pick the single best next recommendation across all services.
 This Home prompt can compare AniList anime/manga with Steam games. Prioritize the user's search request and the most relevant imported profile. Use tags and score as evidence, not as the whole decision.
 If the user asks for a game, prefer Steam GAME options; if they ask for anime/manga, prefer AniList options. If they ask broadly, choose the strongest fit across services.
 Only the listed options are eligible for this request.
-If missingFormats is empty, that option satisfies all requested play modes.
+Each option uses service-specific evidence fields: steamTags and playCapability for Steam, aniListTags and releaseFormat for AniList.
+If missingConstraints is empty, that option satisfies the applicable requested constraints.
 Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
 Profiles summary: $profilesSummary
 $profileEvidence
@@ -1105,11 +1698,20 @@ Local co-op required: $requireLocalCoOp
 Requested media types: ${query.mediaTypes.join(', ')}
 Options: ${jsonEncode(options)}
 ''';
+        },
+      );
+    } catch (_) {
+      return fallback.chooseHomeRecommendation(
+        profiles,
+        selectableRecommendations,
+        query: query,
+      );
+    }
 
     try {
       final response = await _generateText(
-        prompt,
-        maxTokens: 1024,
+        packed.prompt,
+        maxTokens: budget.responseTokens,
         settings: settings,
       );
       Recommendation? chosen;

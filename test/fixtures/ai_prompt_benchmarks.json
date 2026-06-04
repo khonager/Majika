@@ -32,19 +32,21 @@
         "Service context: Steam PC games",
         "Steam play capability values",
         "Known Steam tag subset",
-        "You may output any official Steam tag you confidently know"
+        "You may output any official Steam tag you confidently know",
+        "exactly these keys: tags, formats, searchText"
       ],
       "mustNotContainPromptText": [
         "Yandere",
         "Mahou Shoujo",
         "Previously AI selected tags",
-        "Adult content selected: false"
+        "Adult content selected: false",
+        "mediaTypes",
+        "includeAdult",
+        "AniList release format values"
       ],
       "expectedJsonShape": {
         "tags": ["RPG", "Controller Support"],
         "formats": ["SINGLE_PLAYER", "CONTROLLER"],
-        "mediaTypes": ["GAME"],
-        "includeAdult": false,
         "searchText": "role playing game"
       }
     },
@@ -80,13 +82,13 @@
       "mustNotContainPromptText": [
         "Known AniList tags",
         "Mahou Shoujo",
-        "Adult content selected: false"
+        "Adult content selected: false",
+        "mediaTypes",
+        "includeAdult"
       ],
       "expectedJsonShape": {
         "tags": ["Souls-like", "Action RPG"],
         "formats": ["SINGLE_PLAYER"],
-        "mediaTypes": ["GAME"],
-        "includeAdult": false,
         "searchText": "hard unforgiving boss fights"
       }
     },
@@ -202,7 +204,14 @@
         "A lower-score option can win",
         "Portal 2",
         "It Takes Two",
-        "Steam PC games"
+        "Steam PC games",
+        "missingPlayCapabilities",
+        "\"steamTags\""
+      ],
+      "mustNotContainPromptText": [
+        "\"aniListTags\"",
+        "\"releaseFormat\"",
+        "\"isAdult\""
       ],
       "expectedJsonShape": {
         "id": "steam_portal_like",

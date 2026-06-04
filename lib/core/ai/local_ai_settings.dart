@@ -19,6 +19,12 @@ const defaultCloudAiProvider = 'Google Gemini';
 const defaultCloudAiEndpoint =
     'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 const defaultCloudAiModel = 'gemini-3.1-flash-lite';
+const defaultOnDeviceContextWindowTokens = 4096;
+const defaultLocalServerContextWindowTokens = 16384;
+const defaultCloudContextWindowTokens = 131072;
+const defaultManualContextWindowTokens = 1048576;
+const minimumAiContextWindowTokens = 2048;
+const maximumAiContextWindowTokens = 1048576;
 
 class LocalAiSettingsKeys {
   static const immersiveReader = 'settings.immersiveReader';
@@ -37,6 +43,7 @@ class LocalAiSettingsKeys {
   static const huggingFaceToken = 'settings.huggingFaceToken';
   static const imageQuality = 'settings.imageQuality';
   static const aiContextItems = 'settings.aiContextItems';
+  static const aiContextWindowTokens = 'settings.aiContextWindowTokens';
   static const localEndpoint = 'settings.localEndpoint';
   static const localServerModel = 'settings.localServerModel';
   static const cloudAiProvider = 'settings.cloudAiProvider';
@@ -60,6 +67,8 @@ class LocalAiRuntimeSettings {
   final String deviceModelName;
   final String backend;
   final double contextItems;
+  final int? contextWindowOverrideTokens;
+  final bool allowExplicitContent;
 
   const LocalAiRuntimeSettings({
     required this.useLocalAi,
@@ -75,6 +84,8 @@ class LocalAiRuntimeSettings {
     this.deviceModelName = '',
     this.backend = localAiBackendAuto,
     required this.contextItems,
+    this.contextWindowOverrideTokens,
+    this.allowExplicitContent = false,
   });
 
   const LocalAiRuntimeSettings.defaults({bool enabled = false})
@@ -90,7 +101,9 @@ class LocalAiRuntimeSettings {
       cloudApiKey = '',
       deviceModelName = '',
       backend = localAiBackendAuto,
-      contextItems = 24;
+      contextItems = 24,
+      contextWindowOverrideTokens = null,
+      allowExplicitContent = false;
 
   bool get usesExternalServer =>
       useLocalAi &&
@@ -112,6 +125,28 @@ class LocalAiRuntimeSettings {
       !usesManualAi;
 
   int get contextItemLimit => contextItems.round().clamp(8, 48);
+
+  int get contextWindowTokens {
+    final override = contextWindowOverrideTokens;
+    if (override != null) {
+      return override.clamp(
+        minimumAiContextWindowTokens,
+        maximumAiContextWindowTokens,
+      );
+    }
+    return resolveAiContextWindowTokens(
+      mode: mode,
+      modelName: activeModelName,
+      cloudProvider: usesExternalCloud ? cloudProvider : '',
+    );
+  }
+
+  String get activeModelName {
+    if (usesExternalCloud) return cloudModel;
+    if (usesExternalServer) return serverModel;
+    if (usesOnDeviceModel) return deviceModelName;
+    return provider;
+  }
 
   PreferredBackend? get preferredBackend {
     return switch (backend) {
@@ -187,6 +222,11 @@ class LocalAiRuntimeSettings {
           prefs.getString(LocalAiSettingsKeys.localBackend) ??
           localAiBackendAuto,
       contextItems: prefs.getDouble(LocalAiSettingsKeys.aiContextItems) ?? 24,
+      contextWindowOverrideTokens: prefs.getInt(
+        LocalAiSettingsKeys.aiContextWindowTokens,
+      ),
+      allowExplicitContent:
+          prefs.getBool(LocalAiSettingsKeys.allowExplicitContent) ?? false,
     );
   }
 
@@ -200,4 +240,46 @@ class LocalAiRuntimeSettings {
       _ => localAiModeOnDevice,
     };
   }
+}
+
+int resolveAiContextWindowTokens({
+  required String mode,
+  required String modelName,
+  String cloudProvider = '',
+}) {
+  final normalized = '$cloudProvider $modelName'.toLowerCase();
+  if (mode == localAiModeManual) return defaultManualContextWindowTokens;
+
+  if (normalized.contains('gemini')) return 1048576;
+  if (normalized.contains('llama-3.1') ||
+      normalized.contains('llama3.1') ||
+      normalized.contains('llama-3.2') ||
+      normalized.contains('llama3.2')) {
+    return 131072;
+  }
+
+  if (normalized.contains('gemma 3n') ||
+      normalized.contains('gemma3n') ||
+      normalized.contains('qwen3:4b') ||
+      normalized.contains('qwen3:8b') ||
+      normalized.contains('gemma3:4b') ||
+      normalized.contains('gemma3:12b')) {
+    return 32768;
+  }
+
+  if (mode == localAiModeExternalCloud) {
+    return defaultCloudContextWindowTokens;
+  }
+  if (mode == localAiModeExternalServer) {
+    return defaultLocalServerContextWindowTokens;
+  }
+  return defaultOnDeviceContextWindowTokens;
+}
+
+String formatAiTokenCount(int tokens) {
+  if (tokens >= 1048576 && tokens % 1048576 == 0) {
+    return '${tokens ~/ 1048576}M';
+  }
+  if (tokens >= 1024 && tokens % 1024 == 0) return '${tokens ~/ 1024}K';
+  return tokens.toString();
 }
