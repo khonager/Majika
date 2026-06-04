@@ -326,25 +326,31 @@ class RecommendationQuery {
     if (_containsAny(text, ['short', 'short anime', 'tv short'])) {
       formats.add('TV_SHORT');
     }
-    if (_containsAny(text, ['movie', 'film', 'cinematic'])) {
+    if (_containsAny(text, ['movie', 'movies', 'film', 'films', 'cinematic'])) {
       formats.add('MOVIE');
     }
-    if (_containsAny(text, ['special'])) {
+    if (_containsAny(text, ['special', 'specials'])) {
       formats.add('SPECIAL');
     }
-    if (_containsAny(text, ['ova'])) {
+    if (_containsAny(text, ['ova', 'ovas'])) {
       formats.add('OVA');
     }
-    if (_containsAny(text, ['ona', 'web anime'])) {
+    if (_containsAny(text, ['ona', 'onas', 'web anime'])) {
       formats.add('ONA');
     }
     if (_containsAny(text, ['music video', 'music'])) {
       formats.add('MUSIC');
     }
-    if (_containsAny(text, ['manga', 'comic'])) {
+    if (_containsAny(text, ['manga', 'comic', 'comics'])) {
       formats.add('MANGA');
     }
-    if (_containsAny(text, ['novel', 'light novel', 'ln'])) {
+    if (_containsAny(text, [
+      'novel',
+      'novels',
+      'light novel',
+      'light novels',
+      'ln',
+    ])) {
       formats.add('NOVEL');
     }
     if (_containsAny(text, ['one shot', 'oneshot', 'one-shot'])) {
@@ -385,7 +391,12 @@ class RecommendationQuery {
     if (_containsAny(text, ['online co op', 'online co-op', 'online coop'])) {
       formats.add('ONLINE_CO_OP');
     }
-    if (_containsAny(text, ['controller', 'gamepad'])) {
+    if (_containsAny(text, [
+      'controller',
+      'controllers',
+      'gamepad',
+      'gamepads',
+    ])) {
       formats.add('CONTROLLER');
     }
     if (_containsAny(text, ['steam deck', 'deck verified'])) {
@@ -403,15 +414,29 @@ class RecommendationQuery {
       'anime',
       'tv',
       'movie',
+      'movies',
       'film',
+      'films',
       'special',
+      'specials',
       'ova',
+      'ovas',
       'ona',
+      'onas',
       'music video',
     ])) {
       types.add('ANIME');
     }
-    if (_containsAny(text, ['manga', 'comic', 'novel', 'light novel', 'ln'])) {
+    if (_containsAny(text, [
+      'manga',
+      'comic',
+      'comics',
+      'novel',
+      'novels',
+      'light novel',
+      'light novels',
+      'ln',
+    ])) {
       types.add('MANGA');
     }
     if (_containsAny(text, [
@@ -519,7 +544,7 @@ class RecommendationQuery {
   }
 
   static bool _containsAny(String text, Iterable<String> values) {
-    return values.any((value) => text.contains(_normalize(value)));
+    return values.any((value) => _containsWholePhrase(text, _normalize(value)));
   }
 
   static bool _shouldInferTagFromRequest(String normalizedRequest, String tag) {

@@ -43,6 +43,16 @@ void main() {
     expect(decoded['scoring'], isA<Map<String, dynamic>>());
   });
 
+  test('query inference does not turn word fragments into hard filters', () {
+    const query = RecommendationQuery(
+      request: 'find a deeply personal mystery recommendation',
+    );
+
+    expect(query.inferredFormats(), isNot(contains('ONA')));
+    expect(query.inferredMediaTypes(), isNot(contains('GAME')));
+    expect(query.inferredTags(const ['Mystery']), contains('Mystery'));
+  });
+
   test(
     'flutter gemma service turns model JSON into query selections',
     () async {

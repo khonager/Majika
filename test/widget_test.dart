@@ -8,7 +8,9 @@ import 'package:majika/core/ai/ai_console_log.dart';
 import 'package:majika/core/ai/local_ai_service.dart';
 import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/models/media_item.dart';
+import 'package:majika/core/models/recommendation.dart';
 import 'package:majika/core/models/recommendation_query.dart';
+import 'package:majika/core/models/taste_profile.dart';
 import 'package:majika/core/models/user_taste_signals.dart';
 import 'package:majika/core/services/media_service.dart';
 import 'package:majika/main.dart';
@@ -236,23 +238,13 @@ void main() {
   testWidgets('direct AI pick can resolve a title outside fetched candidates', (
     WidgetTester tester,
   ) async {
-    final aiService = FlutterGemmaLocalAiService(
-      textGenerator: (prompt, maxTokens) async {
-        if (prompt.contains('You turn an anime or manga request')) {
-          return '{"tags":[],"formats":[],"mediaTypes":[],"searchText":"unfetched personal pick"}';
-        }
-        if (prompt.contains('Personally recommend exactly one real anime')) {
-          return '{"title":"AI Outside Pick","reason":"A personal recommendation beyond the fetched tag results."}';
-        }
-        return '{"id":"anilist_2","reason":"Initial candidate pick."}';
-      },
-    );
+    final mediaService = _DirectPickMediaService();
 
     await tester.pumpWidget(
       MaterialApp(
         home: HomeScreen(
-          mediaService: _DirectPickMediaService(),
-          aiService: aiService,
+          mediaService: mediaService,
+          aiService: const _DirectSuggestionAiService(),
         ),
       ),
     );
@@ -270,6 +262,13 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
+    expect(mediaService.searchRequests, contains('AI Outside Pick'));
+    await tester.scrollUntilVisible(
+      find.text('AI Outside Pick'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     expect(find.text('AI Outside Pick'), findsOneWidget);
     expect(find.text('AI recommendation'), findsOneWidget);
     expect(
@@ -313,10 +312,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 250));
 
     expect(find.text('Manual AI response'), findsOneWidget);
-    expect(find.textContaining('Pick the single best AniList'), findsOneWidget);
+    expect(
+      find.textContaining('Personally recommend exactly one real anime'),
+      findsOneWidget,
+    );
     await tester.enterText(
       find.byKey(const ValueKey('manual-ai-response')),
-      '{"id":"anilist_5","reason":"Manual pick."}',
+      '{"title":"Time Travel Movie","reason":"Manual pick."}',
     );
     await tester.tap(find.text('Use response'));
     await tester.pump();
@@ -605,6 +607,54 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Funny PC Game'), findsWidgets);
+  });
+
+  testWidgets('direct Home AI pick resolves through its chosen service', (
+    WidgetTester tester,
+  ) async {
+    final steamService = _DirectPickSteamMediaService();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          mediaServices: [_FakeMediaService(), steamService],
+          aiService: const _DirectHomeSuggestionAiService(),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('AniList'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Steam'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'steamtester');
+    await tester.tap(find.text('Build game profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Home'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('home-recommendation-query')),
+      'find a game from outside the usual results',
+    );
+    await tester.tap(find.byTooltip('Search Home recommendations'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(steamService.searchRequests, contains('AI Outside Steam Pick'));
+    await tester.scrollUntilVisible(
+      find.text('AI Outside Steam Pick'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('AI Outside Steam Pick'), findsWidgets);
+    expect(find.text('Direct cross-service personal pick.'), findsWidgets);
   });
 
   testWidgets('sign out clears only the active saved service', (
@@ -1406,10 +1456,13 @@ class _FailingImportMediaService extends _FakeMediaService {
 }
 
 class _DirectPickMediaService extends _FakeMediaService {
+  final List<String> searchRequests = [];
+
   @override
   Future<List<MediaItem>> searchRecommendationCandidates(
     RecommendationQuery query,
   ) async {
+    searchRequests.add(query.request);
     if (query.request == 'AI Outside Pick') {
       return [
         MediaItem(
@@ -1426,6 +1479,42 @@ class _DirectPickMediaService extends _FakeMediaService {
       ];
     }
     return super.searchRecommendationCandidates(query);
+  }
+}
+
+class _DirectSuggestionAiService extends DeterministicLocalAiService {
+  const _DirectSuggestionAiService();
+
+  @override
+  Future<AiRecommendationSuggestion?> suggestRecommendation(
+    TasteProfile profile,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+  }) async {
+    if (!query.isActive) return null;
+    return const AiRecommendationSuggestion(
+      title: 'AI Outside Pick',
+      serviceName: 'AniList',
+      reason: 'A personal recommendation beyond the fetched tag results.',
+    );
+  }
+}
+
+class _DirectHomeSuggestionAiService extends DeterministicLocalAiService {
+  const _DirectHomeSuggestionAiService();
+
+  @override
+  Future<AiRecommendationSuggestion?> suggestHomeRecommendation(
+    List<TasteProfile> profiles,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+  }) async {
+    if (!query.isActive) return null;
+    return const AiRecommendationSuggestion(
+      title: 'AI Outside Steam Pick',
+      serviceName: 'Steam',
+      reason: 'Direct cross-service personal pick.',
+    );
   }
 }
 
@@ -1614,5 +1703,33 @@ class _FakeSteamMediaService implements MediaService {
       'Co-op',
       'Controller Support',
     ];
+  }
+}
+
+class _DirectPickSteamMediaService extends _FakeSteamMediaService {
+  final List<String> searchRequests = [];
+
+  @override
+  Future<List<MediaItem>> searchRecommendationCandidates(
+    RecommendationQuery query,
+  ) async {
+    searchRequests.add(query.request);
+    if (query.request == 'AI Outside Steam Pick') {
+      return [
+        MediaItem(
+          id: 'steam_direct_pick',
+          title: 'AI Outside Steam Pick',
+          coverUrl: '',
+          tags: const ['RPG', 'Strategy'],
+          rating: 9,
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: id,
+          siteUrl: 'https://store.steampowered.com/app/direct-pick',
+          description: 'A resolved Steam title absent from the fetched pool.',
+        ),
+      ];
+    }
+    return super.searchRecommendationCandidates(query);
   }
 }
