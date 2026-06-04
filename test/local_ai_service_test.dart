@@ -408,6 +408,47 @@ void main() {
     );
   });
 
+  test(
+    'direct AniList prompt prioritizes high-rated owned titles to avoid',
+    () async {
+      late String capturedPrompt;
+      final highRatedOwned = _mediaItem(
+        'anilist_high_rated',
+        'No Game No Life',
+      );
+      final library = [
+        for (var index = 0; index < 12; index++)
+          _mediaItem('anilist_owned_$index', 'Owned Anime $index'),
+        highRatedOwned,
+      ];
+      final service = FlutterGemmaLocalAiService(
+        textGenerator: (prompt, maxTokens) async {
+          capturedPrompt = prompt;
+          return '{"title":"Odd Taxi","reason":"An unseen approachable pick."}';
+        },
+      );
+
+      await service.suggestRecommendation(
+        _profile(library: library, highRatedItems: [highRatedOwned]),
+        const [],
+        query: const RecommendationQuery(
+          request: 'something good for a person who never watched anime',
+          mediaTypes: {'ANIME'},
+        ),
+      );
+
+      expect(
+        capturedPrompt,
+        contains('Known library titles to avoid: ["No Game No Life"'),
+      );
+      expect(capturedPrompt, contains('"Owned Anime 11"'));
+      expect(
+        capturedPrompt,
+        contains('taste signals only, never valid recommendations'),
+      );
+    },
+  );
+
   test('AI has a distinct direct Home recommendation prompt', () async {
     late String capturedPrompt;
     final service = FlutterGemmaLocalAiService(
@@ -438,6 +479,10 @@ void main() {
     expect(suggestion?.title, 'Odd Taxi');
     expect(capturedPrompt, contains('direct Home recommendation'));
     expect(capturedPrompt, contains('across the user\'s imported services'));
+    expect(
+      capturedPrompt,
+      contains('taste signals only, never valid recommendations'),
+    );
     expect(
       capturedPrompt,
       contains('Choose only from these services: AniList, Steam'),
@@ -568,7 +613,7 @@ void main() {
 
       expect(interpreted.aiSelectedTags, contains('Mystery'));
       expect(interpreted.aiSelectedTags, isNot(contains('Romance')));
-      expect(interpreted.formats, contains('TV'));
+      expect(interpreted.formats, contains('SERIES'));
     },
   );
 
@@ -677,7 +722,7 @@ void main() {
       'gemini-3.1-flash-lite',
     );
     expect(interpreted.aiSelectedTags, contains('Mystery'));
-    expect(interpreted.formats, contains('TV'));
+    expect(interpreted.formats, contains('SERIES'));
   });
 
   test('local AI service can use manual copy paste responses', () async {

@@ -786,7 +786,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       return 'Service context: Steam PC games. Tags are Steam genres, store tags, and play features. Formats are gameplay capability filters such as single-player, co-op, controller, and Steam Deck.';
     }
     if (_isAniListService(serviceName)) {
-      return 'Service context: AniList anime and manga. Tags are AniList genres and media tags. Formats are AniList release formats such as TV, movie, OVA, manga, and novel.';
+      return 'Service context: AniList anime and manga. Tags are AniList genres and media tags. Formats are broad content shapes: series, movie, manga, and book.';
     }
     return 'Service context: $serviceName recommendations. Use the service tags and filters below.';
   }
@@ -1012,7 +1012,7 @@ You turn an anime or manga request into AniList search help for Majika.
 This is not the final recommendation prompt. Preserve titles, franchises, creators, unusual tropes, and specific taste words in searchText so Majika can fetch candidates beyond tag matches. A later AI prompt will personally pick the best title.
 Return JSON only. No markdown. No explanation.
 Return one object with exactly these keys: tags, formats, mediaTypes, includeAdult, searchText.
-Use empty arrays when no known AniList tag, release format, or media type clearly matches.
+Use empty arrays when no known AniList tag, broad format, or media type clearly matches.
 Do not return Steam store tags or Steam play capabilities.
 Keep leftover natural-language anime or manga terms in searchText.
 AniList media type values: ${allowedMediaTypes.join(', ')}
@@ -1592,10 +1592,7 @@ AniList options: ${jsonEncode(options)}
     required RecommendationQuery query,
     required List<Map<String, Object?>> knownHints,
   }) {
-    final ownedTitles = profile.library
-        .take(limits.profileItemLimit)
-        .map((item) => item.title)
-        .toList();
+    final ownedTitles = _ownedTitlesForPrompt(profile, limits);
     if (_isSteamService(profile.serviceName)) {
       return '''
 Prompt mode: ${tier.name}.
@@ -1604,6 +1601,7 @@ ${_servicePromptContext('Steam')}
 Personally recommend exactly one real Steam PC game from your own knowledge for this user.
 This is a direct recommendation, not tag selection and not option reranking. You may choose a game outside the known search-result hints. Use the request, the user's game taste, and your knowledge of games as the decision.
 The title must be an exact game title that Majika can search for on Steam. Do not invent a game and do not recommend a game the user already owns.
+Titles shown in profile evidence are already owned and are taste signals only, never valid recommendations.
 Respect required play capabilities when they are present.
 Return JSON only. Use exactly these keys: title, reason.
 ${_profilePromptEvidence(profile, tier, limits)}
@@ -1621,6 +1619,7 @@ ${_servicePromptContext('AniList')}
 Personally recommend exactly one real anime or manga title from your own knowledge for this user.
 This is a direct recommendation, not tag selection and not option reranking. You may choose a title outside the known search-result hints. Use the request, the user's anime/manga taste, and your knowledge of titles as the decision.
 The title must be an exact canonical title that Majika can search for on AniList. Do not invent a title and do not recommend a title already in the user's library.
+Titles shown in profile evidence are already in the user's library and are taste signals only, never valid recommendations.
 Respect requested media types and release formats when they are present.
 ${_adultRecommendationGuidance(query, supportsAdultContent: true)}
 Return JSON only. Use exactly these keys: title, reason.
@@ -1639,6 +1638,7 @@ ${_servicePromptContext(profile.serviceName)}
 Personally recommend exactly one real title from your own knowledge for this user.
 This is a direct recommendation, not tag selection and not option reranking. You may choose a title outside the known search-result hints.
 The title must be exact and searchable through ${profile.serviceName}. Do not invent a title and do not recommend a title already in the user's library.
+Titles shown in profile evidence are already in the user's library and are taste signals only, never valid recommendations.
 ${_adultRecommendationGuidance(query, supportsAdultContent: true)}
 Return JSON only. Use exactly these keys: title, reason.
 ${_profilePromptEvidence(profile, tier, limits)}
@@ -1648,6 +1648,32 @@ Requested formats: ${query.effectiveFormats().join(', ')}
 Known library titles to avoid: ${jsonEncode(ownedTitles)}
 Known search-result hints, optional and non-exhaustive: ${jsonEncode(knownHints)}
 ''';
+  }
+
+  List<String> _ownedTitlesForPrompt(
+    TasteProfile profile,
+    _PromptLimits limits,
+  ) {
+    final limit = limits.profileItemLimit >= _fullPromptLimit
+        ? _fullPromptLimit
+        : limits.profileItemLimit * 8;
+    final titles = <String>{};
+
+    void add(MediaItem? item) {
+      final title = item?.title.trim() ?? '';
+      if (title.isNotEmpty && titles.length < limit) {
+        titles.add(title);
+      }
+    }
+
+    add(profile.recentActivity);
+    for (final item in profile.highRatedItems) {
+      add(item);
+    }
+    for (final item in profile.library) {
+      add(item);
+    }
+    return titles.toList();
   }
 
   String _homeDirectRecommendationPrompt({
@@ -1663,10 +1689,7 @@ Known search-result hints, optional and non-exhaustive: ${jsonEncode(knownHints)
         .toList();
     final ownedTitles = {
       for (final profile in profiles)
-        profile.serviceName: profile.library
-            .take(limits.profileItemLimit)
-            .map((item) => item.title)
-            .toList(),
+        profile.serviceName: _ownedTitlesForPrompt(profile, limits),
     };
     final profileEvidence = profiles
         .map((profile) => _profilePromptEvidence(profile, tier, limits))
@@ -1679,6 +1702,7 @@ This is the direct Home recommendation, not tag selection and not option reranki
 Choose only from these services: ${availableServices.join(', ')}.
 If the request asks for a game, choose Steam. If it asks for anime or manga, choose AniList. For a broad request, choose the strongest personal fit across the available services.
 Return an exact title searchable through the chosen service. Do not invent a title and do not recommend anything already in the corresponding library.
+Titles shown in profile evidence are already owned and are taste signals only, never valid recommendations.
 Respect hard media-type and format/play-capability requirements when they apply to the chosen service.
 ${_adultRecommendationGuidance(query, supportsAdultContent: availableServices.any(_isAniListService))}
 Return JSON only. Use exactly these keys: service, title, reason. The service must exactly match one available service.

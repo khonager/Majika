@@ -163,7 +163,9 @@ class AniListService implements MediaService {
     RecommendationQuery query, {
     required Iterable<String> availableTags,
   }) async {
-    final formats = query.effectiveFormats();
+    final formats = RecommendationQuery.aniListReleaseFormatsFor(
+      query.effectiveFormats(),
+    );
     final tags = query.effectiveTags(availableTags);
     final searchText = tags.isEmpty && formats.isEmpty
         ? query.aniListSearchText
@@ -172,10 +174,10 @@ class AniListService implements MediaService {
     final mediaTags = tags
         .where((tag) => !_knownAniListGenres.contains(tag))
         .toList();
-    final variables = {
+    final variables = <String, dynamic>{
       'type': mediaType,
       'page': 1,
-      'perPage': 30,
+      'perPage': 50,
       'isAdult': query.includeAdult || query.infersAdult,
       if (searchText.isNotEmpty) 'search': searchText,
       if (formats.isNotEmpty) 'formatIn': formats.toList(),
@@ -183,15 +185,31 @@ class AniListService implements MediaService {
       if (mediaTags.isNotEmpty) 'tagIn': mediaTags,
     };
 
-    final response = await _postGraphQl(_searchQuery, variables);
-    final candidates = parseCandidates(jsonDecode(response.body));
+    final pageCount = tags.isEmpty && searchText.isEmpty ? 4 : 1;
+    final candidates = await _searchPages(variables, pageCount: pageCount);
     if (candidates.isNotEmpty || mediaTags.isEmpty || genreTags.isEmpty) {
       return candidates;
     }
 
     final relaxedVariables = {...variables}..remove('tagIn');
-    final relaxedResponse = await _postGraphQl(_searchQuery, relaxedVariables);
-    return parseCandidates(jsonDecode(relaxedResponse.body));
+    return _searchPages(relaxedVariables, pageCount: pageCount);
+  }
+
+  Future<List<MediaItem>> _searchPages(
+    Map<String, dynamic> variables, {
+    required int pageCount,
+  }) async {
+    final candidates = <MediaItem>[];
+    for (var page = 1; page <= pageCount; page++) {
+      final response = await _postGraphQl(_searchQuery, {
+        ...variables,
+        'page': page,
+      });
+      final pageCandidates = parseCandidates(jsonDecode(response.body));
+      if (pageCandidates.isEmpty) break;
+      candidates.addAll(pageCandidates);
+    }
+    return _dedupe(candidates);
   }
 
   Future<http.Response> _postGraphQl(

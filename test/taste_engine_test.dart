@@ -424,6 +424,38 @@ void main() {
       expect(timeTravelMovie.formats, contains('MOVIE'));
       expect(timeTravelMovie.mediaTypes, contains('ANIME'));
 
+      final legacySeries = const RecommendationQuery(
+        formats: {'TV', 'OVA', 'ONA', 'SPECIAL'},
+      );
+      expect(legacySeries.effectiveFormats(), {'SERIES'});
+
+      final book = const RecommendationQuery(
+        request: 'recommend a fantasy book',
+      ).withInferredSelections(RecommendationQuery.browsableTags);
+      expect(book.formats, contains('BOOK'));
+      expect(book.mediaTypes, contains('MANGA'));
+
+      final aniListRequest = const RecommendationQuery(
+        request: 'anime recommendation for beginners',
+      ).withInferredSelections(RecommendationQuery.aniListBrowsableTags);
+      expect(aniListRequest.aiSelectedTags, isNot(contains('Anime')));
+
+      final broadBeginnerRequest = const RecommendationQuery(
+        request: 'something good for a person who never watched anime ever',
+      );
+      expect(
+        broadBeginnerRequest.matchesText(
+          MediaItem(
+            id: 'anilist_beginner',
+            title: 'Approachable Pick',
+            coverUrl: '',
+            tags: ['Comedy'],
+            format: 'TV',
+          ),
+        ),
+        isTrue,
+      );
+
       final obsessedCharacter = const RecommendationQuery(
         request: 'obsessed character thriller',
       ).withInferredSelections(RecommendationQuery.browsableTags);

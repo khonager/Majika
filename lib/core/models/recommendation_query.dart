@@ -5,7 +5,9 @@ class RecommendationQuery {
   static const steamMediaTypes = ['GAME'];
   static const allMediaTypes = [...aniListMediaTypes, ...steamMediaTypes];
 
-  static const aniListFormats = [
+  static const aniListFormats = ['SERIES', 'MOVIE', 'MANGA', 'BOOK'];
+
+  static const aniListReleaseFormats = [
     'TV',
     'TV_SHORT',
     'MOVIE',
@@ -286,7 +288,32 @@ class RecommendationQuery {
   }
 
   Set<String> effectiveFormats() {
-    return {...inferredFormats(), ...formats};
+    return {
+      for (final format in {...inferredFormats(), ...formats})
+        canonicalFormat(format),
+    };
+  }
+
+  static String canonicalFormat(String format) {
+    return switch (format) {
+      'TV' || 'TV_SHORT' || 'SPECIAL' || 'OVA' || 'ONA' || 'MUSIC' => 'SERIES',
+      'ONE_SHOT' => 'MANGA',
+      'NOVEL' => 'BOOK',
+      _ => format,
+    };
+  }
+
+  static Set<String> aniListReleaseFormatsFor(Iterable<String> formats) {
+    return {
+      for (final format in formats)
+        ...switch (canonicalFormat(format)) {
+          'SERIES' => {'TV', 'TV_SHORT', 'SPECIAL', 'OVA', 'ONA', 'MUSIC'},
+          'MOVIE' => {'MOVIE'},
+          'MANGA' => {'MANGA', 'ONE_SHOT'},
+          'BOOK' => {'NOVEL'},
+          _ => <String>{},
+        },
+    };
   }
 
   Set<String> effectiveMediaTypes() {
@@ -297,14 +324,15 @@ class RecommendationQuery {
     final normalizedRequest = _normalize(request);
     if (normalizedRequest.isEmpty) return {};
 
-    final searchSpace = {...browsableTags, ...availableTags};
+    final searchSpace = availableTags.toSet();
     final inferred = <String>{
       for (final tag in searchSpace)
         if (_shouldInferTagFromRequest(normalizedRequest, tag)) tag,
     };
 
     for (final entry in _fallbackTagHints.entries) {
-      if (_containsAny(normalizedRequest, entry.value)) {
+      if (searchSpace.contains(entry.key) &&
+          _containsAny(normalizedRequest, entry.value)) {
         inferred.add(entry.key);
       }
     }
@@ -321,27 +349,31 @@ class RecommendationQuery {
     final formats = <String>{};
 
     if (_containsAny(text, ['tv', 'series', 'show', 'anime series'])) {
-      formats.add('TV');
-    }
-    if (_containsAny(text, ['short', 'short anime', 'tv short'])) {
-      formats.add('TV_SHORT');
+      formats.add('SERIES');
     }
     if (_containsAny(text, ['movie', 'movies', 'film', 'films', 'cinematic'])) {
       formats.add('MOVIE');
     }
-    if (_containsAny(text, ['special', 'specials'])) {
-      formats.add('SPECIAL');
+    if (_containsAny(text, [
+      'special',
+      'specials',
+      'ova',
+      'ovas',
+      'ona',
+      'onas',
+      'web anime',
+      'music video',
+    ])) {
+      formats.add('SERIES');
     }
-    if (_containsAny(text, ['ova', 'ovas'])) {
-      formats.add('OVA');
-    }
-    if (_containsAny(text, ['ona', 'onas', 'web anime'])) {
-      formats.add('ONA');
-    }
-    if (_containsAny(text, ['music video', 'music'])) {
-      formats.add('MUSIC');
-    }
-    if (_containsAny(text, ['manga', 'comic', 'comics'])) {
+    if (_containsAny(text, [
+      'manga',
+      'comic',
+      'comics',
+      'one shot',
+      'oneshot',
+      'one-shot',
+    ])) {
       formats.add('MANGA');
     }
     if (_containsAny(text, [
@@ -349,12 +381,11 @@ class RecommendationQuery {
       'novels',
       'light novel',
       'light novels',
+      'book',
+      'books',
       'ln',
     ])) {
-      formats.add('NOVEL');
-    }
-    if (_containsAny(text, ['one shot', 'oneshot', 'one-shot'])) {
-      formats.add('ONE_SHOT');
+      formats.add('BOOK');
     }
     if (_containsAny(text, ['single player', 'single-player', 'solo'])) {
       formats.add('SINGLE_PLAYER');
@@ -435,6 +466,8 @@ class RecommendationQuery {
       'novels',
       'light novel',
       'light novels',
+      'book',
+      'books',
       'ln',
     ])) {
       types.add('MANGA');
@@ -487,22 +520,42 @@ class RecommendationQuery {
       'about',
       'an',
       'and',
+      'approachable',
+      'beginner',
+      'beginners',
+      'best',
+      'easy',
+      'ever',
       'for',
       'find',
       'give',
+      'good',
       'i',
       'in',
       'me',
+      'never',
+      'new',
+      'newcomer',
+      'newcomers',
       'of',
       'or',
+      'people',
+      'person',
       'recommend',
+      'recommendation',
       'recommendations',
       'show',
+      'someone',
       'something',
+      'start',
+      'starting',
       'that',
       'the',
       'to',
       'want',
+      'watch',
+      'watched',
+      'who',
       'with',
     };
 

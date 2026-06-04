@@ -209,6 +209,26 @@ void main() {
     expect(find.textContaining('No matches'), findsOneWidget);
   });
 
+  testWidgets('AniList exposes broad content format filters', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Series'), findsOneWidget);
+    expect(find.text('Movie'), findsOneWidget);
+    expect(find.text('Manga'), findsWidgets);
+    expect(find.text('Book'), findsOneWidget);
+    expect(find.text('OVA'), findsNothing);
+    expect(find.text('ONA'), findsNothing);
+    expect(find.text('Special'), findsNothing);
+  });
+
   testWidgets('natural language search fetches matching candidates', (
     WidgetTester tester,
   ) async {
@@ -275,6 +295,33 @@ void main() {
       find.text('A personal recommendation beyond the fetched tag results.'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('invalid direct AI pick falls back to ranked recommendations', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          mediaService: _FakeMediaService(),
+          aiService: const _InvalidDirectSuggestionAiService(),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search a vibe, tag, format, or request'),
+      'anime recommendation for beginners',
+    );
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Best Match'), findsOneWidget);
+    expect(find.textContaining('No matches'), findsNothing);
   });
 
   testWidgets('manual AI mode prompts for pasted search responses', (
@@ -1496,6 +1543,23 @@ class _DirectSuggestionAiService extends DeterministicLocalAiService {
       title: 'AI Outside Pick',
       serviceName: 'AniList',
       reason: 'A personal recommendation beyond the fetched tag results.',
+    );
+  }
+}
+
+class _InvalidDirectSuggestionAiService extends DeterministicLocalAiService {
+  const _InvalidDirectSuggestionAiService();
+
+  @override
+  Future<AiRecommendationSuggestion?> suggestRecommendation(
+    TasteProfile profile,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+  }) async {
+    return const AiRecommendationSuggestion(
+      title: 'Anya for Animals',
+      serviceName: 'AniList',
+      reason: 'A made-up title should not erase valid ranked results.',
     );
   }
 }

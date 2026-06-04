@@ -2525,16 +2525,10 @@ class _RecommendationSearchPanelState
 
   String _formatLabel(String format) {
     return switch (format) {
-      'TV' => 'TV',
-      'TV_SHORT' => 'TV Short',
+      'SERIES' => 'Series',
       'MOVIE' => 'Movie',
-      'OVA' => 'OVA',
-      'ONA' => 'ONA',
-      'MUSIC' => 'Music',
       'MANGA' => 'Manga',
-      'NOVEL' => 'Novel',
-      'SPECIAL' => 'Special',
-      'ONE_SHOT' => 'One-shot',
+      'BOOK' => 'Book',
       'SINGLE_PLAYER' => 'Single-player',
       'MULTIPLAYER' => 'Multiplayer',
       'CO_OP' => 'Co-op',
@@ -2596,7 +2590,10 @@ class _RecommendationSearchPanelState
   }
 
   void _toggleFormat(String format) {
-    final formats = {...widget.query.formats};
+    final formats = {
+      for (final selected in widget.query.formats)
+        RecommendationQuery.canonicalFormat(selected),
+    };
     formats.contains(format) ? formats.remove(format) : formats.add(format);
     widget.onQueryChanged(widget.query.copyWith(formats: formats));
   }

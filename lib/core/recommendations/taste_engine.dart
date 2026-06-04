@@ -420,6 +420,11 @@ class TasteEngine {
     required bool requireLocalCoOp,
   }) {
     if (requestedFormat == item.format) return true;
+    if (RecommendationQuery.aniListFormats.contains(requestedFormat)) {
+      return RecommendationQuery.aniListReleaseFormatsFor({
+        requestedFormat,
+      }).contains(item.format);
+    }
     final normalizedTags = item.tags
         .map((tag) => tag.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ''))
         .toSet();

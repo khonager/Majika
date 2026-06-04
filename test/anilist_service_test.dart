@@ -315,6 +315,60 @@ void main() {
     expect(results.single.title, 'Out of Order');
     expect(requests.single['tagIn'], contains('Achronological Order'));
     expect(requests.single['search'], isNull);
+    expect(requests.single['perPage'], 50);
+  });
+
+  test('broad series search discovers candidates on deeper pages', () async {
+    final pages = <int>[];
+    final service = AniListService(
+      client: MockClient((request) async {
+        final payload = jsonDecode(request.body) as Map<String, dynamic>;
+        final graphQuery = payload['query'] as String;
+        if (graphQuery.contains('GenreCollection')) {
+          return _json({
+            'data': {
+              'GenreCollection': <String>[],
+              'MediaTagCollection': <Object>[],
+            },
+          });
+        }
+
+        final variables = Map<String, dynamic>.from(
+          payload['variables'] as Map,
+        );
+        final page = variables['page'] as int;
+        pages.add(page);
+        expect(variables['formatIn'], containsAll(['TV', 'OVA', 'ONA']));
+        if (page == 3) {
+          return _json({
+            'data': {
+              'Page': {'media': <Object>[]},
+            },
+          });
+        }
+        return _json({
+          'data': {
+            'Page': {
+              'media': [_candidateJson(page, 'Series page $page')],
+            },
+          },
+        });
+      }),
+    );
+
+    final results = await service.searchRecommendationCandidates(
+      const RecommendationQuery(
+        request: 'anime recommendation for beginners',
+        mediaTypes: {'ANIME'},
+        formats: {'TV', 'OVA', 'ONA', 'SPECIAL'},
+      ),
+    );
+
+    expect(pages, [1, 2, 3]);
+    expect(results.map((item) => item.title), [
+      'Series page 1',
+      'Series page 2',
+    ]);
   });
 }
 
@@ -324,4 +378,27 @@ http.Response _json(Map<String, Object?> body) {
     200,
     headers: {'content-type': 'application/json'},
   );
+}
+
+Map<String, Object?> _candidateJson(int id, String title) {
+  return {
+    'id': id,
+    'type': 'ANIME',
+    'format': 'TV',
+    'title': {'userPreferred': title, 'romaji': title, 'english': null},
+    'coverImage': {'large': 'https://example.com/$id.jpg'},
+    'genres': ['Comedy'],
+    'tags': <Object>[],
+    'siteUrl': 'https://anilist.co/anime/$id',
+    'characters': {'nodes': <Object>[]},
+    'studios': {'nodes': <Object>[]},
+    'averageScore': 80,
+    'popularity': 1000,
+    'episodes': 12,
+    'chapters': null,
+    'status': 'FINISHED',
+    'isAdult': false,
+    'startDate': {'year': 2024},
+    'description': 'An approachable series.',
+  };
 }
