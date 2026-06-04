@@ -178,7 +178,7 @@ class AniListService implements MediaService {
       'type': mediaType,
       'page': 1,
       'perPage': 50,
-      'isAdult': query.includeAdult || query.infersAdult,
+      'isAdult': query.allowsAdult,
       if (searchText.isNotEmpty) 'search': searchText,
       if (formats.isNotEmpty) 'formatIn': formats.toList(),
       if (genreTags.isNotEmpty) 'genreIn': genreTags,

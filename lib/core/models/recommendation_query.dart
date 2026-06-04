@@ -172,6 +172,7 @@ class RecommendationQuery {
   final Set<String> mediaTypes;
   final Set<String> formats;
   final bool includeAdult;
+  final bool excludeAdult;
 
   const RecommendationQuery({
     this.request = '',
@@ -180,6 +181,7 @@ class RecommendationQuery {
     this.mediaTypes = const {},
     this.formats = const {},
     this.includeAdult = false,
+    this.excludeAdult = false,
   });
 
   factory RecommendationQuery.fromJson(Map<String, dynamic> json) {
@@ -190,6 +192,7 @@ class RecommendationQuery {
       mediaTypes: _jsonStringSet(json['mediaTypes']),
       formats: _jsonStringSet(json['formats']),
       includeAdult: json['includeAdult'] as bool? ?? false,
+      excludeAdult: json['excludeAdult'] as bool? ?? false,
     );
   }
 
@@ -201,6 +204,7 @@ class RecommendationQuery {
       'mediaTypes': mediaTypes.toList(),
       'formats': formats.toList(),
       'includeAdult': includeAdult,
+      'excludeAdult': excludeAdult,
     };
   }
 
@@ -212,6 +216,8 @@ class RecommendationQuery {
       formats.isNotEmpty ||
       includeAdult;
 
+  bool get allowsAdult => !excludeAdult && (includeAdult || infersAdult);
+
   bool get infersAdult {
     final text = _normalize(request);
     return _containsAny(text, [
@@ -220,7 +226,17 @@ class RecommendationQuery {
       'hentai',
       'ecchi',
       'explicit',
+      'erotic',
+      'erotica',
+      'lewd',
+      'porn',
+      'pornography',
+      'r18',
+      'sex',
+      'sexual',
+      'smut',
       '18+',
+      '18 plus',
     ]);
   }
 
@@ -255,6 +271,7 @@ class RecommendationQuery {
     Set<String>? mediaTypes,
     Set<String>? formats,
     bool? includeAdult,
+    bool? excludeAdult,
   }) {
     return RecommendationQuery(
       request: request ?? this.request,
@@ -263,6 +280,7 @@ class RecommendationQuery {
       mediaTypes: mediaTypes ?? this.mediaTypes,
       formats: formats ?? this.formats,
       includeAdult: includeAdult ?? this.includeAdult,
+      excludeAdult: excludeAdult ?? this.excludeAdult,
     );
   }
 
@@ -271,7 +289,7 @@ class RecommendationQuery {
       aiSelectedTags: inferredTags(availableTags),
       mediaTypes: effectiveMediaTypes(),
       formats: effectiveFormats(),
-      includeAdult: includeAdult || infersAdult,
+      includeAdult: allowsAdult,
     );
   }
 
@@ -288,8 +306,15 @@ class RecommendationQuery {
   }
 
   Set<String> effectiveFormats() {
+    final selectedFormats = {
+      for (final format in formats) canonicalFormat(format),
+    };
+    final hasAniListSelection = selectedFormats.any(aniListFormats.contains);
     return {
-      for (final format in {...inferredFormats(), ...formats})
+      for (final format
+          in hasAniListSelection
+              ? selectedFormats
+              : {...inferredFormats(), ...selectedFormats})
         canonicalFormat(format),
     };
   }
@@ -317,7 +342,20 @@ class RecommendationQuery {
   }
 
   Set<String> effectiveMediaTypes() {
+    final formatTypes = aniListMediaTypesForFormats(effectiveFormats());
+    if (formatTypes.isNotEmpty) return formatTypes;
     return mediaTypes.isNotEmpty ? mediaTypes : inferredMediaTypes();
+  }
+
+  static Set<String> aniListMediaTypesForFormats(Iterable<String> formats) {
+    return {
+      for (final format in formats)
+        ...switch (canonicalFormat(format)) {
+          'SERIES' || 'MOVIE' => {'ANIME'},
+          'MANGA' || 'BOOK' => {'MANGA'},
+          _ => <String>{},
+        },
+    };
   }
 
   Set<String> inferredTags(Iterable<String> availableTags) {
@@ -778,8 +816,17 @@ class RecommendationQuery {
       'spy family',
       'spy x family',
     ],
-    'Hentai': ['hentai', 'explicit adult'],
-    'Ecchi': ['ecchi', 'fanservice'],
+    'Hentai': [
+      'hentai',
+      'explicit adult',
+      'erotic adult',
+      'porn',
+      'pornography',
+      'r18',
+      'sexual',
+      'smut',
+    ],
+    'Ecchi': ['ecchi', 'fanservice', 'lewd'],
     'Action': [
       'action',
       'fight',

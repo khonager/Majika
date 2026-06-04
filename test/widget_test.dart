@@ -74,7 +74,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('explicit-content preference expands imported candidates', (
+  testWidgets('explicit-content permission waits for an adult request', (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues({
@@ -90,14 +90,8 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(service.includeAdultRequests, contains(true));
-    final adultChip = tester.widget<FilterChip>(
-      find.descendant(
-        of: find.byKey(const ValueKey('filter-adult')),
-        matching: find.byType(FilterChip),
-      ),
-    );
-    expect(adultChip.selected, isTrue);
+    expect(service.includeAdultRequests, isNot(contains(true)));
+    expect(find.byKey(const ValueKey('filter-adult')), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -183,6 +177,9 @@ void main() {
   testWidgets('search request and chips refill recommendations', (
     WidgetTester tester,
   ) async {
+    SharedPreferences.setMockInitialValues({
+      LocalAiSettingsKeys.allowExplicitContent: true,
+    });
     await tester.pumpWidget(
       MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
     );
@@ -202,7 +199,7 @@ void main() {
 
     expect(find.text('Adult Match'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('filter-type-manga')));
+    await tester.tap(find.byKey(const ValueKey('filter-format-manga')));
     await tester.pumpAndSettle();
 
     expect(find.text('Adult Match'), findsNothing);
@@ -224,9 +221,38 @@ void main() {
     expect(find.text('Movie'), findsOneWidget);
     expect(find.text('Manga'), findsWidgets);
     expect(find.text('Book'), findsOneWidget);
+    expect(find.text('Type'), findsNothing);
+    expect(find.byKey(const ValueKey('filter-type-anime')), findsNothing);
+    expect(find.byKey(const ValueKey('filter-adult')), findsNothing);
     expect(find.text('OVA'), findsNothing);
     expect(find.text('ONA'), findsNothing);
     expect(find.text('Special'), findsNothing);
+  });
+
+  testWidgets('hidden explicit content overrides an adult search', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      LocalAiSettingsKeys.allowExplicitContent: false,
+    });
+    final service = _TrackingAdultMediaService();
+
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: service)),
+    );
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search a vibe, tag, format, or request'),
+      'hentai romance ova',
+    );
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pumpAndSettle();
+
+    expect(service.includeAdultRequests, isNot(contains(true)));
+    expect(find.text('Adult Match'), findsNothing);
   });
 
   testWidgets('natural language search fetches matching candidates', (
@@ -1443,9 +1469,7 @@ class _FakeMediaService implements MediaService {
           description:
               'A romance movie where time travel changes the relationship.',
         ),
-      ...await fetchRecommendationCandidates(
-        includeAdult: query.includeAdult || query.infersAdult,
-      ),
+      ...await fetchRecommendationCandidates(includeAdult: query.allowsAdult),
     ];
   }
 

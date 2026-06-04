@@ -244,12 +244,9 @@ void main() {
         availableTags: const ['Romance', 'Hentai'],
       );
 
-      expect(
-        capturedPrompt,
-        contains('Adult/NSFW content is allowed by the user settings'),
-      );
+      expect(capturedPrompt, contains('Adult/NSFW content is permitted'));
       expect(capturedPrompt, isNot(contains('Adult content selected: false')));
-      expect(interpreted.includeAdult, isTrue);
+      expect(interpreted.includeAdult, isFalse);
     },
   );
 

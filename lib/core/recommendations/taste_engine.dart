@@ -99,7 +99,7 @@ class TasteEngine {
     final requestedFormats = query.effectiveFormats();
     final requestedMediaTypes = query.effectiveMediaTypes();
     final requireLocalCoOp = query.infersLocalCoOp;
-    final includeAdult = query.includeAdult || query.infersAdult;
+    final includeAdult = query.allowsAdult;
 
     for (final candidate in candidates) {
       if (libraryIds.contains(candidate.id)) continue;

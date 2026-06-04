@@ -192,8 +192,8 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final service = workspace.service;
       final initialQuery = RecommendationQuery(
-        includeAdult:
-            service.supportsAdultContent && await _allowsExplicitContent(),
+        excludeAdult:
+            service.supportsAdultContent && !await _allowsExplicitContent(),
       );
       final importResults = await Future.wait<Object?>([
         service.fetchUserProfile(userName),
@@ -291,11 +291,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final workspace = _activeWorkspace;
     final profile = workspace.profile;
     if (profile == null) return;
+    final allowExplicitContent = await _allowsExplicitContent();
     final requestQuery = rawQuery.copyWith(
-      includeAdult:
-          rawQuery.includeAdult ||
-          (workspace.service.supportsAdultContent &&
-              await _allowsExplicitContent()),
+      includeAdult: false,
+      excludeAdult:
+          workspace.service.supportsAdultContent && !allowExplicitContent,
     );
     if (!mounted) return;
     final searchRunId = ++_nextSearchRunId;
@@ -328,8 +328,7 @@ class _HomeScreenState extends State<HomeScreen> {
           );
           var candidates = workspace.candidates;
           final needsAdultCandidates =
-              (query.includeAdult || query.infersAdult) &&
-              !workspace.adultCandidatesLoaded;
+              query.allowsAdult && !workspace.adultCandidatesLoaded;
 
           if (query.isActive) {
             progressToast.update(
@@ -416,7 +415,8 @@ class _HomeScreenState extends State<HomeScreen> {
   ) async {
     final allowExplicitContent = await _allowsExplicitContent();
     final homeRequestQuery = rawQuery.copyWith(
-      includeAdult: rawQuery.includeAdult || allowExplicitContent,
+      includeAdult: false,
+      excludeAdult: !allowExplicitContent,
     );
     if (!mounted) return;
     final importedWorkspaces = _importedWorkspaces;
@@ -451,10 +451,10 @@ class _HomeScreenState extends State<HomeScreen> {
             final profile = workspace.profile;
             if (profile == null) continue;
             final serviceRequestQuery = rawQuery.copyWith(
-              includeAdult:
-                  rawQuery.includeAdult ||
-                  (allowExplicitContent &&
-                      workspace.service.supportsAdultContent),
+              includeAdult: false,
+              excludeAdult:
+                  workspace.service.supportsAdultContent &&
+                  !allowExplicitContent,
             );
             progressToast.update(
               'Interpreting ${workspace.service.displayName} filters...',
@@ -474,12 +474,12 @@ class _HomeScreenState extends State<HomeScreen> {
               mediaTypes: {...chooserQuery.mediaTypes, ...query.mediaTypes},
               formats: {...chooserQuery.formats, ...query.formats},
               includeAdult: chooserQuery.includeAdult || query.includeAdult,
+              excludeAdult: chooserQuery.excludeAdult || query.excludeAdult,
             );
 
             var candidates = workspace.candidates;
             final needsAdultCandidates =
-                (query.includeAdult || query.infersAdult) &&
-                !workspace.adultCandidatesLoaded;
+                query.allowsAdult && !workspace.adultCandidatesLoaded;
 
             if (query.isActive) {
               progressToast.update(
@@ -842,7 +842,8 @@ class _HomeScreenState extends State<HomeScreen> {
       final searchResults = await service.searchRecommendationCandidates(
         RecommendationQuery(
           request: suggestion.title,
-          includeAdult: query.includeAdult || query.infersAdult,
+          includeAdult: query.allowsAdult,
+          excludeAdult: query.excludeAdult,
         ),
       );
       MediaItem? item;
@@ -870,7 +871,7 @@ class _HomeScreenState extends State<HomeScreen> {
           !requiredMediaTypes.contains(resolvedItem.mediaType)) {
         return (recommendation: null, discoveredItem: null);
       }
-      if (resolvedItem.isAdult && !(query.includeAdult || query.infersAdult)) {
+      if (resolvedItem.isAdult && !query.allowsAdult) {
         return (recommendation: null, discoveredItem: null);
       }
       final applicableFormats = query
@@ -884,7 +885,8 @@ class _HomeScreenState extends State<HomeScreen> {
         profile,
         [resolvedItem],
         query: RecommendationQuery(
-          includeAdult: query.includeAdult || query.infersAdult,
+          includeAdult: query.allowsAdult,
+          excludeAdult: query.excludeAdult,
           mediaTypes: applicableMediaTypes,
           formats: applicableFormats,
         ),
@@ -920,11 +922,14 @@ class _HomeScreenState extends State<HomeScreen> {
         if (workspace == null) continue;
         final session = entry.value;
         workspace.restore(
-          allowExplicitContent && workspace.service.supportsAdultContent
-              ? session.copyWith(
-                  query: session.query.copyWith(includeAdult: true),
-                )
-              : session,
+          session.copyWith(
+            query: session.query.copyWith(
+              includeAdult: false,
+              excludeAdult:
+                  workspace.service.supportsAdultContent &&
+                  !allowExplicitContent,
+            ),
+          ),
           tasteEngine: _tasteEngine,
         );
       }
@@ -934,47 +939,11 @@ class _HomeScreenState extends State<HomeScreen> {
           : activeWorkspace.profile?.userName ?? '';
     });
     _rebuildHomeRecommendationsSync();
-    if (allowExplicitContent) {
-      unawaited(_loadAllowedExplicitCandidates());
-    }
   }
 
   Future<bool> _allowsExplicitContent() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(LocalAiSettingsKeys.allowExplicitContent) ?? false;
-  }
-
-  Future<void> _loadAllowedExplicitCandidates() async {
-    for (final workspace in _importedWorkspaces) {
-      if (!workspace.service.supportsAdultContent ||
-          workspace.adultCandidatesLoaded) {
-        continue;
-      }
-      try {
-        final adultCandidates = await workspace.service
-            .fetchRecommendationCandidates(includeAdult: true);
-        if (!mounted) return;
-        final query = workspace.query.copyWith(includeAdult: true);
-        final candidates = _dedupeCandidates([
-          ...workspace.candidates,
-          ...adultCandidates,
-        ]);
-        setState(() {
-          workspace.query = query;
-          workspace.candidates = candidates;
-          workspace.recommendations = _tasteEngine.rankCandidates(
-            workspace.profile!,
-            candidates,
-            query: query,
-          );
-          workspace.adultCandidatesLoaded = true;
-        });
-        unawaited(_persistWorkspace(workspace));
-      } catch (_) {
-        // A saved feed remains usable if an adult-candidate refresh fails.
-      }
-    }
-    _rebuildHomeRecommendationsSync();
   }
 
   Future<void> _persistWorkspace(_ServiceWorkspace workspace) async {
@@ -2458,29 +2427,23 @@ class _RecommendationSearchPanelState
             ],
           ),
           const SizedBox(height: 12),
-          _FilterSection(
-            label: 'Type',
-            children: [
-              for (final mediaType in widget.mediaService.supportedMediaTypes)
-                _FilterChipButton(
-                  key: ValueKey('filter-type-${mediaType.toLowerCase()}'),
-                  label: _mediaTypeLabel(mediaType),
-                  selected: widget.query.effectiveMediaTypes().contains(
-                    mediaType,
+          if (widget.mediaService.displayName != 'AniList') ...[
+            _FilterSection(
+              label: 'Type',
+              children: [
+                for (final mediaType in widget.mediaService.supportedMediaTypes)
+                  _FilterChipButton(
+                    key: ValueKey('filter-type-${mediaType.toLowerCase()}'),
+                    label: _mediaTypeLabel(mediaType),
+                    selected: widget.query.effectiveMediaTypes().contains(
+                      mediaType,
+                    ),
+                    onSelected: () => _toggleMediaType(mediaType),
                   ),
-                  onSelected: () => _toggleMediaType(mediaType),
-                ),
-              if (widget.mediaService.supportsAdultContent)
-                _FilterChipButton(
-                  key: const ValueKey('filter-adult'),
-                  label: 'Adult',
-                  selected:
-                      widget.query.includeAdult || widget.query.infersAdult,
-                  onSelected: _toggleAdult,
-                ),
-            ],
-          ),
-          const SizedBox(height: 10),
+              ],
+            ),
+            const SizedBox(height: 10),
+          ],
           _FilterSection(
             label: widget.mediaService.displayName == 'Steam'
                 ? 'Modes'
@@ -2594,13 +2557,24 @@ class _RecommendationSearchPanelState
       for (final selected in widget.query.formats)
         RecommendationQuery.canonicalFormat(selected),
     };
-    formats.contains(format) ? formats.remove(format) : formats.add(format);
-    widget.onQueryChanged(widget.query.copyWith(formats: formats));
-  }
-
-  void _toggleAdult() {
+    if (widget.mediaService.displayName == 'AniList') {
+      if (formats.contains(format)) {
+        formats.remove(format);
+      } else {
+        formats
+          ..clear()
+          ..add(format);
+      }
+    } else {
+      formats.contains(format) ? formats.remove(format) : formats.add(format);
+    }
     widget.onQueryChanged(
-      widget.query.copyWith(includeAdult: !widget.query.includeAdult),
+      widget.query.copyWith(
+        formats: formats,
+        mediaTypes: widget.mediaService.displayName == 'AniList'
+            ? RecommendationQuery.aniListMediaTypesForFormats(formats)
+            : widget.query.mediaTypes,
+      ),
     );
   }
 }

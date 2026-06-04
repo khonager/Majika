@@ -409,6 +409,17 @@ void main() {
       ),
       hasLength(1),
     );
+    expect(
+      engine.rankCandidates(
+        profile,
+        candidates,
+        query: const RecommendationQuery(
+          request: 'hentai romance ova',
+          excludeAdult: true,
+        ),
+      ),
+      isEmpty,
+    );
   });
 
   test(
@@ -428,6 +439,7 @@ void main() {
         formats: {'TV', 'OVA', 'ONA', 'SPECIAL'},
       );
       expect(legacySeries.effectiveFormats(), {'SERIES'});
+      expect(legacySeries.effectiveMediaTypes(), {'ANIME'});
 
       final book = const RecommendationQuery(
         request: 'recommend a fantasy book',
@@ -435,10 +447,29 @@ void main() {
       expect(book.formats, contains('BOOK'));
       expect(book.mediaTypes, contains('MANGA'));
 
+      const mangaFormatWins = RecommendationQuery(
+        mediaTypes: {'ANIME'},
+        formats: {'MANGA'},
+      );
+      expect(mangaFormatWins.effectiveMediaTypes(), {'MANGA'});
+
       final aniListRequest = const RecommendationQuery(
         request: 'anime recommendation for beginners',
       ).withInferredSelections(RecommendationQuery.aniListBrowsableTags);
       expect(aniListRequest.aiSelectedTags, isNot(contains('Anime')));
+
+      final adultRequest = const RecommendationQuery(
+        request: 'an erotic adult anime',
+      ).withInferredSelections(const ['Romance', 'Hentai']);
+      expect(adultRequest.includeAdult, isTrue);
+      expect(adultRequest.aiSelectedTags, contains('Hentai'));
+
+      final hiddenAdultRequest = const RecommendationQuery(
+        request: 'an erotic adult anime',
+        excludeAdult: true,
+      ).withInferredSelections(const ['Romance', 'Hentai']);
+      expect(hiddenAdultRequest.includeAdult, isFalse);
+      expect(hiddenAdultRequest.allowsAdult, isFalse);
 
       final broadBeginnerRequest = const RecommendationQuery(
         request: 'something good for a person who never watched anime ever',

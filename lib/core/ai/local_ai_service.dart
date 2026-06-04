@@ -290,10 +290,14 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     Iterable<String> allowedFormats = RecommendationQuery.aniListFormats,
   }) async {
     final settings = await _runtimeSettings();
+    final supportsExplicitContent = _isAniListService(serviceName);
     final explicitAllowedBySettings =
-        settings.allowExplicitContent && !_isSteamService(serviceName);
+        settings.allowExplicitContent && supportsExplicitContent;
     final effectiveQuery = query.copyWith(
-      includeAdult: query.includeAdult || explicitAllowedBySettings,
+      includeAdult: false,
+      excludeAdult:
+          query.excludeAdult ||
+          (supportsExplicitContent && !explicitAllowedBySettings),
     );
     if (!query.isActive ||
         (!settings.useLocalAi && textGenerator == null) ||
@@ -317,10 +321,12 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     final selectedMediaLine = effectiveQuery.mediaTypes.isEmpty
         ? ''
         : 'User-selected source filters already active: ${effectiveQuery.mediaTypes.join(', ')}\n';
-    final adultGuidance = (query.includeAdult || query.infersAdult)
+    final adultGuidance = query.excludeAdult
+        ? 'Explicit content is hidden by user preference. Set includeAdult to false and do not select adult-only tags.'
+        : query.allowsAdult
         ? 'Adult/NSFW content is explicitly requested or enabled for this search; include it only when it improves the requested match.'
         : explicitAllowedBySettings
-        ? 'Adult/NSFW content is allowed by the user settings. Do not exclude a fitting result merely because it is adult; keep includeAdult true so Majika can include those candidates.'
+        ? 'Adult/NSFW content is permitted, but include it only when the request asks for it. Set includeAdult based on the request text.'
         : 'The includeAdult output field means the request explicitly asks for adult/NSFW content; infer it from the request text only.';
     try {
       final packed = _packPrompt(
@@ -677,7 +683,9 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       formats: formats,
       mediaTypes: mediaTypes,
       includeAdult:
-          ruleInterpreted.includeAdult || decoded['includeAdult'] == true,
+          !original.excludeAdult &&
+          (ruleInterpreted.includeAdult || decoded['includeAdult'] == true),
+      excludeAdult: original.excludeAdult,
     );
   }
 
@@ -1579,7 +1587,10 @@ AniList options: ${jsonEncode(options)}
     required bool supportsAdultContent,
   }) {
     if (!supportsAdultContent) return '';
-    if (query.includeAdult || query.infersAdult) {
+    if (query.excludeAdult) {
+      return 'Explicit content is hidden by user preference. Never choose an adult-only title, even when the request asks for one.';
+    }
+    if (query.allowsAdult) {
       return 'Adult titles are allowed for this request. Consider them normally when they are the best fit.';
     }
     return 'Do not choose an adult-only title unless the request explicitly asks for one.';
