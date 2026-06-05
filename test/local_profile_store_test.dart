@@ -27,6 +27,16 @@ void main() {
             mediaType: 'ANIME',
           ),
         ],
+        baseCandidates: [
+          MediaItem(
+            id: 'anilist_base',
+            title: 'Base Candidate',
+            coverUrl: '',
+            tags: const ['Mystery'],
+            format: 'TV',
+            mediaType: 'ANIME',
+          ),
+        ],
         serviceTags: const ['Comedy', 'Mystery'],
         query: const RecommendationQuery(
           request: 'funny tv',
@@ -45,6 +55,7 @@ void main() {
       expect(saved!.profile.userName, 'tester');
       expect(saved.profile.favoriteGenres, contains('Mystery'));
       expect(saved.candidates.single.title, 'Candidate');
+      expect(saved.baseCandidates.single.title, 'Base Candidate');
       expect(saved.serviceTags, contains('Comedy'));
       expect(saved.query.request, 'funny tv');
       expect(saved.query.selectedTags, contains('Comedy'));

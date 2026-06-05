@@ -355,6 +355,43 @@ void main() {
     expect(find.text('More matching this request'), findsNothing);
   });
 
+  testWidgets('new Steam searches do not reuse previous search candidates', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          mediaService: _SwitchingSearchSteamMediaService(),
+          aiService: const _ActionSteamAiService(),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build game profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    final searchField = find.widgetWithText(
+      TextField,
+      'Search a genre, mode, game, or vibe',
+    );
+    await tester.enterText(searchField, 'first action game');
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Old Action Result'), findsOneWidget);
+
+    await tester.enterText(searchField, 'second action game');
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('New Action Result'), findsOneWidget);
+    expect(find.text('Old Action Result'), findsNothing);
+  });
+
   testWidgets('invalid direct AI pick falls back to ranked recommendations', (
     WidgetTester tester,
   ) async {
@@ -1639,6 +1676,25 @@ class _GooseSteamAiService extends DeterministicLocalAiService {
   }
 }
 
+class _ActionSteamAiService extends DeterministicLocalAiService {
+  const _ActionSteamAiService();
+
+  @override
+  Future<RecommendationQuery> interpretRecommendationRequest(
+    RecommendationQuery query, {
+    required Iterable<String> availableTags,
+    String serviceName = 'AniList',
+    Iterable<String> allowedMediaTypes = RecommendationQuery.allMediaTypes,
+    Iterable<String> allowedFormats = RecommendationQuery.allFormats,
+  }) async {
+    return query.copyWith(
+      aiSelectedTags: const {'Action'},
+      mediaTypes: const {'GAME'},
+      formats: const {'SINGLE_PLAYER'},
+    );
+  }
+}
+
 class _InvalidDirectSuggestionAiService extends DeterministicLocalAiService {
   const _InvalidDirectSuggestionAiService();
 
@@ -1914,6 +1970,38 @@ class _WeakFunSteamMediaService extends _FakeSteamMediaService {
         siteUrl: 'https://store.steampowered.com/app/funko',
         description:
             'A festival of fandom with iconic worlds and mashup characters.',
+      ),
+    ];
+  }
+}
+
+class _SwitchingSearchSteamMediaService extends _FakeSteamMediaService {
+  @override
+  Future<List<MediaItem>> fetchRecommendationCandidates({
+    bool includeAdult = false,
+  }) async {
+    return const <MediaItem>[];
+  }
+
+  @override
+  Future<List<MediaItem>> searchRecommendationCandidates(
+    RecommendationQuery query,
+  ) async {
+    final title = query.request.contains('second')
+        ? 'New Action Result'
+        : 'Old Action Result';
+    final id = query.request.contains('second') ? 'steam_new' : 'steam_old';
+    return [
+      MediaItem(
+        id: id,
+        title: title,
+        coverUrl: '',
+        tags: const ['Action', 'Single-player'],
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        sourceId: this.id,
+        siteUrl: 'https://store.steampowered.com/app/$id',
+        description: 'An action game with strong request evidence.',
       ),
     ];
   }

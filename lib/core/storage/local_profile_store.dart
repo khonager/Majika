@@ -9,6 +9,7 @@ class LocalProfileSession {
   final String serviceId;
   final TasteProfile profile;
   final List<MediaItem> candidates;
+  final List<MediaItem> baseCandidates;
   final List<String> serviceTags;
   final RecommendationQuery query;
   final bool adultCandidatesLoaded;
@@ -18,6 +19,7 @@ class LocalProfileSession {
     required this.serviceId,
     required this.profile,
     required this.candidates,
+    this.baseCandidates = const [],
     required this.serviceTags,
     required this.query,
     required this.adultCandidatesLoaded,
@@ -25,12 +27,15 @@ class LocalProfileSession {
   });
 
   factory LocalProfileSession.fromJson(Map<String, dynamic> json) {
+    final candidates = _mediaItemsFromJson(json['candidates']);
+    final baseCandidates = _mediaItemsFromJson(json['baseCandidates']);
     return LocalProfileSession(
       serviceId: json['serviceId'] as String? ?? '',
       profile: TasteProfile.fromJson(
         Map<String, dynamic>.from(json['profile'] as Map? ?? const {}),
       ),
-      candidates: _mediaItemsFromJson(json['candidates']),
+      candidates: candidates,
+      baseCandidates: baseCandidates.isEmpty ? candidates : baseCandidates,
       serviceTags: _stringList(json['serviceTags']),
       query: RecommendationQuery.fromJson(
         Map<String, dynamic>.from(json['query'] as Map? ?? const {}),
@@ -45,6 +50,7 @@ class LocalProfileSession {
       'serviceId': serviceId,
       'profile': profile.toJson(),
       'candidates': candidates.map((item) => item.toJson()).toList(),
+      'baseCandidates': baseCandidates.map((item) => item.toJson()).toList(),
       'serviceTags': serviceTags,
       'query': query.toJson(),
       'adultCandidatesLoaded': adultCandidatesLoaded,
@@ -55,6 +61,7 @@ class LocalProfileSession {
   LocalProfileSession copyWith({
     TasteProfile? profile,
     List<MediaItem>? candidates,
+    List<MediaItem>? baseCandidates,
     List<String>? serviceTags,
     RecommendationQuery? query,
     bool? adultCandidatesLoaded,
@@ -64,6 +71,7 @@ class LocalProfileSession {
       serviceId: serviceId,
       profile: profile ?? this.profile,
       candidates: candidates ?? this.candidates,
+      baseCandidates: baseCandidates ?? this.baseCandidates,
       serviceTags: serviceTags ?? this.serviceTags,
       query: query ?? this.query,
       adultCandidatesLoaded:

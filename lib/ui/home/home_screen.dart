@@ -30,6 +30,7 @@ class _ServiceWorkspace {
   final MediaService service;
   TasteProfile? profile;
   List<MediaItem> candidates;
+  List<MediaItem> baseCandidates;
   List<String> serviceTags;
   List<Recommendation> recommendations;
   RecommendationQuery query;
@@ -42,6 +43,7 @@ class _ServiceWorkspace {
 
   _ServiceWorkspace({required this.service})
     : candidates = [],
+      baseCandidates = [],
       serviceTags = [],
       recommendations = [],
       query = const RecommendationQuery(),
@@ -59,6 +61,7 @@ class _ServiceWorkspace {
       serviceId: service.id,
       profile: currentProfile,
       candidates: candidates,
+      baseCandidates: baseCandidates,
       serviceTags: serviceTags,
       query: query,
       adultCandidatesLoaded: adultCandidatesLoaded,
@@ -72,6 +75,9 @@ class _ServiceWorkspace {
   }) {
     profile = session.profile;
     candidates = session.candidates;
+    baseCandidates = session.baseCandidates.isEmpty
+        ? session.candidates
+        : session.baseCandidates;
     serviceTags = session.serviceTags;
     query = session.query;
     adultCandidatesLoaded = session.adultCandidatesLoaded;
@@ -92,6 +98,7 @@ class _ServiceWorkspace {
   void clear({String draft = ''}) {
     profile = null;
     candidates = [];
+    baseCandidates = [];
     serviceTags = [];
     recommendations = [];
     query = const RecommendationQuery();
@@ -235,6 +242,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         workspace.profile = profile;
         workspace.candidates = storedCandidates;
+        workspace.baseCandidates = candidates;
         workspace.serviceTags = serviceTags;
         workspace.recommendations = recommendations;
         workspace.query = initialQuery;
@@ -326,7 +334,8 @@ class _HomeScreenState extends State<HomeScreen> {
             allowedMediaTypes: workspace.service.supportedMediaTypes,
             allowedFormats: workspace.service.supportedFormats,
           );
-          var candidates = workspace.candidates;
+          var baseCandidates = workspace.baseCandidates;
+          var candidates = query.isActive ? <MediaItem>[] : [...baseCandidates];
           final needsAdultCandidates =
               query.allowsAdult && !workspace.adultCandidatesLoaded;
 
@@ -346,6 +355,10 @@ class _HomeScreenState extends State<HomeScreen> {
             progressToast.update('Adding adult-content candidates...');
             final adultCandidates = await workspace.service
                 .fetchRecommendationCandidates(includeAdult: true);
+            baseCandidates = _dedupeCandidates([
+              ...baseCandidates,
+              ...adultCandidates,
+            ]);
             candidates = _dedupeCandidates([...candidates, ...adultCandidates]);
           }
 
@@ -396,6 +409,7 @@ class _HomeScreenState extends State<HomeScreen> {
           }
           setState(() {
             workspace.query = query;
+            workspace.baseCandidates = baseCandidates;
             workspace.candidates = candidates;
             workspace.recommendations = orderedRecommendations;
             workspace.adultCandidatesLoaded =
@@ -497,7 +511,10 @@ class _HomeScreenState extends State<HomeScreen> {
               excludeAdult: chooserQuery.excludeAdult || query.excludeAdult,
             );
 
-            var candidates = workspace.candidates;
+            var baseCandidates = workspace.baseCandidates;
+            var candidates = query.isActive
+                ? <MediaItem>[]
+                : [...baseCandidates];
             final needsAdultCandidates =
                 query.allowsAdult && !workspace.adultCandidatesLoaded;
 
@@ -519,6 +536,10 @@ class _HomeScreenState extends State<HomeScreen> {
               );
               final adultCandidates = await workspace.service
                   .fetchRecommendationCandidates(includeAdult: true);
+              baseCandidates = _dedupeCandidates([
+                ...baseCandidates,
+                ...adultCandidates,
+              ]);
               candidates = _dedupeCandidates([
                 ...candidates,
                 ...adultCandidates,
@@ -558,6 +579,7 @@ class _HomeScreenState extends State<HomeScreen> {
             );
             if (recommendations.isEmpty) continue;
 
+            workspace.baseCandidates = baseCandidates;
             workspace.candidates = candidates;
             workspace.adultCandidatesLoaded =
                 workspace.adultCandidatesLoaded || needsAdultCandidates;
@@ -1195,7 +1217,7 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final tag in workspace.profile?.favoriteGenres ?? const <String>[]) {
       counts.update(tag, (count) => count + 4, ifAbsent: () => 4);
     }
-    for (final item in workspace.candidates) {
+    for (final item in workspace.baseCandidates) {
       for (final tag in item.tags) {
         counts.update(tag, (count) => count + 1, ifAbsent: () => 1);
       }
