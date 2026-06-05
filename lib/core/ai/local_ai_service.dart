@@ -1315,6 +1315,7 @@ Favorite tags: ${profile.favoriteGenres.take(limits.profileItemLimit).join(', ')
     required Set<String> requestedFormats,
     required bool requireLocalCoOp,
     required Set<String> requestTags,
+    required RecommendationQuery query,
     required int tagLimit,
     required int signalLimit,
   }) {
@@ -1349,6 +1350,8 @@ Favorite tags: ${profile.favoriteGenres.take(limits.profileItemLimit).join(', ')
         ...common,
         'steamTags': item.tags.take(tagLimit).toList(),
         'matchedRequestSteamTags': matchedRequestTags,
+        if (_asksForPrimaryComedy(query))
+          'comedyFit': _steamComedyFitLabel(item),
         'playCapability': item.format,
         'requestedPlayCapabilities': requestedFormats.toList(),
         'matchedPlayCapabilities': matchedFormats,
@@ -1459,15 +1462,17 @@ ${_servicePromptContext('Steam')}
 Pick the single best Steam game for this user from the Steam game options.
 Treat Steam store tags, matchedRequestSteamTags, scores, playtime, and ranker reasons as evidence, not as the decision itself.
 Prioritize the game request and the user's personal game taste. A lower-score option can win when it better satisfies the request or resembles a named game, franchise, mechanic, or mood.
+${_steamRequestIntentGuidance(query)}
 Only the listed Steam game options are eligible for this request.
 If missingPlayCapabilities is empty, that game satisfies every required Steam play capability.
 Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
 ${_profilePromptEvidence(profile, tier, limits)}
 Game request: ${query.request}
 User-selected Steam tags: ${query.selectedTags.join(', ')}
+AI-selected Steam tags: ${query.aiSelectedTags.join(', ')}
 Required Steam play capabilities: ${requestedFormats.join(', ')}
 Local co-op required: $requireLocalCoOp
-Request-inferred Steam tags: ${inferredTags.join(', ')}
+Text-inferred Steam tags: ${inferredTags.join(', ')}
 Steam game options: ${jsonEncode(options)}
 ''';
   }
@@ -1596,6 +1601,56 @@ AniList options: ${jsonEncode(options)}
     return 'Do not choose an adult-only title unless the request explicitly asks for one.';
   }
 
+  bool _asksForPrimaryComedy(RecommendationQuery query) {
+    final normalized = query.request.toLowerCase();
+    return normalized.contains('laugh') ||
+        normalized.contains('funny') ||
+        normalized.contains('comedy') ||
+        normalized.contains('comedic') ||
+        normalized.contains('humor') ||
+        normalized.contains('humour') ||
+        query.selectedTags.any(_isComedySteamTag) ||
+        query.aiSelectedTags.any(_isComedySteamTag);
+  }
+
+  bool _isComedySteamTag(String tag) {
+    final normalized = tag.toLowerCase();
+    return normalized == 'comedy' ||
+        normalized == 'funny' ||
+        normalized == 'humor' ||
+        normalized == 'humour' ||
+        normalized == 'satire' ||
+        normalized == 'parody';
+  }
+
+  String _steamComedyFitLabel(MediaItem item) {
+    if (item.tags.any(_isComedySteamTag)) return 'core comedy tag';
+    final text = '${item.title} ${item.description}'.toLowerCase();
+    final strongSignals = [
+      'comedy',
+      'comedic',
+      'funny',
+      'hilarious',
+      'laugh',
+      'parody',
+      'satire',
+      'slapstick',
+      'absurd',
+      'silly',
+      'witty',
+      'joke',
+      'bonkers',
+      'whimsical',
+    ];
+    if (strongSignals.any(text.contains)) return 'comedy-forward evidence';
+    return 'incidental or unclear humor';
+  }
+
+  String _steamRequestIntentGuidance(RecommendationQuery query) {
+    if (!_asksForPrimaryComedy(query)) return '';
+    return 'For this request, treat laughter/comedy as a core requirement. Prefer games known or marketed as comedy, funny, absurd, parody, slapstick, or witty. Do not choose broad action, open-world, or RPG games merely because they contain occasional jokes, satire, or a few funny moments.';
+  }
+
   String _serviceDirectRecommendationPrompt({
     required TasteProfile profile,
     required _AiPromptTier tier,
@@ -1611,12 +1666,14 @@ ${_promptScopeInstruction(tier)}
 ${_servicePromptContext('Steam')}
 Personally recommend exactly one real Steam PC game from your own knowledge for this user.
 This is a direct recommendation, not tag selection and not option reranking. You may choose a game outside the known search-result hints. Use the request, the user's game taste, and your knowledge of games as the decision.
+${_steamRequestIntentGuidance(query)}
 The title must be an exact game title that Majika can search for on Steam. Do not invent a game and do not recommend a game the user already owns.
 Titles shown in profile evidence are already owned and are taste signals only, never valid recommendations.
 Respect required play capabilities when they are present.
 Return JSON only. Use exactly these keys: title, reason.
 ${_profilePromptEvidence(profile, tier, limits)}
 Game request: ${query.request}
+AI-selected Steam tags: ${query.aiSelectedTags.join(', ')}
 Required Steam play capabilities: ${query.effectiveFormats().join(', ')}
 Known owned-game titles to avoid: ${jsonEncode(ownedTitles)}
 Known Steam search-result hints, optional and non-exhaustive: ${jsonEncode(knownHints)}
@@ -1885,6 +1942,7 @@ Known cross-service search-result hints, optional and non-exhaustive: ${jsonEnco
                   requestedFormats: requestedFormats,
                   requireLocalCoOp: requireLocalCoOp,
                   requestTags: requestTags,
+                  query: query,
                   tagLimit: limits.optionTagLimit,
                   signalLimit: limits.signalLimit,
                 ),
