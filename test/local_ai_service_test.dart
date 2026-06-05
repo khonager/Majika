@@ -350,55 +350,72 @@ void main() {
     expect(chosen?.reason, 'Best fit from the AI pass.');
   });
 
-  test('Steam comedy prompt treats laughter as the core request', () async {
-    late String capturedPrompt;
-    final service = FlutterGemmaLocalAiService(
-      textGenerator: (prompt, maxTokens) async {
-        capturedPrompt = prompt;
-        return '{"id":"steam_funi","reason":"It is built around silly comedy rather than incidental jokes."}';
-      },
-    );
+  test(
+    'Steam picker prompt prioritizes request fit over profile shape',
+    () async {
+      late String capturedPrompt;
+      final service = FlutterGemmaLocalAiService(
+        textGenerator: (prompt, maxTokens) async {
+          capturedPrompt = prompt;
+          return '{"id":"steam_funi","reason":"It is built around silly comedy rather than incidental jokes."}';
+        },
+      );
 
-    final chosen = await service.chooseTopRecommendation(
-      _profile(serviceName: 'Steam'),
-      [
-        _recommendation(
-          'steam_gta',
-          'Grand Theft Auto V Legacy',
-          tags: const ['Action', 'Adventure', 'Single-player'],
-          mediaType: 'GAME',
-          format: 'SINGLE_PLAYER',
-          sourceId: 'com.majika.service.steam',
+      final chosen = await service.chooseTopRecommendation(
+        _profile(serviceName: 'Steam'),
+        [
+          _recommendation(
+            'steam_gta',
+            'Grand Theft Auto V Legacy',
+            tags: const ['Action', 'Adventure', 'Single-player'],
+            mediaType: 'GAME',
+            format: 'SINGLE_PLAYER',
+            sourceId: 'com.majika.service.steam',
+          ),
+          _recommendation(
+            'steam_funi',
+            'Funi Raccoon Game',
+            tags: const ['Comedy', 'Funny', 'Single-player'],
+            mediaType: 'GAME',
+            format: 'SINGLE_PLAYER',
+            sourceId: 'com.majika.service.steam',
+          ),
+        ],
+        query: const RecommendationQuery(
+          request: 'a fun single player game that makes you laugh a lot',
+          aiSelectedTags: {'Comedy', 'Funny'},
+          formats: {'SINGLE_PLAYER'},
         ),
-        _recommendation(
-          'steam_funi',
-          'Funi Raccoon Game',
-          tags: const ['Comedy', 'Funny', 'Single-player'],
-          mediaType: 'GAME',
-          format: 'SINGLE_PLAYER',
-          sourceId: 'com.majika.service.steam',
-        ),
-      ],
-      query: const RecommendationQuery(
-        request: 'a fun single player game that makes you laugh a lot',
-        aiSelectedTags: {'Comedy', 'Funny'},
-        formats: {'SINGLE_PLAYER'},
-      ),
-    );
+      );
 
-    expect(chosen?.item.id, 'steam_funi');
-    expect(capturedPrompt, contains('laughter/comedy as a core requirement'));
-    expect(capturedPrompt, contains('AI-selected Steam tags: Comedy, Funny'));
-    expect(
-      capturedPrompt,
-      contains('"comedyFit":"incidental or unclear humor"'),
-    );
-    expect(capturedPrompt, contains('"comedyFit":"core comedy tag"'));
-    expect(
-      capturedPrompt,
-      contains('Do not choose broad action, open-world, or RPG games merely'),
-    );
-  });
+      expect(chosen?.item.id, 'steam_funi');
+      expect(
+        capturedPrompt,
+        contains('First filter for the strongest match to the game request'),
+      );
+      expect(
+        capturedPrompt,
+        contains('Steam taste profile only as secondary guidance'),
+      );
+      expect(
+        capturedPrompt,
+        contains(
+          'Write the reason around why the chosen game fits the request',
+        ),
+      );
+      expect(capturedPrompt, contains('AI-selected Steam tags: Comedy, Funny'));
+      expect(
+        capturedPrompt,
+        contains('"requestFitEvidence":["tag:Single-player"]'),
+      );
+      expect(
+        capturedPrompt,
+        contains(
+          '"requestFitEvidence":["tag:Comedy","tag:Funny","tag:Single-player"]',
+        ),
+      );
+    },
+  );
 
   test('AI can directly suggest a Steam game outside fetched options', () async {
     late String capturedPrompt;

@@ -1345,13 +1345,17 @@ Favorite tags: ${profile.favoriteGenres.take(limits.profileItemLimit).join(', ')
         'reasonFromRanker': recommendation.reason,
       },
     };
+    final requestFit = _requestFitEvidence(
+      item,
+      query: query,
+      requestTags: requestTags,
+    );
     if (_isSteamService(serviceName)) {
       return {
         ...common,
         'steamTags': item.tags.take(tagLimit).toList(),
         'matchedRequestSteamTags': matchedRequestTags,
-        if (_asksForPrimaryComedy(query))
-          'comedyFit': _steamComedyFitLabel(item),
+        'requestFitEvidence': requestFit,
         'playCapability': item.format,
         'requestedPlayCapabilities': requestedFormats.toList(),
         'matchedPlayCapabilities': matchedFormats,
@@ -1367,6 +1371,7 @@ Favorite tags: ${profile.favoriteGenres.take(limits.profileItemLimit).join(', ')
         ...common,
         'aniListTags': item.tags.take(tagLimit).toList(),
         'matchedRequestAniListTags': matchedRequestTags,
+        'requestFitEvidence': requestFit,
         'releaseFormat': item.format,
         'requestedReleaseFormats': requestedFormats.toList(),
         'matchedReleaseFormats': matchedFormats,
@@ -1386,6 +1391,7 @@ Favorite tags: ${profile.favoriteGenres.take(limits.profileItemLimit).join(', ')
       ...common,
       'tags': item.tags.take(tagLimit).toList(),
       'requestTags': matchedRequestTags,
+      'requestFitEvidence': requestFit,
       'format': item.format,
       'requestedFormats': requestedFormats.toList(),
       'matchedFormats': matchedFormats,
@@ -1433,7 +1439,8 @@ ${_promptScopeInstruction(tier)}
 ${_servicePromptContext(profile.serviceName)}
 Pick the single best recommendation for this user from the options.
 Treat tags, requestTags, scores, and ranker reasons as evidence, not as the decision itself.
-Prioritize the user's request and personal taste. A lower-score option can win when it better satisfies the request or resembles a named title, franchise, or trope.
+First filter for the strongest match to the user's request. Use the taste profile only as secondary guidance or a tie-breaker.
+Write the reason around why the chosen option fits the request; mention personal taste only when it adds useful context.
 Only the listed options are eligible for this request.
 Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
 ${_profilePromptEvidence(profile, tier, limits)}
@@ -1461,8 +1468,9 @@ ${_promptScopeInstruction(tier)}
 ${_servicePromptContext('Steam')}
 Pick the single best Steam game for this user from the Steam game options.
 Treat Steam store tags, matchedRequestSteamTags, scores, playtime, and ranker reasons as evidence, not as the decision itself.
-Prioritize the game request and the user's personal game taste. A lower-score option can win when it better satisfies the request or resembles a named game, franchise, mechanic, or mood.
-${_steamRequestIntentGuidance(query)}
+First filter for the strongest match to the game request. Use the user's Steam taste profile only as secondary guidance or a tie-breaker.
+Do not pick a broadly popular or profile-shaped game when another option better satisfies the requested mood, mechanic, theme, tag, franchise, format, or play capability.
+Write the reason around why the chosen game fits the request; mention personal taste only when it adds useful context.
 Only the listed Steam game options are eligible for this request.
 If missingPlayCapabilities is empty, that game satisfies every required Steam play capability.
 Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
@@ -1492,7 +1500,8 @@ ${_promptScopeInstruction(tier)}
 ${_servicePromptContext('AniList')}
 Pick the single best AniList anime or manga recommendation for this user from the AniList options.
 Treat AniList tags, matchedRequestAniListTags, scores, staff, studios, and ranker reasons as evidence, not as the decision itself.
-Prioritize the user's request and personal anime or manga taste. A lower-score option can win when it better satisfies the request or resembles a named title, franchise, creator, trope, or mood.
+First filter for the strongest match to the user's request. Use the anime/manga taste profile only as secondary guidance or a tie-breaker.
+Write the reason around why the chosen title fits the request; mention personal taste only when it adds useful context.
 Only the listed AniList options are eligible for this request.
 If missingReleaseFormats is empty, that title satisfies the requested AniList release-format constraint.
 Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
@@ -1601,55 +1610,84 @@ AniList options: ${jsonEncode(options)}
     return 'Do not choose an adult-only title unless the request explicitly asks for one.';
   }
 
-  bool _asksForPrimaryComedy(RecommendationQuery query) {
-    final normalized = query.request.toLowerCase();
-    return normalized.contains('laugh') ||
-        normalized.contains('funny') ||
-        normalized.contains('comedy') ||
-        normalized.contains('comedic') ||
-        normalized.contains('humor') ||
-        normalized.contains('humour') ||
-        query.selectedTags.any(_isComedySteamTag) ||
-        query.aiSelectedTags.any(_isComedySteamTag);
+  List<String> _requestFitEvidence(
+    MediaItem item, {
+    required RecommendationQuery query,
+    required Set<String> requestTags,
+  }) {
+    final evidence = <String>[];
+    final itemTags = item.tags.map(_canonicalKey).toSet();
+    for (final tag in requestTags) {
+      if (itemTags.contains(_canonicalKey(tag))) {
+        evidence.add('tag:$tag');
+      }
+    }
+
+    final text = '${item.title} ${item.description ?? ''}'.toLowerCase();
+    for (final phrase in _requestIntentPhrases(query)) {
+      if (text.contains(phrase)) {
+        evidence.add('text:$phrase');
+      }
+    }
+
+    return _uniqueStrings(evidence).take(8).toList();
   }
 
-  bool _isComedySteamTag(String tag) {
-    final normalized = tag.toLowerCase();
-    return normalized == 'comedy' ||
-        normalized == 'funny' ||
-        normalized == 'humor' ||
-        normalized == 'humour' ||
-        normalized == 'satire' ||
-        normalized == 'parody';
-  }
-
-  String _steamComedyFitLabel(MediaItem item) {
-    if (item.tags.any(_isComedySteamTag)) return 'core comedy tag';
-    final text = '${item.title} ${item.description}'.toLowerCase();
-    final strongSignals = [
-      'comedy',
-      'comedic',
-      'funny',
-      'hilarious',
-      'laugh',
-      'parody',
-      'satire',
-      'slapstick',
-      'absurd',
-      'silly',
-      'witty',
-      'joke',
-      'bonkers',
-      'whimsical',
+  List<String> _requestIntentPhrases(RecommendationQuery query) {
+    final phrases = <String>[
+      ...query.selectedTags,
+      ...query.aiSelectedTags,
+      ...query.request
+          .toLowerCase()
+          .split(RegExp(r'[^a-z0-9+]+'))
+          .where((word) => word.length >= 4),
     ];
-    if (strongSignals.any(text.contains)) return 'comedy-forward evidence';
-    return 'incidental or unclear humor';
+    return _uniqueStrings(
+      phrases
+          .map((phrase) => phrase.toLowerCase().trim())
+          .where((phrase) => phrase.isNotEmpty)
+          .where((phrase) => !_lowSignalRequestWords.contains(phrase)),
+    ).toList();
   }
 
-  String _steamRequestIntentGuidance(RecommendationQuery query) {
-    if (!_asksForPrimaryComedy(query)) return '';
-    return 'For this request, treat laughter/comedy as a core requirement. Prefer games known or marketed as comedy, funny, absurd, parody, slapstick, or witty. Do not choose broad action, open-world, or RPG games merely because they contain occasional jokes, satire, or a few funny moments.';
+  Iterable<String> _uniqueStrings(Iterable<String> values) sync* {
+    final seen = <String>{};
+    for (final value in values) {
+      if (seen.add(value)) yield value;
+    }
   }
+
+  static const _lowSignalRequestWords = {
+    'game',
+    'games',
+    'anime',
+    'manga',
+    'title',
+    'titles',
+    'recommend',
+    'recommendation',
+    'single',
+    'player',
+    'single-player',
+    'something',
+    'where',
+    'that',
+    'with',
+    'from',
+    'this',
+    'your',
+    'user',
+    'make',
+    'makes',
+    'want',
+    'like',
+    'best',
+    'good',
+    'great',
+    'really',
+    'very',
+    'much',
+  };
 
   String _serviceDirectRecommendationPrompt({
     required TasteProfile profile,
@@ -1665,14 +1703,14 @@ Prompt mode: ${tier.name}.
 ${_promptScopeInstruction(tier)}
 ${_servicePromptContext('Steam')}
 Personally recommend exactly one real Steam PC game from your own knowledge for this user.
-This is a direct recommendation, not tag selection and not option reranking. You may choose a game outside the known search-result hints. Use the request, the user's game taste, and your knowledge of games as the decision.
-${_steamRequestIntentGuidance(query)}
+This is a direct recommendation, not tag selection and not option reranking. You may choose a game outside the known search-result hints. Use the request as the primary decision, then use the user's game taste as secondary guidance.
 The title must be an exact game title that Majika can search for on Steam. Do not invent a game and do not recommend a game the user already owns.
 Titles shown in profile evidence are already owned and are taste signals only, never valid recommendations.
 Respect required play capabilities when they are present.
 Return JSON only. Use exactly these keys: title, reason.
 ${_profilePromptEvidence(profile, tier, limits)}
 Game request: ${query.request}
+User-selected Steam tags: ${query.selectedTags.join(', ')}
 AI-selected Steam tags: ${query.aiSelectedTags.join(', ')}
 Required Steam play capabilities: ${query.effectiveFormats().join(', ')}
 Known owned-game titles to avoid: ${jsonEncode(ownedTitles)}
@@ -1766,7 +1804,7 @@ Known search-result hints, optional and non-exhaustive: ${jsonEncode(knownHints)
 Prompt mode: ${tier.name}.
 ${_promptScopeInstruction(tier)}
 Personally recommend exactly one real title from your own knowledge across the user's imported services.
-This is the direct Home recommendation, not tag selection and not option reranking. You may choose a title outside the known search-result hints. Use the request, the relevant personal profile, and your knowledge of games, anime, and manga as the decision.
+This is the direct Home recommendation, not tag selection and not option reranking. You may choose a title outside the known search-result hints. Use the request as the primary decision, then use the relevant personal profile as secondary guidance.
 Choose only from these services: ${availableServices.join(', ')}.
 If the request asks for a game, choose Steam. If it asks for anime or manga, choose AniList. For a broad request, choose the strongest personal fit across the available services.
 Return an exact title searchable through the chosen service. Do not invent a title and do not recommend anything already in the corresponding library.
