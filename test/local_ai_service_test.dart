@@ -514,6 +514,105 @@ void main() {
     );
   });
 
+  test('AI can suggest multiple Steam candidate titles to resolve', () async {
+    late String capturedPrompt;
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        capturedPrompt = prompt;
+        return '''
+{"suggestions":[
+  {"title":"Untitled Goose Game","reason":"Built around slapstick mischief."},
+  {"title":"There Is No Game: Wrong Dimension","reasoning":"A meta comedy adventure."},
+  {"service":"AniList","title":"Nichijou","reason":"Wrong service for this pass."},
+  {"title":"Untitled Goose Game","reason":"Duplicate should be ignored."}
+]}
+''';
+      },
+    );
+
+    final suggestions = await service.suggestRecommendationCandidates(
+      _profile(
+        serviceName: 'Steam',
+        library: [
+          _mediaItem(
+            'steam_owned',
+            'Portal 2',
+            mediaType: 'GAME',
+            format: 'CO_OP',
+            sourceId: 'com.majika.service.steam',
+          ),
+        ],
+      ),
+      [
+        _recommendation(
+          'steam_funnel',
+          'Funnel Runners',
+          tags: const ['Action', 'Survival'],
+          mediaType: 'GAME',
+          format: 'SINGLE_PLAYER',
+          sourceId: 'com.majika.service.steam',
+        ),
+      ],
+      query: const RecommendationQuery(
+        request: 'a fun single player game that makes you laugh a lot',
+        aiSelectedTags: {'Comedy', 'Funny'},
+        mediaTypes: {'GAME'},
+        formats: {'SINGLE_PLAYER'},
+      ),
+      limit: 3,
+    );
+
+    expect(suggestions.map((suggestion) => suggestion.title), [
+      'Untitled Goose Game',
+      'There Is No Game: Wrong Dimension',
+    ]);
+    expect(suggestions.first.serviceName, 'Steam');
+    expect(suggestions.last.reason, 'A meta comedy adventure.');
+    expect(capturedPrompt, contains('Suggest up to 3 real Steam PC games'));
+    expect(capturedPrompt, contains('title-discovery pass'));
+    expect(capturedPrompt, contains('beyond simple tag search'));
+    expect(capturedPrompt, contains('Titles only, no reasons'));
+    expect(capturedPrompt, contains('AI-selected tags: Comedy, Funny'));
+    expect(capturedPrompt, contains('Known API result titles'));
+    expect(capturedPrompt, contains('Funnel Runners'));
+    expect(capturedPrompt, contains('Portal 2'));
+  });
+
+  test('AI title discovery recovers titles from truncated JSON', () async {
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        return '''
+```json
+{"suggestions":[
+  {"title":"Untitled Goose Game","reason":"A pure comedy sandbox where you play
+  {"title":"There Is No Game: Wrong Dimension","reason":"Meta comedy
+```
+''';
+      },
+    );
+
+    final suggestions = await service.suggestRecommendationCandidates(
+      _profile(serviceName: 'Steam'),
+      const [],
+      query: const RecommendationQuery(
+        request: 'fun game that makes you laugh a lot',
+        aiSelectedTags: {'Comedy', 'Funny'},
+        mediaTypes: {'GAME'},
+        formats: {'SINGLE_PLAYER'},
+      ),
+      limit: 5,
+    );
+
+    expect(suggestions.map((suggestion) => suggestion.title), [
+      'Untitled Goose Game',
+      'There Is No Game: Wrong Dimension',
+    ]);
+    expect(
+      suggestions.every((suggestion) => suggestion.serviceName == 'Steam'),
+      isTrue,
+    );
+  });
+
   test(
     'direct AniList prompt prioritizes high-rated owned titles to avoid',
     () async {

@@ -84,6 +84,20 @@ class SteamService implements MediaService {
     225540, // Just Cause 3
     206420, // Saints Row IV
   ];
+  static const _comedyCandidateAppIds = [
+    837470, // Untitled Goose Game
+    1240210, // There Is No Game: Wrong Dimension
+    2366980, // Thank Goodness You're Here!
+    1703340, // The Stanley Parable: Ultra Deluxe
+    702670, // Donut County
+    850190, // Goat Simulator 3
+    224480, // Octodad: Dadliest Catch
+    597220, // West of Loathing
+    250260, // Jazzpunk: Director's Cut
+    966320, // Later Alligator
+    504130, // Manual Samuel
+    1205450, // Turnip Boy Commits Tax Evasion
+  ];
 
   final http.Client _client;
   final SteamApiKeyProvider _apiKeyProvider;
@@ -197,6 +211,9 @@ class SteamService implements MediaService {
     if (formats.contains('CO_OP') || formats.contains('ONLINE_CO_OP')) {
       items.addAll((await _fetchAppDetails(_localCoopCandidateAppIds)).values);
     }
+    if (_hasComedyIntent(query)) {
+      items.addAll((await _fetchAppDetails(_comedyCandidateAppIds)).values);
+    }
 
     final baseline = await fetchRecommendationCandidates();
     return _dedupe([...items, ...baseline]);
@@ -214,9 +231,44 @@ class SteamService implements MediaService {
       ];
     }
 
+    if (_hasComedyIntent(query)) {
+      return const ['comedy', 'funny', 'hilarious'];
+    }
+
     final text = query.request.trim();
     return text.isEmpty ? const [] : [text];
   }
+
+  static bool _hasComedyIntent(RecommendationQuery query) {
+    final tags = {
+      ...query.selectedTags,
+      ...query.aiSelectedTags,
+      ...query.inferredTags(RecommendationQuery.steamBrowsableTags),
+    };
+    if (tags.contains('Comedy') || tags.contains('Funny')) return true;
+    final text = query.request.toLowerCase();
+    return _comedyIntentTerms.any((term) {
+      final escaped = RegExp.escape(term);
+      return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(text);
+    });
+  }
+
+  static const _comedyIntentTerms = {
+    'absurd',
+    'comedy',
+    'comedic',
+    'funny',
+    'hilarious',
+    'joke',
+    'jokes',
+    'laugh',
+    'laughs',
+    'laughing',
+    'parody',
+    'satire',
+    'silly',
+    'slapstick',
+  };
 
   @override
   Future<List<String>> fetchAvailableTags() async {

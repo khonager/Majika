@@ -211,6 +211,120 @@ void main() {
     expect(recommendations.single.item.id, 'steam_coop');
   });
 
+  test('Steam comedy searches reject weak title-only fun matches', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile(
+      '76561198000000000',
+      [
+        MediaItem(
+          id: 'steam_owned',
+          title: 'Played Action Game',
+          coverUrl: '',
+          tags: const ['Action', 'Single-player', 'Controller Support'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          status: 'OWNED',
+          playtimeMinutes: 6000,
+          sourceId: 'com.majika.service.steam',
+        ),
+      ],
+      serviceId: 'com.majika.service.steam',
+      serviceName: 'Steam',
+    );
+
+    final recommendations = engine.rankCandidates(
+      profile,
+      [
+        MediaItem(
+          id: 'steam_title_only',
+          title: 'Community College Hero: Fun and Games',
+          coverUrl: '',
+          tags: const ['Adventure', 'Indie', 'Single-player'],
+          description:
+              'Join heroes-in-training as they enjoy a tabletop campaign.',
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+        ),
+        MediaItem(
+          id: 'steam_gta',
+          title: 'Grand Theft Auto V Legacy',
+          coverUrl: '',
+          tags: const ['Action', 'Adventure', 'Single-player'],
+          description: 'Explore Los Santos and Blaine County.',
+          rating: 9.5,
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          popularity: 100000,
+          sourceId: 'com.majika.service.steam',
+        ),
+        MediaItem(
+          id: 'steam_ragdolls',
+          title: 'Fun with Ragdolls Plus',
+          coverUrl: '',
+          tags: const ['Action', 'Adventure', 'Single-player'],
+          description:
+              'A 3D physics platformer with a cinematic story and sandbox chaos.',
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          popularity: 100000,
+          sourceId: 'com.majika.service.steam',
+        ),
+        MediaItem(
+          id: 'steam_funko',
+          title: 'Funko Fusion',
+          coverUrl: '',
+          tags: const ['Action', 'Adventure', 'Single-player'],
+          description:
+              'A festival of fandom with iconic worlds and mashup characters.',
+          rating: 8.8,
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          popularity: 100000,
+          sourceId: 'com.majika.service.steam',
+        ),
+        MediaItem(
+          id: 'steam_comedy',
+          title: 'There Is No Game: Wrong Dimension',
+          coverUrl: '',
+          tags: const ['Adventure', 'Single-player'],
+          description:
+              'A hilarious meta comedy adventure full of jokes and absurd surprises.',
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+        ),
+        MediaItem(
+          id: 'steam_tagged',
+          title: 'Comedy Night',
+          coverUrl: '',
+          tags: const ['Comedy', 'Funny', 'Single-player'],
+          description: 'Perform jokes for a live audience.',
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+        ),
+      ],
+      query: const RecommendationQuery(
+        request: 'fun game that makes you laugh a lot',
+        aiSelectedTags: {'Comedy', 'Funny'},
+        mediaTypes: {'GAME'},
+        formats: {'SINGLE_PLAYER'},
+      ),
+    );
+
+    final ids = recommendations.map((recommendation) => recommendation.item.id);
+    expect(ids, containsAll(['steam_comedy', 'steam_tagged']));
+    expect(ids, isNot(contains('steam_title_only')));
+    expect(ids, isNot(contains('steam_gta')));
+    expect(ids, isNot(contains('steam_ragdolls')));
+    expect(ids, isNot(contains('steam_funko')));
+    expect(
+      recommendations.map((recommendation) => recommendation.matchScore),
+      everyElement(lessThan(99)),
+    );
+  });
+
   test('inFAMOUS-like game requests infer open-world action traits', () {
     final engine = TasteEngine();
     final profile = engine.buildProfile(
@@ -602,7 +716,7 @@ void main() {
     expect(recommendations.single.item.title, 'Specific Relationship Story');
   });
 
-  test('Steam AI-selected broad tags do not erase all candidates', () {
+  test('Steam AI-selected broad tags keep candidates with request evidence', () {
     final engine = TasteEngine();
     final profile = engine.buildProfile('tester', [
       MediaItem(
@@ -628,7 +742,8 @@ void main() {
           format: 'SINGLE_PLAYER',
           mediaType: 'GAME',
           sourceId: 'com.majika.service.steam',
-          description: 'Cause playful chaos in a small village.',
+          description:
+              'A silly slapstick comedy about causing playful chaos in a small village.',
         ),
       ],
       query: const RecommendationQuery(
@@ -642,13 +757,20 @@ void main() {
     expect(recommendations.single.item.title, 'Mischief Village');
   });
 
-  test('short request words do not match inside unrelated title fragments', () {
+  test('low-signal fun words do not boost title-only matches', () {
     final engine = TasteEngine();
-    final profile = engine.buildProfile(
-      'tester',
-      const [],
-      serviceName: 'Steam',
-    );
+    final profile = engine.buildProfile('tester', [
+      MediaItem(
+        id: 'steam_seen',
+        title: 'Seen Action Game',
+        coverUrl: '',
+        tags: const ['Action'],
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        status: 'OWNED',
+        sourceId: 'com.majika.service.steam',
+      ),
+    ], serviceName: 'Steam');
 
     final recommendations = engine.rankCandidates(
       profile,
@@ -680,10 +802,10 @@ void main() {
       ),
     );
 
-    expect(recommendations.first.item.title, "Lovers' Fun!");
+    expect(recommendations.first.item.title, 'Funnel Runners');
     expect(
-      recommendations.indexWhere((rec) => rec.item.title == 'Funnel Runners'),
-      greaterThan(0),
+      recommendations.map((rec) => rec.item.title),
+      contains("Lovers' Fun!"),
     );
   });
 

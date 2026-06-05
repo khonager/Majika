@@ -66,7 +66,7 @@ void main() {
     );
 
     await tester.enterText(find.byType(TextField), 'tester');
-    await tester.tap(find.text('Build profile'));
+    await tester.tap(find.text('Build game profile'));
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -166,7 +166,7 @@ void main() {
     );
 
     await tester.enterText(find.byType(TextField).first, 'tester');
-    await tester.tap(find.text('Build profile'));
+    await tester.tap(find.text('Build game profile'));
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -321,6 +321,38 @@ void main() {
       find.text('A personal recommendation beyond the fetched tag results.'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('Steam prompt search hides weak fun title matches', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          mediaService: _WeakFunSteamMediaService(),
+          aiService: const _GooseSteamAiService(),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build game profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search a genre, mode, game, or vibe'),
+      'fun game that makes you laugh a lot',
+    );
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Untitled Goose Game'), findsOneWidget);
+    expect(find.text('AI recommendation'), findsOneWidget);
+    expect(find.text('Fun with Ragdolls Plus'), findsNothing);
+    expect(find.text('Funko Fusion'), findsNothing);
+    expect(find.text('More matching this request'), findsNothing);
   });
 
   testWidgets('invalid direct AI pick falls back to ranked recommendations', (
@@ -1573,6 +1605,40 @@ class _DirectSuggestionAiService extends DeterministicLocalAiService {
   }
 }
 
+class _GooseSteamAiService extends DeterministicLocalAiService {
+  const _GooseSteamAiService();
+
+  @override
+  Future<RecommendationQuery> interpretRecommendationRequest(
+    RecommendationQuery query, {
+    required Iterable<String> availableTags,
+    String serviceName = 'AniList',
+    Iterable<String> allowedMediaTypes = RecommendationQuery.allMediaTypes,
+    Iterable<String> allowedFormats = RecommendationQuery.allFormats,
+  }) async {
+    return query.copyWith(
+      aiSelectedTags: const {'Comedy', 'Funny'},
+      mediaTypes: const {'GAME'},
+      formats: const {'SINGLE_PLAYER'},
+    );
+  }
+
+  @override
+  Future<AiRecommendationSuggestion?> suggestRecommendation(
+    TasteProfile profile,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+  }) async {
+    if (!query.isActive) return null;
+    return const AiRecommendationSuggestion(
+      title: 'Untitled Goose Game',
+      serviceName: 'Steam',
+      reason:
+          'This slapstick sandbox game directly fits the laugh-focused request.',
+    );
+  }
+}
+
 class _InvalidDirectSuggestionAiService extends DeterministicLocalAiService {
   const _InvalidDirectSuggestionAiService();
 
@@ -1792,6 +1858,63 @@ class _FakeSteamMediaService implements MediaService {
       'Single-player',
       'Co-op',
       'Controller Support',
+    ];
+  }
+}
+
+class _WeakFunSteamMediaService extends _FakeSteamMediaService {
+  @override
+  Future<List<MediaItem>> fetchRecommendationCandidates({
+    bool includeAdult = false,
+  }) async {
+    return const <MediaItem>[];
+  }
+
+  @override
+  Future<List<MediaItem>> searchRecommendationCandidates(
+    RecommendationQuery query,
+  ) async {
+    if (query.request == 'Untitled Goose Game') {
+      return [
+        MediaItem(
+          id: 'steam_goose',
+          title: 'Untitled Goose Game',
+          coverUrl: '',
+          tags: const ['Action', 'Single-player', 'Steam Achievements'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: id,
+          siteUrl: 'https://store.steampowered.com/app/837470',
+          description:
+              'A hilarious slapstick sandbox game about causing chaos as a goose.',
+        ),
+      ];
+    }
+    return [
+      MediaItem(
+        id: 'steam_ragdolls',
+        title: 'Fun with Ragdolls Plus',
+        coverUrl: '',
+        tags: const ['Action', 'Adventure', 'Single-player'],
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        sourceId: id,
+        siteUrl: 'https://store.steampowered.com/app/ragdolls',
+        description:
+            'A 3D physics platformer with a cinematic story and sandbox chaos.',
+      ),
+      MediaItem(
+        id: 'steam_funko',
+        title: 'Funko Fusion',
+        coverUrl: '',
+        tags: const ['Action', 'Adventure', 'Single-player'],
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        sourceId: id,
+        siteUrl: 'https://store.steampowered.com/app/funko',
+        description:
+            'A festival of fandom with iconic worlds and mashup characters.',
+      ),
     ];
   }
 }

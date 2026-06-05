@@ -140,6 +140,13 @@ abstract class LocalAiService {
     required RecommendationQuery query,
   });
 
+  Future<List<AiRecommendationSuggestion>> suggestRecommendationCandidates(
+    TasteProfile profile,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+    int limit = 5,
+  });
+
   Future<AiRecommendationSuggestion?> suggestHomeRecommendation(
     List<TasteProfile> profiles,
     List<Recommendation> knownRecommendations, {
@@ -196,6 +203,16 @@ class DeterministicLocalAiService implements LocalAiService {
     required RecommendationQuery query,
   }) async {
     return null;
+  }
+
+  @override
+  Future<List<AiRecommendationSuggestion>> suggestRecommendationCandidates(
+    TasteProfile profile,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+    int limit = 5,
+  }) async {
+    return const [];
   }
 
   @override
@@ -1821,6 +1838,50 @@ Known cross-service search-result hints, optional and non-exhaustive: ${jsonEnco
 ''';
   }
 
+  String _serviceCandidateDiscoveryPrompt({
+    required TasteProfile profile,
+    required _AiPromptTier tier,
+    required _PromptLimits limits,
+    required RecommendationQuery query,
+    required List<Map<String, Object?>> knownHints,
+    required int limit,
+  }) {
+    final ownedTitles = _ownedTitlesForPrompt(profile, limits);
+    final isSteam = _isSteamService(profile.serviceName);
+    final subject = isSteam
+        ? 'real Steam PC games'
+        : _isAniListService(profile.serviceName)
+        ? 'real anime or manga titles'
+        : 'real titles';
+    final formatLabel = isSteam
+        ? 'Steam play capabilities'
+        : _isAniListService(profile.serviceName)
+        ? 'AniList formats/media types'
+        : 'formats/media types';
+    final knownTitles = [
+      for (final hint in knownHints)
+        if (hint['title']?.toString().trim().isNotEmpty ?? false)
+          hint['title'].toString(),
+    ];
+    return '''
+Prompt mode: ${tier.name}.
+${_servicePromptContext(profile.serviceName)}
+Suggest up to $limit $subject that strongly match this request.
+This is a title-discovery pass before API validation. Use your own model knowledge to name likely matches beyond simple tag search.
+Use the request as the primary decision. Use the user's profile only as a light tie-breaker.
+Return exact titles that should be searchable on ${profile.serviceName}. Do not invent titles and do not suggest titles already in the user's library.
+Respect hard $formatLabel when they are present.
+Return JSON only. Prefer exactly this shape: {"titles":["..."]}. Titles only, no reasons.
+Request: ${query.request}
+User-selected tags: ${query.selectedTags.join(', ')}
+AI-selected tags: ${query.aiSelectedTags.join(', ')}
+Requested media types: ${query.effectiveMediaTypes().join(', ')}
+Requested formats or play capabilities: ${query.effectiveFormats().join(', ')}
+Known library titles to avoid: ${jsonEncode(ownedTitles)}
+Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
+''';
+  }
+
   AiRecommendationSuggestion? _suggestionFromResponse(
     String response, {
     required String fallbackServiceName,
@@ -1848,6 +1909,195 @@ Known cross-service search-result hints, optional and non-exhaustive: ${jsonEnco
       );
     }
     return suggestion;
+  }
+
+  List<AiRecommendationSuggestion> _suggestionsFromResponse(
+    String response, {
+    required String fallbackServiceName,
+    Iterable<String> allowedServices = const [],
+    int limit = 5,
+  }) {
+    final serviceLookup = {
+      for (final service in allowedServices) _canonicalKey(service): service,
+    };
+    final suggestions = <AiRecommendationSuggestion>[];
+    final seenTitles = <String>{};
+
+    String serviceNameFor(String rawService) {
+      if (rawService.isEmpty) return fallbackServiceName;
+      return serviceLookup[_canonicalKey(rawService)] ?? '';
+    }
+
+    void addTitle(String title, {String rawService = '', String reason = ''}) {
+      title = title.trim();
+      if (!_looksLikeSuggestedTitle(title)) return;
+      if (!seenTitles.add(_canonicalKey(title))) return;
+      final serviceName = serviceNameFor(rawService.trim());
+      if (serviceName.isEmpty) return;
+      suggestions.add(
+        AiRecommendationSuggestion(
+          title: title,
+          serviceName: serviceName,
+          reason: reason.isEmpty
+              ? 'Suggested from the AI title-discovery pass.'
+              : reason,
+        ),
+      );
+    }
+
+    void addSuggestion(Map candidate) {
+      final title = candidate['title']?.toString().trim() ?? '';
+      final reason =
+          candidate['reason']?.toString().trim() ??
+          candidate['reasoning']?.toString().trim() ??
+          '';
+      addTitle(
+        title,
+        rawService: candidate['service']?.toString().trim() ?? '',
+        reason: reason,
+      );
+    }
+
+    for (final object in _jsonObjects(response)) {
+      final nested = object['suggestions'];
+      if (nested is List) {
+        for (final entry in nested) {
+          if (entry is Map) addSuggestion(entry);
+          if (entry is String) addTitle(entry);
+          if (suggestions.length >= limit) return suggestions;
+        }
+      }
+
+      final titles = object['titles'];
+      if (titles is List) {
+        for (final entry in titles) {
+          if (entry is String) addTitle(entry);
+          if (entry is Map) addSuggestion(entry);
+          if (suggestions.length >= limit) return suggestions;
+        }
+      }
+
+      if (nested is! List && titles is! List) {
+        addSuggestion(object);
+      }
+      if (suggestions.length >= limit) return suggestions;
+    }
+
+    for (final title in _titleFragmentsFromResponse(response)) {
+      addTitle(title);
+      if (suggestions.length >= limit) return suggestions;
+    }
+
+    return suggestions;
+  }
+
+  Iterable<String> _titleFragmentsFromResponse(String response) sync* {
+    final titleFields = RegExp(
+      r'"title"\s*:\s*"((?:\\.|[^"\\])*)"',
+      multiLine: true,
+    );
+    for (final match in titleFields.allMatches(response)) {
+      final encoded = match.group(1);
+      if (encoded == null || encoded.trim().isEmpty) continue;
+      try {
+        yield jsonDecode('"$encoded"').toString();
+      } catch (_) {
+        yield encoded.replaceAll(r'\"', '"').trim();
+      }
+    }
+
+    final titleArray = RegExp(
+      r'"titles"\s*:\s*\[((?:.|\n)*)',
+      multiLine: true,
+    ).firstMatch(response);
+    if (titleArray != null) {
+      final quoted = RegExp(r'"((?:\\.|[^"\\])*)"');
+      for (final match in quoted.allMatches(titleArray.group(1)!)) {
+        final encoded = match.group(1);
+        if (encoded == null || encoded.trim().isEmpty) continue;
+        try {
+          yield jsonDecode('"$encoded"').toString();
+        } catch (_) {
+          yield encoded.replaceAll(r'\"', '"').trim();
+        }
+      }
+    }
+
+    for (final line in response.split('\n')) {
+      var candidate = line.trim();
+      if (candidate.isEmpty || candidate.contains(':')) continue;
+      candidate = candidate
+          .replaceFirst(RegExp(r'^[\-\*\d\.\)\s]+'), '')
+          .replaceFirst(RegExp(r'^"+'), '')
+          .replaceFirst(RegExp(r'[".,]+$'), '')
+          .trim();
+      final separator = RegExp(r'\s+-\s+').firstMatch(candidate);
+      if (separator != null) {
+        candidate = candidate.substring(0, separator.start);
+      }
+      if (_looksLikeSuggestedTitle(candidate)) yield candidate;
+    }
+  }
+
+  bool _looksLikeSuggestedTitle(String title) {
+    final trimmed = title.trim();
+    if (trimmed.length < 2 || trimmed.length > 90) return false;
+    if (trimmed.contains('{') || trimmed.contains('}')) return false;
+    if (trimmed.contains('`')) return false;
+    final lower = trimmed.toLowerCase();
+    const blocked = {
+      'title',
+      'titles',
+      'suggestions',
+      'reason',
+      'reasoning',
+      'json',
+    };
+    if (blocked.contains(lower)) return false;
+    return RegExp(r'[a-zA-Z0-9]').hasMatch(trimmed);
+  }
+
+  @override
+  Future<List<AiRecommendationSuggestion>> suggestRecommendationCandidates(
+    TasteProfile profile,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+    int limit = 5,
+  }) async {
+    if (!query.isActive || limit <= 0) return const [];
+    final settings = await _runtimeSettings();
+    if (!settings.useLocalAi && textGenerator == null) return const [];
+
+    final budget = _promptBudget(settings, responseTokens: 768);
+    try {
+      final packed = _packPrompt(
+        budget: budget,
+        initialLimits: _promptLimits(budget.tier),
+        build: (limits) => _serviceCandidateDiscoveryPrompt(
+          profile: profile,
+          tier: budget.tier,
+          limits: limits,
+          query: query,
+          knownHints: _directPickHints(
+            knownRecommendations,
+            limits.optionLimit,
+          ),
+          limit: limit,
+        ),
+      );
+      final response = await _generateText(
+        packed.prompt,
+        maxTokens: budget.responseTokens,
+        settings: settings,
+      );
+      return _suggestionsFromResponse(
+        response,
+        fallbackServiceName: profile.serviceName,
+        limit: limit,
+      );
+    } catch (_) {
+      return const [];
+    }
   }
 
   @override

@@ -204,6 +204,78 @@ void main() {
     expect(candidates.map((item) => item.title), contains('Overcooked! 2'));
   });
 
+  test('comedy search adds curated matches beyond weak fun titles', () async {
+    final storeTerms = <String>[];
+    final appDetailIds = <String>[];
+    final service = SteamService(
+      client: MockClient((request) async {
+        final url = request.url.toString();
+        if (url.contains('storesearch')) {
+          storeTerms.add(request.url.queryParameters['term']!);
+          return _json({
+            'items': [
+              {'id': 333},
+              {'id': 444},
+            ],
+          });
+        }
+        if (url.contains('appdetails')) {
+          final appId = request.url.queryParameters['appids']!;
+          appDetailIds.add(appId);
+          return _json({
+            appId: {
+              'success': true,
+              'data': {
+                'steam_appid': int.parse(appId),
+                'name': switch (appId) {
+                  '333' => 'Fun with Ragdolls Plus',
+                  '444' => 'Funko Fusion',
+                  '837470' => 'Untitled Goose Game',
+                  '1240210' => 'There Is No Game: Wrong Dimension',
+                  _ => 'Game $appId',
+                },
+                'short_description': switch (appId) {
+                  '837470' => 'A silly slapstick sandbox about being a goose.',
+                  '1240210' => 'A meta comedy adventure full of jokes.',
+                  _ => 'A Steam game.',
+                },
+                'genres': [
+                  {'description': 'Adventure'},
+                ],
+                'categories': [
+                  {'description': 'Single-player'},
+                ],
+              },
+            },
+          });
+        }
+        return http.Response('not found', 404);
+      }),
+    );
+
+    final candidates = await service.searchRecommendationCandidates(
+      const RecommendationQuery(
+        request: 'fun game that makes you laugh a lot',
+        aiSelectedTags: {'Comedy', 'Funny'},
+        mediaTypes: {'GAME'},
+        formats: {'SINGLE_PLAYER'},
+      ),
+    );
+
+    expect(storeTerms, containsAll(['comedy', 'funny']));
+    expect(storeTerms, isNot(contains('fun game that makes you laugh a lot')));
+    expect(appDetailIds, contains('837470'));
+    expect(appDetailIds, contains('1240210'));
+    expect(
+      candidates.map((item) => item.title),
+      contains('Untitled Goose Game'),
+    );
+    expect(
+      candidates.map((item) => item.title),
+      contains('There Is No Game: Wrong Dimension'),
+    );
+  });
+
   test('inFAMOUS-like search expands to similar Steam candidates', () async {
     final storeTerms = <String>[];
     final appDetailIds = <String>[];

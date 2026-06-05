@@ -349,6 +349,26 @@ class _HomeScreenState extends State<HomeScreen> {
             candidates = _dedupeCandidates([...candidates, ...adultCandidates]);
           }
 
+          if (query.isActive) {
+            progressToast.update(
+              'Asking AI for known ${workspace.service.displayName} matches...',
+            );
+            final preliminaryRecommendations = _tasteEngine.rankCandidates(
+              profile,
+              candidates,
+              query: query,
+            );
+            final aiDiscovered = await _discoverAiSuggestedItems(
+              service: workspace.service,
+              profile: profile,
+              knownRecommendations: preliminaryRecommendations,
+              query: query,
+            );
+            if (aiDiscovered.isNotEmpty) {
+              candidates = _dedupeCandidates([...aiDiscovered, ...candidates]);
+            }
+          }
+
           progressToast.update('Ranking matches against your profile...');
           final recommendations = _tasteEngine.rankCandidates(
             profile,
@@ -503,6 +523,29 @@ class _HomeScreenState extends State<HomeScreen> {
                 ...candidates,
                 ...adultCandidates,
               ]);
+            }
+
+            if (query.isActive) {
+              progressToast.update(
+                'Asking AI for known ${workspace.service.displayName} matches...',
+              );
+              final preliminaryRecommendations = _tasteEngine.rankCandidates(
+                profile,
+                candidates,
+                query: query,
+              );
+              final aiDiscovered = await _discoverAiSuggestedItems(
+                service: workspace.service,
+                profile: profile,
+                knownRecommendations: preliminaryRecommendations,
+                query: query,
+              );
+              if (aiDiscovered.isNotEmpty) {
+                candidates = _dedupeCandidates([
+                  ...aiDiscovered,
+                  ...candidates,
+                ]);
+              }
             }
 
             progressToast.update(
@@ -813,6 +856,104 @@ class _HomeScreenState extends State<HomeScreen> {
     return null;
   }
 
+  Future<List<MediaItem>> _discoverAiSuggestedItems({
+    required MediaService service,
+    required TasteProfile profile,
+    required List<Recommendation> knownRecommendations,
+    required RecommendationQuery query,
+  }) async {
+    final suggestions = await _aiService.suggestRecommendationCandidates(
+      profile,
+      knownRecommendations,
+      query: query,
+      limit: 5,
+    );
+    if (suggestions.isEmpty) return const [];
+
+    final discovered = <MediaItem>[];
+    for (final suggestion in suggestions) {
+      if (_normalizedTitle(suggestion.serviceName) !=
+          _normalizedTitle(profile.serviceName)) {
+        continue;
+      }
+      final item = await _resolveSuggestedItem(
+        service: service,
+        profile: profile,
+        query: query,
+        suggestion: suggestion,
+      );
+      if (item != null) discovered.add(item);
+    }
+    return _dedupeCandidates(discovered);
+  }
+
+  Future<MediaItem?> _resolveSuggestedItem({
+    required MediaService service,
+    required TasteProfile profile,
+    required RecommendationQuery query,
+    required AiRecommendationSuggestion suggestion,
+  }) async {
+    final titleKey = _normalizedTitle(suggestion.title);
+    if (titleKey.isEmpty) return null;
+
+    final searchResults = await service.searchRecommendationCandidates(
+      RecommendationQuery(
+        request: suggestion.title,
+        includeAdult: query.allowsAdult,
+        excludeAdult: query.excludeAdult,
+      ),
+    );
+    MediaItem? item;
+    for (final result in searchResults) {
+      if (_normalizedTitle(result.title) == titleKey) {
+        item = result;
+        break;
+      }
+    }
+    if (item == null) return null;
+
+    final resolvedItem = item;
+    if (profile.library.any(
+      (owned) =>
+          owned.id == resolvedItem.id ||
+          _normalizedTitle(owned.title) == _normalizedTitle(resolvedItem.title),
+    )) {
+      return null;
+    }
+
+    final requiredMediaTypes = query.effectiveMediaTypes();
+    if (requiredMediaTypes.isNotEmpty &&
+        !requiredMediaTypes.contains(resolvedItem.mediaType)) {
+      return null;
+    }
+    if (resolvedItem.isAdult && !query.allowsAdult) return null;
+
+    final validated = _tasteEngine.rankCandidates(profile, [
+      resolvedItem,
+    ], query: _hardValidationQueryFor(service, query));
+    return validated.isEmpty ? null : resolvedItem;
+  }
+
+  RecommendationQuery _hardValidationQueryFor(
+    MediaService service,
+    RecommendationQuery query,
+  ) {
+    final applicableFormats = query
+        .effectiveFormats()
+        .where(service.supportedFormats.contains)
+        .toSet();
+    final applicableMediaTypes = query
+        .effectiveMediaTypes()
+        .where(service.supportedMediaTypes.contains)
+        .toSet();
+    return RecommendationQuery(
+      includeAdult: query.allowsAdult,
+      excludeAdult: query.excludeAdult,
+      mediaTypes: applicableMediaTypes,
+      formats: applicableFormats,
+    );
+  }
+
   Future<({Recommendation? recommendation, MediaItem? discoveredItem})>
   _resolveDirectSuggestion({
     required MediaService service,
@@ -839,58 +980,18 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     try {
-      final searchResults = await service.searchRecommendationCandidates(
-        RecommendationQuery(
-          request: suggestion.title,
-          includeAdult: query.allowsAdult,
-          excludeAdult: query.excludeAdult,
-        ),
+      final item = await _resolveSuggestedItem(
+        service: service,
+        profile: profile,
+        query: query,
+        suggestion: suggestion,
       );
-      MediaItem? item;
-      for (final result in searchResults) {
-        if (_normalizedTitle(result.title) == titleKey) {
-          item = result;
-          break;
-        }
-      }
       if (item == null) {
         return (recommendation: null, discoveredItem: null);
       }
-      final resolvedItem = item;
-      if (profile.library.any(
-        (owned) =>
-            owned.id == resolvedItem.id ||
-            _normalizedTitle(owned.title) ==
-                _normalizedTitle(resolvedItem.title),
-      )) {
-        return (recommendation: null, discoveredItem: null);
-      }
-
-      final requiredMediaTypes = query.effectiveMediaTypes();
-      if (requiredMediaTypes.isNotEmpty &&
-          !requiredMediaTypes.contains(resolvedItem.mediaType)) {
-        return (recommendation: null, discoveredItem: null);
-      }
-      if (resolvedItem.isAdult && !query.allowsAdult) {
-        return (recommendation: null, discoveredItem: null);
-      }
-      final applicableFormats = query
-          .effectiveFormats()
-          .where(service.supportedFormats.contains)
-          .toSet();
-      final applicableMediaTypes = requiredMediaTypes
-          .where(service.supportedMediaTypes.contains)
-          .toSet();
-      final validated = _tasteEngine.rankCandidates(
-        profile,
-        [resolvedItem],
-        query: RecommendationQuery(
-          includeAdult: query.allowsAdult,
-          excludeAdult: query.excludeAdult,
-          mediaTypes: applicableMediaTypes,
-          formats: applicableFormats,
-        ),
-      );
+      final validated = _tasteEngine.rankCandidates(profile, [
+        item,
+      ], query: _hardValidationQueryFor(service, query));
       if (validated.isEmpty) {
         return (recommendation: null, discoveredItem: null);
       }
@@ -899,7 +1000,7 @@ class _HomeScreenState extends State<HomeScreen> {
           reason: suggestion.reason,
           isAiPick: true,
         ),
-        discoveredItem: resolvedItem,
+        discoveredItem: item,
       );
     } catch (_) {
       return (recommendation: null, discoveredItem: null);
@@ -2110,18 +2211,23 @@ class _RecommendationState extends StatelessWidget {
                     )
                   else
                     _TopRecommendationCard(recommendation: topPick),
-                  const SizedBox(height: 18),
-                  Padding(
-                    padding: readableInset,
-                    child: Text(
-                      'More for this profile',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
+                  if (otherPicks.isNotEmpty) ...[
+                    const SizedBox(height: 18),
+                    Padding(
+                      padding: readableInset,
+                      child: Text(
+                        query.isActive
+                            ? 'More matching this request'
+                            : 'More for this profile',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                            ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
+                    const SizedBox(height: 10),
+                  ],
                 ],
               ),
             ),

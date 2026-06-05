@@ -214,11 +214,18 @@ class TasteEngine {
       final hasNaturalLanguageRequest = query.request.trim().isNotEmpty;
       if (hasNaturalLanguageRequest) {
         final requestTextScore = _requestTextScore(candidate, query.request);
+        final requestTagEvidenceScore = _requestTagEvidenceScore(
+          candidate,
+          requestedTags,
+        );
         score += requestTextScore * 2.4;
-        if (requestTextScore == 0 &&
-            requestedTags.isNotEmpty &&
-            requestedGenreMatches.isEmpty) {
-          score *= 0.45;
+        score += requestTagEvidenceScore * 2.0;
+        final hasRequestEvidence =
+            requestTextScore > 0 ||
+            requestTagEvidenceScore > 0 ||
+            requestedGenreMatches.isNotEmpty;
+        if (requestedTags.isNotEmpty && !hasRequestEvidence) {
+          continue;
         }
       }
 
@@ -248,7 +255,7 @@ class TasteEngine {
     recommendations.sort((a, b) => b.rawScore.compareTo(a.rawScore));
     if (recommendations.isEmpty) return [];
 
-    final calibrated = _calibrateScores(recommendations);
+    final calibrated = _calibrateScores(recommendations, query: query);
     return [calibrated.first.copyWith(isTopPick: true), ...calibrated.skip(1)];
   }
 
@@ -330,11 +337,7 @@ class TasteEngine {
   }
 
   double _requestTextScore(MediaItem candidate, String request) {
-    final terms = request
-        .toLowerCase()
-        .split(RegExp(r'[^a-z0-9+]+'))
-        .where((term) => term.length > 2)
-        .toList();
+    final terms = _requestTextTerms(request);
     if (terms.isEmpty) return 0;
 
     final title = candidate.title.toLowerCase();
@@ -354,6 +357,53 @@ class TasteEngine {
     }
 
     return min(score, 5.0);
+  }
+
+  List<String> _requestTextTerms(String request) {
+    return request
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9+]+'))
+        .where(
+          (term) =>
+              term.length > 2 &&
+              !_requestTextStopWords.contains(term) &&
+              !_requestStructuralTerms.contains(term) &&
+              !_lowSignalRequestTerms.contains(term),
+        )
+        .toList();
+  }
+
+  double _requestTagEvidenceScore(
+    MediaItem candidate,
+    Set<String> requestedTags,
+  ) {
+    if (requestedTags.isEmpty) return 0;
+    final haystack = _normalizedEvidenceText(candidate);
+    var score = 0.0;
+    for (final tag in requestedTags) {
+      final hints = _requestTagEvidenceHints[tag];
+      if (hints == null) continue;
+      if (hints.any((hint) => _containsWholePhrase(haystack, hint))) {
+        score += 1.0;
+      }
+    }
+    return min(score, 3.0);
+  }
+
+  String _normalizedEvidenceText(MediaItem candidate) {
+    return [
+      candidate.title,
+      candidate.subtitle,
+      candidate.format,
+      candidate.mediaType,
+      candidate.description ?? '',
+      ...candidate.tags,
+    ].join(' ').toLowerCase().replaceAll(RegExp(r'[_-]+'), ' ').trim();
+  }
+
+  bool _containsWholePhrase(String text, String phrase) {
+    final escaped = RegExp.escape(phrase.toLowerCase());
+    return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(text);
   }
 
   bool _matchesRequestTerm(String text, Set<String> tokens, String term) {
@@ -510,8 +560,18 @@ class TasteEngine {
   }
 
   List<Recommendation> _calibrateScores(
-    List<_ScoredRecommendation> recommendations,
-  ) {
+    List<_ScoredRecommendation> recommendations, {
+    required RecommendationQuery query,
+  }) {
+    if (query.isActive && recommendations.length <= 3) {
+      return [
+        for (final entry in recommendations)
+          entry.recommendation.copyWith(
+            matchScore: max(52, min(92, 50 + entry.rawScore * 2.2)),
+          ),
+      ];
+    }
+
     final minScore = recommendations.last.rawScore;
     final maxScore = recommendations.first.rawScore;
     final range = maxScore - minScore;
@@ -527,6 +587,95 @@ class TasteEngine {
   }
 
   static const Set<String> _adultRequestTags = {'Hentai'};
+
+  static const Set<String> _requestTextStopWords = {
+    'about',
+    'and',
+    'best',
+    'find',
+    'for',
+    'give',
+    'good',
+    'like',
+    'lot',
+    'make',
+    'makes',
+    'really',
+    'recommend',
+    'recommendation',
+    'recommendations',
+    'similar',
+    'something',
+    'that',
+    'the',
+    'to',
+    'want',
+    'with',
+    'you',
+  };
+
+  static const Set<String> _requestStructuralTerms = {
+    'anime',
+    'book',
+    'comic',
+    'film',
+    'films',
+    'game',
+    'games',
+    'manga',
+    'movie',
+    'movies',
+    'novel',
+    'play',
+    'steam',
+    'series',
+    'show',
+    'shows',
+    'special',
+  };
+
+  static const Set<String> _lowSignalRequestTerms = {'entertaining', 'fun'};
+
+  static const Map<String, Set<String>> _requestTagEvidenceHints = {
+    'Comedy': {
+      'absurd',
+      'comedy',
+      'comedic',
+      'funny',
+      'goofy',
+      'hilarious',
+      'humor',
+      'humour',
+      'joke',
+      'jokes',
+      'laugh',
+      'laughing',
+      'parody',
+      'satire',
+      'silly',
+      'slapstick',
+      'witty',
+    },
+    'Funny': {
+      'absurd',
+      'comedy',
+      'comedic',
+      'funny',
+      'goofy',
+      'hilarious',
+      'humor',
+      'humour',
+      'joke',
+      'jokes',
+      'laugh',
+      'laughing',
+      'parody',
+      'satire',
+      'silly',
+      'slapstick',
+      'witty',
+    },
+  };
 }
 
 class _ScoredRecommendation {
