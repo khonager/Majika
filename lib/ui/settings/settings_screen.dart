@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:http/http.dart' as http;
 import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/firebase/firebase_profile_service.dart';
 import 'package:majika/ui/profile/profile_screen.dart';
@@ -32,6 +34,17 @@ enum _AiModelTier {
   final IconData icon;
 
   const _AiModelTier(this.label, this.icon);
+}
+
+enum _ServerRuntime {
+  ollama('Ollama', defaultLocalAiEndpoint, Icons.terminal_rounded),
+  fastFlowLm('FastFlowLM', _flmLocalAiEndpoint, Icons.memory_rounded);
+
+  final String label;
+  final String endpoint;
+  final IconData icon;
+
+  const _ServerRuntime(this.label, this.endpoint, this.icon);
 }
 
 const _downloadableLocalAiModels = [
@@ -158,28 +171,48 @@ const _flmLocalAiEndpoint = 'http://127.0.0.1:52625/v1/chat/completions';
 const _flmDefaultModel = 'llama3.2:1b';
 const _externalLocalServerModelPresets = [
   _ServerModelPreset(
-    name: 'qwen3:1.7b',
+    name: 'llama3.2:1b',
+    runtime: _ServerRuntime.ollama,
     tier: _AiModelTier.low,
-    sizeLabel: '1.4 GB',
+    sizeLabel: '1.3 GB',
     description:
-        'Experimental compact-prompt model for modest laptops; use only if larger local models are unavailable.',
+        'Smallest useful Ollama fallback for modest laptops. It uses compact prompts and is best when speed matters more than rich explanations.',
+  ),
+  _ServerModelPreset(
+    name: 'llama3.2:3b',
+    runtime: _ServerRuntime.ollama,
+    tier: _AiModelTier.recommended,
+    sizeLabel: '2.0 GB',
+    description:
+        'Good starter model for Majika on everyday machines: stronger than 1B while still light enough to run locally.',
+  ),
+  _ServerModelPreset(
+    name: 'qwen2.5:3b-instruct',
+    runtime: _ServerRuntime.ollama,
+    tier: _AiModelTier.recommended,
+    sizeLabel: '1.9 GB',
+    description:
+        'Compact instruction-following model that tends to handle structured recommendation prompts cleanly.',
+  ),
+  _ServerModelPreset(
+    name: 'qwen2.5:7b-instruct',
+    runtime: _ServerRuntime.ollama,
+    tier: _AiModelTier.high,
+    sizeLabel: '4.7 GB',
+    description:
+        'Higher-quality local choice for ranking, tag filtering, and explanation quality when RAM is available.',
   ),
   _ServerModelPreset(
     name: 'qwen3:4b-instruct',
+    runtime: _ServerRuntime.ollama,
     tier: _AiModelTier.recommended,
     sizeLabel: '2.5 GB',
     description:
-        'Best default for Majika: strong instruction following without being too heavy.',
-  ),
-  _ServerModelPreset(
-    name: 'qwen3:8b',
-    tier: _AiModelTier.high,
-    sizeLabel: '5.2 GB',
-    description:
-        'Higher accuracy for better tag and top-pick choices if the laptop has enough RAM.',
+        'Majika default local-server model: strong instruction following without being too heavy.',
   ),
   _ServerModelPreset(
     name: 'gemma3:1b',
+    runtime: _ServerRuntime.ollama,
     tier: _AiModelTier.low,
     sizeLabel: '815 MB',
     description:
@@ -187,19 +220,38 @@ const _externalLocalServerModelPresets = [
   ),
   _ServerModelPreset(
     name: 'gemma3:4b',
+    runtime: _ServerRuntime.ollama,
     tier: _AiModelTier.recommended,
     sizeLabel: '3.3 GB',
     description: 'Balanced Gemma option for local server users.',
   ),
   _ServerModelPreset(
-    name: 'gemma3:12b',
+    name: 'llama3.1:8b',
+    runtime: _ServerRuntime.ollama,
     tier: _AiModelTier.high,
-    sizeLabel: '8.1 GB',
+    sizeLabel: '4.9 GB',
     description:
-        'Large Gemma option for stronger reasoning on beefier machines.',
+        'Reliable installed-friendly generalist for fuller recommendation reasoning on larger local machines.',
+  ),
+  _ServerModelPreset(
+    name: 'qwen3:0.6b',
+    runtime: _ServerRuntime.fastFlowLm,
+    tier: _AiModelTier.low,
+    sizeLabel: 'FLM',
+    description:
+        'FastFlowLM compact model for Ryzen AI NPU setups. Use when FLM is installed and you want the lightest server option.',
+  ),
+  _ServerModelPreset(
+    name: 'qwen3:4b',
+    runtime: _ServerRuntime.fastFlowLm,
+    tier: _AiModelTier.recommended,
+    sizeLabel: 'FLM',
+    description:
+        'FastFlowLM balanced NPU option for Majika-style structured prompts on supported Ryzen AI devices.',
   ),
   _ServerModelPreset(
     name: _flmDefaultModel,
+    runtime: _ServerRuntime.fastFlowLm,
     tier: _AiModelTier.low,
     sizeLabel: 'FastFlowLM',
     description: 'FastFlowLM starter model for AMD NPU-oriented setups.',
@@ -263,6 +315,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   _DownloadableModel _selectedModel = _defaultLocalAiModel;
   String? _downloadedModelId;
   String? _downloadedModelName;
+  bool _isLoadingServerModels = false;
+  String? _serverModelStatusMessage;
+  Set<String> _installedOllamaModels = const {};
   double _imageQuality = 0.85;
   double? _downloadProgress;
   CancelToken? _downloadCancelToken;
@@ -319,14 +374,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return models.contains(_selectedModel) ? _selectedModel : models.first;
   }
 
+  List<_ServerModelPreset> get _serverModelPresets {
+    final presets = [..._externalLocalServerModelPresets];
+    final knownNames = presets.map((preset) => preset.name).toSet();
+    final installedOnly =
+        _installedOllamaModels
+            .where((name) => !knownNames.contains(name))
+            .where((name) => !_looksLikeEmbeddingModel(name))
+            .toList()
+          ..sort();
+    for (final name in installedOnly) {
+      presets.insert(
+        0,
+        _ServerModelPreset(
+          name: name,
+          runtime: _ServerRuntime.ollama,
+          tier: _AiModelTier.recommended,
+          sizeLabel: 'Installed',
+          description:
+              'Installed Ollama model found on this device. Majika can use it immediately; benchmark quality before making it your default.',
+        ),
+      );
+    }
+    return presets;
+  }
+
   _ServerModelPreset get _effectiveServerModelPreset {
     final modelName = _localServerModelController.text.trim();
-    for (final preset in _externalLocalServerModelPresets) {
+    for (final preset in _serverModelPresets) {
       if (preset.name == modelName) return preset;
     }
-    return _externalLocalServerModelPresets.firstWhere(
+    return _serverModelPresets.firstWhere(
       (preset) => preset.name == defaultLocalAiModel,
-      orElse: () => _externalLocalServerModelPresets.first,
+      orElse: () => _serverModelPresets.first,
     );
   }
 
@@ -344,7 +424,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   String get _ollamaServeCommand => 'ollama run $_effectiveServerModelName';
 
-  String get _flmServeCommand => 'flm serve $_flmDefaultModel';
+  String get _ollamaPullCommand => 'ollama pull $_effectiveServerModelName';
+
+  String get _effectiveFlmModelName =>
+      _effectiveServerModelPreset.runtime == _ServerRuntime.fastFlowLm
+      ? _effectiveServerModelName
+      : _flmDefaultModel;
+
+  String get _flmServeCommand => 'flm serve $_effectiveFlmModelName';
+
+  String get _flmPullCommand => 'flm pull $_effectiveFlmModelName';
 
   int get _resolvedContextWindowTokens {
     final override = int.tryParse(_contextWindowController.text.trim());
@@ -464,6 +553,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           prefs.getString(LocalAiSettingsKeys.huggingFaceToken) ?? '';
     });
     _loadProfileHuggingFaceTokenIfNeeded();
+    unawaited(_refreshServerModels());
   }
 
   String _modeFromLegacyProvider(String? provider) {
@@ -511,6 +601,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showInfoToast(context, '$label command copied.');
   }
 
+  Future<void> _refreshServerModels() async {
+    final endpoint = _localEndpointController.text.trim().isEmpty
+        ? defaultLocalAiEndpoint
+        : _localEndpointController.text.trim();
+    if (!_looksLikeOllamaEndpoint(endpoint)) {
+      if (!mounted) return;
+      setState(() {
+        _installedOllamaModels = const {};
+        _serverModelStatusMessage =
+            'FastFlowLM is not installed on this device. Use flm list on a supported Windows Ryzen AI setup to confirm downloaded models.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoadingServerModels = true;
+      _serverModelStatusMessage = null;
+    });
+
+    try {
+      final tagsUri = _ollamaTagsUri(endpoint);
+      final response = await http
+          .get(tagsUri)
+          .timeout(const Duration(milliseconds: 1800));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError('Ollama returned HTTP ${response.statusCode}.');
+      }
+      final decoded = jsonDecode(response.body);
+      final models = decoded is Map<String, dynamic> ? decoded['models'] : null;
+      final names = <String>{};
+      if (models is List) {
+        for (final model in models) {
+          if (model is! Map<String, dynamic>) continue;
+          final name = model['name'] ?? model['model'];
+          if (name != null) names.add(name.toString());
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _installedOllamaModels = names;
+        _serverModelStatusMessage = names.isEmpty
+            ? 'Ollama is reachable, but no downloaded models were reported.'
+            : 'Found ${names.length} downloaded Ollama model${names.length == 1 ? '' : 's'} on this device.';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _installedOllamaModels = const {};
+        _serverModelStatusMessage =
+            'Could not reach Ollama at ${_ollamaTagsUri(endpoint)}. Start Ollama, then refresh.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingServerModels = false);
+      }
+    }
+  }
+
   Future<void> _useOllamaDefaults() async {
     final modelName = _effectiveServerModelName == _flmDefaultModel
         ? defaultLocalAiModel
@@ -532,6 +680,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       localAiModeExternalServer,
     );
     await _saveBool(LocalAiSettingsKeys.useLocalAi, true);
+    unawaited(_refreshServerModels());
   }
 
   Future<void> _useFlmDefaults() async {
@@ -549,6 +698,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       localAiModeExternalServer,
     );
     await _saveBool(LocalAiSettingsKeys.useLocalAi, true);
+    unawaited(_refreshServerModels());
   }
 
   Future<void> _useCloudProvider(_CloudAiProviderPreset preset) async {
@@ -1177,11 +1327,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 if (_usesExternalServer)
                   _ServerModelPresetCard(
-                    presets: _externalLocalServerModelPresets,
+                    presets: _serverModelPresets,
                     selectedPreset: _effectiveServerModelPreset,
+                    installedOllamaModels: _installedOllamaModels,
+                    isLoadingInstalledModels: _isLoadingServerModels,
+                    statusMessage: _serverModelStatusMessage,
+                    onRefreshInstalledModels: _refreshServerModels,
                     onPresetSelected: (preset) {
                       final value = preset.name;
-                      setState(() => _localServerModelController.text = value);
+                      setState(() {
+                        _localServerModelController.text = value;
+                        _localEndpointController.text = preset.runtime.endpoint;
+                      });
+                      _saveString(
+                        LocalAiSettingsKeys.localEndpoint,
+                        preset.runtime.endpoint,
+                      );
                       _saveString(LocalAiSettingsKeys.localServerModel, value);
                       showInfoToast(
                         context,
@@ -1206,7 +1367,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (_usesExternalServer)
                   _ServerRuntimeHelpCard(
                     ollamaCommand: _ollamaServeCommand,
+                    ollamaPullCommand: _ollamaPullCommand,
                     flmCommand: _flmServeCommand,
+                    flmPullCommand: _flmPullCommand,
                     onUseOllama: () {
                       unawaited(_useOllamaDefaults());
                       showInfoToast(context, 'Ollama endpoint selected.');
@@ -1215,10 +1378,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       unawaited(_useFlmDefaults());
                       showInfoToast(context, 'FastFlowLM endpoint selected.');
                     },
+                    onRefresh: _refreshServerModels,
                     onCopyOllama: () =>
                         _copyServerCommand('Ollama', _ollamaServeCommand),
+                    onCopyOllamaPull: () =>
+                        _copyServerCommand('Ollama pull', _ollamaPullCommand),
                     onCopyFlm: () =>
                         _copyServerCommand('FastFlowLM', _flmServeCommand),
+                    onCopyFlmPull: () =>
+                        _copyServerCommand('FastFlowLM pull', _flmPullCommand),
                   ),
                 if (_usesExternalCloud)
                   _CloudAiProviderCard(
@@ -1486,16 +1654,38 @@ class _DownloadableModel {
 
 class _ServerModelPreset {
   final String name;
+  final _ServerRuntime runtime;
   final _AiModelTier tier;
   final String sizeLabel;
   final String description;
 
   const _ServerModelPreset({
     required this.name,
+    required this.runtime,
     required this.tier,
     required this.sizeLabel,
     required this.description,
   });
+
+  String get downloadCommand => switch (runtime) {
+    _ServerRuntime.ollama => 'ollama pull $name',
+    _ServerRuntime.fastFlowLm => 'flm pull $name',
+  };
+
+  String get serveCommand => switch (runtime) {
+    _ServerRuntime.ollama => 'ollama run $name',
+    _ServerRuntime.fastFlowLm => 'flm serve $name',
+  };
+
+  @override
+  bool operator ==(Object other) {
+    return other is _ServerModelPreset &&
+        other.name == name &&
+        other.runtime == runtime;
+  }
+
+  @override
+  int get hashCode => Object.hash(name, runtime);
 }
 
 class _CloudAiProviderPreset {
@@ -1540,6 +1730,33 @@ String _downloadModelErrorMessage(Object error, _DownloadableModel model) {
   }
 
   return 'Could not download ${model.name}: $error';
+}
+
+bool _looksLikeOllamaEndpoint(String endpoint) {
+  final uri = Uri.tryParse(endpoint);
+  if (uri == null) return true;
+  if (uri.port == 52625) return false;
+  if (uri.path.contains('/v1') || uri.path.contains('/chat/completions')) {
+    return uri.port == 11434;
+  }
+  return endpoint.contains('11434') || !endpoint.contains('52625');
+}
+
+bool _looksLikeEmbeddingModel(String modelName) {
+  final normalized = modelName.toLowerCase();
+  return normalized.contains('embed') || normalized.contains('nomic-embed');
+}
+
+Uri _ollamaTagsUri(String endpoint) {
+  final uri = Uri.parse(endpoint);
+  var path = uri.path;
+  for (final suffix in ['/v1/chat/completions', '/chat/completions', '/v1']) {
+    if (path.endsWith(suffix)) {
+      path = path.substring(0, path.length - suffix.length);
+      break;
+    }
+  }
+  return uri.replace(path: '$path/api/tags', query: '');
 }
 
 class _CloudAiProviderCard extends StatelessWidget {
@@ -1657,17 +1874,26 @@ class _CloudAiProviderCard extends StatelessWidget {
 class _ServerModelPresetCard extends StatelessWidget {
   final List<_ServerModelPreset> presets;
   final _ServerModelPreset selectedPreset;
+  final Set<String> installedOllamaModels;
+  final bool isLoadingInstalledModels;
+  final String? statusMessage;
+  final Future<void> Function() onRefreshInstalledModels;
   final ValueChanged<_ServerModelPreset> onPresetSelected;
 
   const _ServerModelPresetCard({
     required this.presets,
     required this.selectedPreset,
+    required this.installedOllamaModels,
+    required this.isLoadingInstalledModels,
+    required this.statusMessage,
+    required this.onRefreshInstalledModels,
     required this.onPresetSelected,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final selectedInstalled = _isPresetInstalled(selectedPreset);
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
       padding: const EdgeInsets.all(14),
@@ -1699,7 +1925,7 @@ class _ServerModelPresetCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Server model preset',
+                      'Server model catalog',
                       style: theme.textTheme.titleSmall?.copyWith(
                         color: Colors.white,
                         fontWeight: FontWeight.w800,
@@ -1707,13 +1933,25 @@ class _ServerModelPresetCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Built-in local-server choices for this platform.',
+                      'Installed Ollama models plus Majika-friendly downloads.',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: Colors.white70,
                       ),
                     ),
                   ],
                 ),
+              ),
+              IconButton.filledTonal(
+                tooltip: 'Refresh installed models',
+                onPressed: isLoadingInstalledModels
+                    ? null
+                    : () => unawaited(onRefreshInstalledModels()),
+                icon: isLoadingInstalledModels
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh_rounded),
               ),
             ],
           ),
@@ -1732,10 +1970,9 @@ class _ServerModelPresetCard extends StatelessWidget {
                 for (final preset in presets)
                   DropdownMenuItem(
                     value: preset,
-                    child: Text(
-                      '${preset.tier.label} · ${preset.name}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    child: _ServerModelMenuItem(
+                      preset: preset,
+                      isInstalled: _isPresetInstalled(preset),
                     ),
                   ),
               ],
@@ -1745,20 +1982,139 @@ class _ServerModelPresetCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          Text(
-            '${selectedPreset.sizeLabel} · ${selectedPreset.tier.label}',
-            style: const TextStyle(color: Colors.white70),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _ModelStatusChip(
+                icon: selectedInstalled
+                    ? Icons.check_circle_rounded
+                    : Icons.download_rounded,
+                label: selectedInstalled ? 'Installed' : 'Needs download',
+                color: selectedInstalled
+                    ? Colors.greenAccent
+                    : Colors.white.withValues(alpha: 0.62),
+              ),
+              _ModelStatusChip(
+                icon: selectedPreset.runtime.icon,
+                label: selectedPreset.runtime.label,
+                color: theme.colorScheme.secondary,
+              ),
+              _ModelStatusChip(
+                icon: selectedPreset.tier.icon,
+                label:
+                    '${selectedPreset.sizeLabel} · ${selectedPreset.tier.label}',
+                color: Colors.white70,
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           Text(
             selectedPreset.description,
-            style: const TextStyle(color: Colors.white70, height: 1.35),
+            style: TextStyle(
+              color: selectedInstalled ? Colors.white70 : Colors.white60,
+              height: 1.35,
+            ),
+          ),
+          if (statusMessage != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              statusMessage!,
+              style: const TextStyle(color: Colors.white54, height: 1.3),
+            ),
+          ],
+          const SizedBox(height: 10),
+          SelectableText(
+            selectedInstalled
+                ? selectedPreset.serveCommand
+                : selectedPreset.downloadCommand,
+            style: const TextStyle(
+              color: Colors.white,
+              fontFamily: 'monospace',
+              fontSize: 12,
+            ),
           ),
           const SizedBox(height: 10),
           TextButton.icon(
-            onPressed: _openOllamaDownload,
+            onPressed: selectedPreset.runtime == _ServerRuntime.ollama
+                ? _openOllamaDownload
+                : _openFastFlowLmDownload,
             icon: const Icon(Icons.open_in_new_rounded, size: 16),
-            label: const Text('Install local server app'),
+            label: Text('Install ${selectedPreset.runtime.label}'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool _isPresetInstalled(_ServerModelPreset preset) {
+    if (preset.runtime == _ServerRuntime.fastFlowLm) return false;
+    return installedOllamaModels.contains(preset.name);
+  }
+}
+
+class _ServerModelMenuItem extends StatelessWidget {
+  final _ServerModelPreset preset;
+  final bool isInstalled;
+
+  const _ServerModelMenuItem({required this.preset, required this.isInstalled});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isInstalled ? Colors.white : Colors.white54;
+    return Row(
+      children: [
+        Icon(
+          isInstalled ? Icons.check_circle_rounded : Icons.download_rounded,
+          size: 16,
+          color: isInstalled ? Colors.greenAccent : Colors.white54,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            '${preset.runtime.label} · ${preset.name}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: color),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ModelStatusChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  const _ModelStatusChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: color, fontSize: 12),
+            ),
           ),
         ],
       ),
@@ -1768,19 +2124,29 @@ class _ServerModelPresetCard extends StatelessWidget {
 
 class _ServerRuntimeHelpCard extends StatelessWidget {
   final String ollamaCommand;
+  final String ollamaPullCommand;
   final String flmCommand;
+  final String flmPullCommand;
   final VoidCallback onUseOllama;
   final VoidCallback onUseFlm;
+  final VoidCallback onRefresh;
   final VoidCallback onCopyOllama;
+  final VoidCallback onCopyOllamaPull;
   final VoidCallback onCopyFlm;
+  final VoidCallback onCopyFlmPull;
 
   const _ServerRuntimeHelpCard({
     required this.ollamaCommand,
+    required this.ollamaPullCommand,
     required this.flmCommand,
+    required this.flmPullCommand,
     required this.onUseOllama,
     required this.onUseFlm,
+    required this.onRefresh,
     required this.onCopyOllama,
+    required this.onCopyOllamaPull,
     required this.onCopyFlm,
+    required this.onCopyFlmPull,
   });
 
   @override
@@ -1815,19 +2181,23 @@ class _ServerRuntimeHelpCard extends StatelessWidget {
           _ServerCommandRow(
             title: 'Ollama',
             subtitle:
-                'Endpoint $defaultLocalAiEndpoint; model follows the preset above.',
+                'Endpoint $defaultLocalAiEndpoint; refresh reads /api/tags from this device.',
             command: ollamaCommand,
+            secondaryCommand: ollamaPullCommand,
             onUse: onUseOllama,
             onCopy: onCopyOllama,
+            onCopySecondary: onCopyOllamaPull,
           ),
           const SizedBox(height: 10),
           _ServerCommandRow(
             title: 'FastFlowLM',
             subtitle:
-                'Endpoint $_flmLocalAiEndpoint; starter model $_flmDefaultModel.',
+                'Endpoint $_flmLocalAiEndpoint; use flm list on supported Windows Ryzen AI devices.',
             command: flmCommand,
+            secondaryCommand: flmPullCommand,
             onUse: onUseFlm,
             onCopy: onCopyFlm,
+            onCopySecondary: onCopyFlmPull,
           ),
         ],
       ),
@@ -1839,19 +2209,63 @@ class _ServerCommandRow extends StatelessWidget {
   final String title;
   final String subtitle;
   final String command;
+  final String secondaryCommand;
   final VoidCallback onUse;
   final VoidCallback onCopy;
+  final VoidCallback onCopySecondary;
 
   const _ServerCommandRow({
     required this.title,
     required this.subtitle,
     required this.command,
+    required this.secondaryCommand,
     required this.onUse,
     required this.onCopy,
+    required this.onCopySecondary,
   });
 
   @override
   Widget build(BuildContext context) {
+    final actionButtons = Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      alignment: WrapAlignment.end,
+      children: [
+        IconButton.filledTonal(
+          tooltip: 'Use $title settings',
+          onPressed: onUse,
+          icon: const Icon(Icons.check_rounded),
+        ),
+        IconButton.filledTonal(
+          tooltip: 'Copy $title command',
+          onPressed: onCopy,
+          icon: const Icon(Icons.copy_rounded),
+        ),
+        IconButton.filledTonal(
+          tooltip: 'Copy $title download command',
+          onPressed: onCopySecondary,
+          icon: const Icon(Icons.download_rounded),
+        ),
+      ],
+    );
+    final titleBlock = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          subtitle,
+          style: const TextStyle(color: Colors.white70, height: 1.3),
+        ),
+      ],
+    );
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -1862,51 +2276,54 @@ class _ServerCommandRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth < 260) {
+                return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        height: 1.3,
-                      ),
+                    titleBlock,
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: actionButtons,
                     ),
                   ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton.filledTonal(
-                tooltip: 'Use $title settings',
-                onPressed: onUse,
-                icon: const Icon(Icons.check_rounded),
-              ),
-              const SizedBox(width: 4),
-              IconButton.filledTonal(
-                tooltip: 'Copy $title command',
-                onPressed: onCopy,
-                icon: const Icon(Icons.copy_rounded),
-              ),
-            ],
+                );
+              }
+
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: titleBlock),
+                  const SizedBox(width: 8),
+                  Flexible(child: actionButtons),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 8),
-          SelectableText(
-            command,
-            style: const TextStyle(
-              color: Colors.white,
-              fontFamily: 'monospace',
-              fontSize: 12,
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SelectableText(
+              command,
+              style: const TextStyle(
+                color: Colors.white,
+                fontFamily: 'monospace',
+                fontSize: 12,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SelectableText(
+              secondaryCommand,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontFamily: 'monospace',
+                fontSize: 12,
+              ),
             ),
           ),
         ],
@@ -2260,6 +2677,11 @@ Future<void> _openCloudProviderKeys(_CloudAiProviderPreset preset) async {
 
 Future<void> _openOllamaDownload() async {
   final uri = Uri.parse('https://ollama.com/download');
+  await launchUrl(uri, mode: LaunchMode.externalApplication);
+}
+
+Future<void> _openFastFlowLmDownload() async {
+  final uri = Uri.parse('https://fastflowlm.com/');
   await launchUrl(uri, mode: LaunchMode.externalApplication);
 }
 

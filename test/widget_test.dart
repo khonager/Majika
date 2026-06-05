@@ -1022,8 +1022,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Local server endpoint'), findsOneWidget);
-    expect(find.text('Server model preset'), findsOneWidget);
+    expect(find.text('Server model catalog'), findsOneWidget);
     expect(find.text('qwen3:4b-instruct'), findsWidgets);
+    expect(find.text('Needs download'), findsOneWidget);
+    expect(find.textContaining('ollama pull qwen3:4b-instruct'), findsWidgets);
     expect(find.text(defaultLocalAiEndpoint), findsWidgets);
     expect(find.text('Local server model'), findsOneWidget);
     expect(find.text('Serve a local model'), findsOneWidget);
