@@ -1009,6 +1009,7 @@ Return JSON only. No markdown. No explanation.
 Return one object with exactly these keys: tags, formats, searchText.
 The formats field is Majika's transport field for Steam play capabilities only.
 Use empty arrays when no known Steam tag or play capability clearly matches.
+For adult/sexual Steam requests, use Steam tags such as Sexual Content, Nudity, Mature, NSFW, Hentai, Dating Sim, or Visual Novel when they clearly match.
 Do not return AniList media types, AniList release formats, or adult-content fields.
 Keep leftover natural-language game terms in searchText.
 ${_formatInstruction('Steam', allowedFormats)}
@@ -1114,6 +1115,7 @@ $selectedTagsLine$selectedFormatsLine$selectedMediaLine
     ];
     final tags = <String>{
       ...query.selectedTags,
+      ...query.inferredTags(serviceTags),
       for (final tag in serviceTags)
         if (_tagLooksRequested(query.request, tag)) tag,
     };
@@ -1457,6 +1459,7 @@ ${_servicePromptContext(profile.serviceName)}
 Pick the single best recommendation for this user from the options.
 Treat tags, requestTags, scores, and ranker reasons as evidence, not as the decision itself.
 First filter for the strongest match to the user's request. Use the taste profile only as secondary guidance or a tie-breaker.
+Prioritize the user's request before personal taste. A lower-score option can win when it better matches the request.
 Write the reason around why the chosen option fits the request; mention personal taste only when it adds useful context.
 Only the listed options are eligible for this request.
 Return JSON only. Use exactly these keys: id, reason. The id must match one option id. Keep reason to one short sentence under 25 words.
@@ -1486,6 +1489,7 @@ ${_servicePromptContext('Steam')}
 Pick the single best Steam game for this user from the Steam game options.
 Treat Steam store tags, matchedRequestSteamTags, scores, playtime, and ranker reasons as evidence, not as the decision itself.
 First filter for the strongest match to the game request. Use the user's Steam taste profile only as secondary guidance or a tie-breaker.
+Prioritize the user's request before personal taste. A lower-score option can win when it better matches the request.
 Do not pick a broadly popular or profile-shaped game when another option better satisfies the requested mood, mechanic, theme, tag, franchise, format, or play capability.
 Write the reason around why the chosen game fits the request; mention personal taste only when it adds useful context.
 Only the listed Steam game options are eligible for this request.
@@ -1518,6 +1522,7 @@ ${_servicePromptContext('AniList')}
 Pick the single best AniList anime or manga recommendation for this user from the AniList options.
 Treat AniList tags, matchedRequestAniListTags, scores, staff, studios, and ranker reasons as evidence, not as the decision itself.
 First filter for the strongest match to the user's request. Use the anime/manga taste profile only as secondary guidance or a tie-breaker.
+Prioritize the user's request before personal taste. A lower-score option can win when it better matches the request.
 Write the reason around why the chosen title fits the request; mention personal taste only when it adds useful context.
 Only the listed AniList options are eligible for this request.
 If missingReleaseFormats is empty, that title satisfies the requested AniList release-format constraint.

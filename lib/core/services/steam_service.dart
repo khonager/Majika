@@ -98,6 +98,19 @@ class SteamService implements MediaService {
     504130, // Manual Samuel
     1205450, // Turnip Boy Commits Tax Evasion
   ];
+  static const _adultCandidateAppIds = [
+    339800, // HuniePop
+    930210, // HuniePop 2: Double Date
+    1126320, // Being a DIK - Season 1
+    611790, // House Party
+    644560, // Mirror
+    407330, // Sakura Dungeon
+    459820, // Crush Crush
+    1034140, // Subverse
+    939400, // LoveChoice
+    765870, // Leisure Suit Larry - Wet Dreams Don't Dry
+    402180, // Sakura Swim Club
+  ];
 
   final http.Client _client;
   final SteamApiKeyProvider _apiKeyProvider;
@@ -138,7 +151,7 @@ class SteamService implements MediaService {
   List<String> get supportedFormats => RecommendationQuery.steamFormats;
 
   @override
-  bool get supportsAdultContent => false;
+  bool get supportsAdultContent => true;
 
   @override
   Future<ServiceUserProfile?> fetchUserProfile(String userName) async {
@@ -180,7 +193,10 @@ class SteamService implements MediaService {
   Future<List<MediaItem>> fetchRecommendationCandidates({
     bool includeAdult = false,
   }) async {
-    final details = await _fetchAppDetails(_candidateAppIds);
+    final appIds = includeAdult
+        ? [..._candidateAppIds, ..._adultCandidateAppIds]
+        : _candidateAppIds;
+    final details = await _fetchAppDetails(appIds);
     return details.values.toList();
   }
 
@@ -214,6 +230,9 @@ class SteamService implements MediaService {
     if (_hasComedyIntent(query)) {
       items.addAll((await _fetchAppDetails(_comedyCandidateAppIds)).values);
     }
+    if (_hasAdultIntent(query)) {
+      items.addAll((await _fetchAppDetails(_adultCandidateAppIds)).values);
+    }
 
     final baseline = await fetchRecommendationCandidates();
     return _dedupe([...items, ...baseline]);
@@ -231,8 +250,16 @@ class SteamService implements MediaService {
       ];
     }
 
+    if (query.excludeAdult && query.infersAdult) {
+      return const [];
+    }
+
     if (_hasComedyIntent(query)) {
       return const ['comedy', 'funny', 'hilarious'];
+    }
+
+    if (_hasAdultIntent(query)) {
+      return const ['adult', 'hentai', 'dating sim', 'visual novel', 'sexy'];
     }
 
     final text = query.request.trim();
@@ -270,6 +297,56 @@ class SteamService implements MediaService {
     'slapstick',
   };
 
+  static bool _hasAdultIntent(RecommendationQuery query) {
+    if (query.excludeAdult) return false;
+    if (query.infersAdult) return true;
+    final tags = {
+      ...query.selectedTags,
+      ...query.aiSelectedTags,
+      ...query.inferredTags(RecommendationQuery.steamBrowsableTags),
+    };
+    if (tags.any(_adultIntentTags.contains)) return true;
+    final text = query.request.toLowerCase();
+    return _adultIntentTerms.any((term) {
+      final escaped = RegExp.escape(term);
+      return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(text);
+    });
+  }
+
+  static const _adultIntentTags = {
+    'Hentai',
+    'Ecchi',
+    'Sexual Content',
+    'Nudity',
+    'Mature',
+    'NSFW',
+  };
+
+  static const _adultIntentTerms = {
+    '18+',
+    '18 plus',
+    'adult',
+    'adult game',
+    'adult games',
+    'eroge',
+    'erotic',
+    'explicit',
+    'hentai',
+    'horny',
+    'lewd',
+    'mature game',
+    'mature games',
+    'naughty',
+    'nsfw',
+    'porn',
+    'pornography',
+    'r18',
+    'sex',
+    'sexual',
+    'sexy',
+    'smut',
+  };
+
   @override
   Future<List<String>> fetchAvailableTags() async {
     return RecommendationQuery.steamBrowsableTags;
@@ -304,7 +381,8 @@ class SteamService implements MediaService {
           'appids': '$appId',
           'l': 'en',
           'cc': 'us',
-          'filters': 'basic,genres,categories,release_date,metacritic',
+          'filters':
+              'basic,genres,categories,content_descriptors,release_date,metacritic',
         },
       );
       try {
@@ -457,7 +535,16 @@ class SteamService implements MediaService {
   static MediaItem _mediaFromAppDetails(int appId, Map<dynamic, dynamic> data) {
     final genres = _descriptions(data['genres']);
     final categories = _descriptions(data['categories']);
-    final tags = _normalizeTags([...genres, ...categories]);
+    final contentNotes = _contentDescriptorNotes(data['content_descriptors']);
+    final evidenceText = [
+      data['name']?.toString() ?? '',
+      data['short_description']?.toString() ?? '',
+      contentNotes,
+      ...genres,
+      ...categories,
+    ].join(' ');
+    final adultTags = _adultTagsFromEvidence(evidenceText);
+    final tags = _normalizeTags([...genres, ...categories, ...adultTags]);
     final metacriticScore = data['metacritic'] is Map
         ? (data['metacritic']['score'] as num?)?.toDouble()
         : null;
@@ -484,6 +571,7 @@ class SteamService implements MediaService {
       studios: {...developers, ...publishers}.toList(),
       startYear: releaseYear,
       popularity: _syntheticPopularity(data),
+      isAdult: adultTags.isNotEmpty,
     );
   }
 
@@ -555,6 +643,73 @@ class SteamService implements MediaService {
       for (final item in value)
         if (item != null) item.toString(),
     ];
+  }
+
+  static String _contentDescriptorNotes(Object? value) {
+    if (value is! Map) return '';
+    return value['notes']?.toString() ?? '';
+  }
+
+  static List<String> _adultTagsFromEvidence(String value) {
+    final text = _normalizeEvidence(value);
+    if (!_containsAdultEvidence(text)) return const [];
+
+    final tags = <String>{'Sexual Content', 'Mature', 'NSFW'};
+    if (_containsWholePhrase(text, 'hentai')) tags.add('Hentai');
+    if (_containsAnyWholePhrase(text, const ['nude', 'nudity', 'naked'])) {
+      tags.add('Nudity');
+    }
+    if (_containsAnyWholePhrase(text, const [
+      'dating sim',
+      'dating simulator',
+    ])) {
+      tags.add('Dating Sim');
+    }
+    if (_containsWholePhrase(text, 'visual novel')) {
+      tags.add('Visual Novel');
+    }
+    return tags.toList();
+  }
+
+  static bool _containsAdultEvidence(String text) {
+    return _containsAnyWholePhrase(text, const [
+      '18+',
+      '18 plus',
+      'adult visual novel',
+      'adult version',
+      'adult',
+      'eroge',
+      'erotic',
+      'explicit',
+      'hentai',
+      'horny',
+      'lewd',
+      'naughty',
+      'nsfw',
+      'porn',
+      'pornography',
+      'r18',
+      'sex',
+      'sexual',
+      'sexual content',
+      'sexy',
+      'smut',
+      'steamy',
+      'uncensored',
+    ]);
+  }
+
+  static bool _containsAnyWholePhrase(String text, Iterable<String> values) {
+    return values.any((value) => _containsWholePhrase(text, value));
+  }
+
+  static bool _containsWholePhrase(String text, String phrase) {
+    final escaped = RegExp.escape(_normalizeEvidence(phrase));
+    return RegExp('(^|[^a-z0-9+])$escaped([^a-z0-9+]|\$)').hasMatch(text);
+  }
+
+  static String _normalizeEvidence(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'[_-]+'), ' ').trim();
   }
 
   static List<String> _normalizeTags(List<String> values) {

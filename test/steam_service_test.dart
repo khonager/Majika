@@ -85,12 +85,15 @@ void main() {
   });
 
   test('exposes a broad Steam tag catalog for search prompts', () async {
-    final tags = await SteamService().fetchAvailableTags();
+    final service = SteamService();
+    final tags = await service.fetchAvailableTags();
 
     expect(tags, contains('Souls-like'));
     expect(tags, contains('Action RPG'));
     expect(tags, contains('Local Co-Op'));
     expect(tags, contains('Controller Support'));
+    expect(tags, contains('Sexual Content'));
+    expect(service.supportsAdultContent, isTrue);
     expect(tags, isNot(contains('Mahou Shoujo')));
   });
 
@@ -275,6 +278,161 @@ void main() {
       contains('There Is No Game: Wrong Dimension'),
     );
   });
+
+  test('adult search adds curated matches beyond generic title search', () async {
+    final storeTerms = <String>[];
+    final appDetailIds = <String>[];
+    final service = SteamService(
+      client: MockClient((request) async {
+        final url = request.url.toString();
+        if (url.contains('storesearch')) {
+          storeTerms.add(request.url.queryParameters['term']!);
+          return _json({
+            'items': [
+              {'id': 1145360},
+              {'id': 413150},
+            ],
+          });
+        }
+        if (url.contains('appdetails')) {
+          final appId = request.url.queryParameters['appids']!;
+          appDetailIds.add(appId);
+          return _json({
+            appId: {
+              'success': true,
+              'data': {
+                'steam_appid': int.parse(appId),
+                'name': switch (appId) {
+                  '1126320' => 'Being a DIK - Season 1',
+                  '611790' => 'House Party',
+                  '339800' => 'HuniePop',
+                  '1145360' => 'Hades',
+                  '413150' => 'Stardew Valley',
+                  _ => 'Game $appId',
+                },
+                'short_description': switch (appId) {
+                  '1126320' =>
+                    'A choice-driven adult Visual Novel about sex, romance, and drama.',
+                  '611790' =>
+                    'An edgy comedy adventure with naughty adult situations.',
+                  '339800' => 'A dating sim puzzle game with steamy writing.',
+                  _ => 'A Steam game.',
+                },
+                'genres': [
+                  {'description': 'Adventure'},
+                ],
+                'categories': [
+                  {'description': 'Single-player'},
+                ],
+              },
+            },
+          });
+        }
+        return http.Response('not found', 404);
+      }),
+    );
+
+    final candidates = await service.searchRecommendationCandidates(
+      const RecommendationQuery(
+        request: 'horny and naughty sexy',
+        mediaTypes: {'GAME'},
+        formats: {'SINGLE_PLAYER'},
+      ),
+    );
+
+    expect(
+      storeTerms,
+      containsAll(['adult', 'hentai', 'dating sim', 'visual novel', 'sexy']),
+    );
+    expect(storeTerms, isNot(contains('horny and naughty sexy')));
+    expect(appDetailIds, contains('1126320'));
+    expect(appDetailIds, contains('611790'));
+    expect(
+      candidates.map((item) => item.title),
+      contains('Being a DIK - Season 1'),
+    );
+    expect(
+      candidates.firstWhere((item) => item.id == 'steam_1126320').isAdult,
+      isTrue,
+    );
+  });
+
+  test('parses Steam adult evidence from content descriptors', () {
+    final item = SteamService.parseAppDetails({
+      '1126320': {
+        'success': true,
+        'data': {
+          'steam_appid': 1126320,
+          'name': 'Being a DIK - Season 1',
+          'short_description':
+              'A choice-driven adult Visual Novel with romance and drama.',
+          'genres': [
+            {'description': 'Indie'},
+          ],
+          'categories': [
+            {'description': 'Single-player'},
+          ],
+          'content_descriptors': {
+            'notes': 'The game graphically depicts sex and sexual acts.',
+          },
+        },
+      },
+    }, appId: 1126320);
+
+    expect(item?.isAdult, isTrue);
+    expect(item?.tags, contains('Sexual Content'));
+    expect(item?.tags, contains('Mature'));
+    expect(item?.tags, contains('Visual Novel'));
+  });
+
+  test(
+    'hidden explicit content suppresses Steam adult candidate search',
+    () async {
+      final storeTerms = <String>[];
+      final appDetailIds = <String>[];
+      final service = SteamService(
+        client: MockClient((request) async {
+          final url = request.url.toString();
+          if (url.contains('storesearch')) {
+            storeTerms.add(request.url.queryParameters['term']!);
+            return _json({'items': []});
+          }
+          if (url.contains('appdetails')) {
+            final appId = request.url.queryParameters['appids']!;
+            appDetailIds.add(appId);
+            return _json({
+              appId: {
+                'success': true,
+                'data': {
+                  'steam_appid': int.parse(appId),
+                  'name': 'Game $appId',
+                  'short_description': 'A Steam game.',
+                  'genres': [
+                    {'description': 'Action'},
+                  ],
+                  'categories': [
+                    {'description': 'Single-player'},
+                  ],
+                },
+              },
+            });
+          }
+          return http.Response('not found', 404);
+        }),
+      );
+
+      await service.searchRecommendationCandidates(
+        const RecommendationQuery(
+          request: 'horny and naughty sexy',
+          excludeAdult: true,
+        ),
+      );
+
+      expect(storeTerms, isEmpty);
+      expect(appDetailIds, isNot(contains('1126320')));
+      expect(appDetailIds, isNot(contains('611790')));
+    },
+  );
 
   test('inFAMOUS-like search expands to similar Steam candidates', () async {
     final storeTerms = <String>[];

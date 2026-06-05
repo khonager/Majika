@@ -193,6 +193,48 @@ void main() {
   });
 
   test(
+    'flutter gemma service exposes Steam adult tags for sexual requests',
+    () async {
+      late String capturedPrompt;
+      final service = FlutterGemmaLocalAiService(
+        settingsLoader: () async => const LocalAiRuntimeSettings(
+          useLocalAi: true,
+          useAiForSearch: true,
+          mode: localAiModeOnDevice,
+          provider: 'tiny benchmark model',
+          endpoint: defaultLocalAiEndpoint,
+          serverModel: defaultLocalAiModel,
+          deviceModelName: 'Gemma 3 1B IT',
+          contextItems: 8,
+        ),
+        textGenerator: (prompt, maxTokens) async {
+          capturedPrompt = prompt;
+          return '{"tags":["Sexual Content"],"formats":["SINGLE_PLAYER"],"searchText":"dating sim"}';
+        },
+      );
+
+      final interpreted = await service.interpretRecommendationRequest(
+        const RecommendationQuery(request: 'horny and naughty sexy'),
+        availableTags: RecommendationQuery.steamBrowsableTags,
+        serviceName: 'Steam',
+        allowedMediaTypes: RecommendationQuery.steamMediaTypes,
+        allowedFormats: RecommendationQuery.steamFormats,
+      );
+
+      expect(
+        capturedPrompt,
+        contains('For adult/sexual Steam requests, use Steam tags'),
+      );
+      expect(capturedPrompt, contains('Sexual Content'));
+      expect(capturedPrompt, contains('Nudity'));
+      expect(capturedPrompt, contains('NSFW'));
+      expect(interpreted.includeAdult, isTrue);
+      expect(interpreted.aiSelectedTags, contains('Sexual Content'));
+      expect(interpreted.formats, contains('SINGLE_PLAYER'));
+    },
+  );
+
+  test(
     'local AI search prompt omits stale AI tags and false adult state',
     () async {
       late String capturedPrompt;

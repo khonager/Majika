@@ -325,6 +325,117 @@ void main() {
     );
   });
 
+  test('Steam adult searches reject generic profile matches', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile(
+      '76561198000000000',
+      [
+        MediaItem(
+          id: 'steam_owned',
+          title: 'Played Action RPG',
+          coverUrl: '',
+          tags: const ['Action', 'RPG', 'Single-player'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          status: 'OWNED',
+          playtimeMinutes: 6000,
+          sourceId: 'com.majika.service.steam',
+        ),
+      ],
+      serviceId: 'com.majika.service.steam',
+      serviceName: 'Steam',
+    );
+
+    final recommendations = engine.rankCandidates(
+      profile,
+      [
+        MediaItem(
+          id: 'steam_hades',
+          title: 'Hades',
+          coverUrl: '',
+          tags: const ['Action', 'Indie', 'Single-player'],
+          description:
+              'Defy the god of the dead in this rogue-like dungeon crawler.',
+          rating: 9.8,
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          popularity: 100000,
+          sourceId: 'com.majika.service.steam',
+        ),
+        MediaItem(
+          id: 'steam_stardew',
+          title: 'Stardew Valley',
+          coverUrl: '',
+          tags: const ['RPG', 'Simulation', 'Single-player'],
+          description: 'Build a life on your inherited farm.',
+          rating: 9.8,
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          popularity: 100000,
+          sourceId: 'com.majika.service.steam',
+        ),
+        MediaItem(
+          id: 'steam_cyberpunk',
+          title: 'Cyberpunk 2077',
+          coverUrl: '',
+          tags: const ['RPG', 'Single-player'],
+          description: 'An open-world action-adventure RPG in Night City.',
+          rating: 9.7,
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          popularity: 100000,
+          sourceId: 'com.majika.service.steam',
+        ),
+        MediaItem(
+          id: 'steam_adult_vn',
+          title: 'Being a DIK - Season 1',
+          coverUrl: '',
+          tags: const [
+            'Indie',
+            'Single-player',
+            'Sexual Content',
+            'Mature',
+            'NSFW',
+            'Visual Novel',
+          ],
+          description:
+              'A choice-driven adult Visual Novel about sex, romance, and drama.',
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          isAdult: true,
+          sourceId: 'com.majika.service.steam',
+        ),
+        MediaItem(
+          id: 'steam_dating',
+          title: 'HuniePop',
+          coverUrl: '',
+          tags: const [
+            'Dating Sim',
+            'Puzzle',
+            'Single-player',
+            'Sexual Content',
+          ],
+          description: 'A steamy dating sim puzzle game.',
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          isAdult: true,
+          sourceId: 'com.majika.service.steam',
+        ),
+      ],
+      query: const RecommendationQuery(
+        request: 'horny and naughty sexy',
+        mediaTypes: {'GAME'},
+        formats: {'SINGLE_PLAYER'},
+      ),
+    );
+
+    final ids = recommendations.map((recommendation) => recommendation.item.id);
+    expect(ids, containsAll(['steam_adult_vn', 'steam_dating']));
+    expect(ids, isNot(contains('steam_hades')));
+    expect(ids, isNot(contains('steam_stardew')));
+    expect(ids, isNot(contains('steam_cyberpunk')));
+  });
+
   test('inFAMOUS-like game requests infer open-world action traits', () {
     final engine = TasteEngine();
     final profile = engine.buildProfile(

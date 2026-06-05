@@ -218,13 +218,18 @@ class TasteEngine {
           candidate,
           requestedTags,
         );
+        final hasAdultRequestEvidence =
+            _isAdultRequest(query, requestedTags) &&
+            _hasAdultEvidence(candidate);
         score += requestTextScore * 2.4;
         score += requestTagEvidenceScore * 2.0;
         final hasRequestEvidence =
             requestTextScore > 0 ||
             requestTagEvidenceScore > 0 ||
-            requestedGenreMatches.isNotEmpty;
-        if (requestedTags.isNotEmpty && !hasRequestEvidence) {
+            requestedGenreMatches.isNotEmpty ||
+            hasAdultRequestEvidence;
+        if (_requiresRequestEvidence(query, requestedTags) &&
+            !hasRequestEvidence) {
           continue;
         }
       }
@@ -388,6 +393,25 @@ class TasteEngine {
       }
     }
     return min(score, 3.0);
+  }
+
+  bool _requiresRequestEvidence(
+    RecommendationQuery query,
+    Set<String> requestedTags,
+  ) {
+    return requestedTags.isNotEmpty || _isAdultRequest(query, requestedTags);
+  }
+
+  bool _isAdultRequest(RecommendationQuery query, Set<String> requestedTags) {
+    return query.infersAdult || requestedTags.any(_adultRequestTags.contains);
+  }
+
+  bool _hasAdultEvidence(MediaItem candidate) {
+    if (candidate.isAdult) return true;
+    final haystack = _normalizedEvidenceText(candidate);
+    return _adultEvidenceTerms.any(
+      (term) => _containsWholePhrase(haystack, term),
+    );
   }
 
   String _normalizedEvidenceText(MediaItem candidate) {
@@ -586,7 +610,14 @@ class TasteEngine {
     ];
   }
 
-  static const Set<String> _adultRequestTags = {'Hentai'};
+  static const Set<String> _adultRequestTags = {
+    'Hentai',
+    'Ecchi',
+    'Sexual Content',
+    'Nudity',
+    'Mature',
+    'NSFW',
+  };
 
   static const Set<String> _requestTextStopWords = {
     'about',
@@ -637,6 +668,83 @@ class TasteEngine {
   static const Set<String> _lowSignalRequestTerms = {'entertaining', 'fun'};
 
   static const Map<String, Set<String>> _requestTagEvidenceHints = {
+    'Hentai': {
+      '18+',
+      '18 plus',
+      'adult',
+      'adult visual novel',
+      'eroge',
+      'erotic',
+      'explicit',
+      'hentai',
+      'horny',
+      'lewd',
+      'naughty',
+      'nsfw',
+      'porn',
+      'pornography',
+      'r18',
+      'sex',
+      'sexual',
+      'sexual content',
+      'sexy',
+      'smut',
+      'steamy',
+      'uncensored',
+    },
+    'Ecchi': {'ecchi', 'fan service', 'fanservice', 'lewd', 'naughty', 'sexy'},
+    'Sexual Content': {
+      '18+',
+      '18 plus',
+      'adult',
+      'adult visual novel',
+      'erotic',
+      'explicit',
+      'horny',
+      'lewd',
+      'naughty',
+      'nsfw',
+      'porn',
+      'sex',
+      'sexual',
+      'sexual content',
+      'sexy',
+      'smut',
+      'steamy',
+      'uncensored',
+    },
+    'Nudity': {'naked', 'naughty', 'nude', 'nudity', 'sexy', 'uncensored'},
+    'Mature': {
+      '18+',
+      '18 plus',
+      'adult',
+      'adult visual novel',
+      'erotic',
+      'explicit',
+      'mature',
+      'nsfw',
+      'sex',
+      'sexual',
+      'sexual content',
+      'steamy',
+    },
+    'NSFW': {
+      '18+',
+      '18 plus',
+      'adult',
+      'erotic',
+      'explicit',
+      'horny',
+      'lewd',
+      'naughty',
+      'nsfw',
+      'porn',
+      'sex',
+      'sexual',
+      'sexual content',
+      'sexy',
+      'smut',
+    },
     'Comedy': {
       'absurd',
       'comedy',
@@ -675,6 +783,34 @@ class TasteEngine {
       'slapstick',
       'witty',
     },
+  };
+
+  static const Set<String> _adultEvidenceTerms = {
+    '18+',
+    '18 plus',
+    'adult',
+    'adult visual novel',
+    'eroge',
+    'erotic',
+    'explicit',
+    'hentai',
+    'horny',
+    'lewd',
+    'naked',
+    'naughty',
+    'nude',
+    'nudity',
+    'nsfw',
+    'porn',
+    'pornography',
+    'r18',
+    'sex',
+    'sexual',
+    'sexual content',
+    'sexy',
+    'smut',
+    'steamy',
+    'uncensored',
   };
 }
 
