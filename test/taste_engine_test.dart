@@ -602,6 +602,46 @@ void main() {
     expect(recommendations.single.item.title, 'Specific Relationship Story');
   });
 
+  test('Steam AI-selected broad tags do not erase all candidates', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile('tester', [
+      MediaItem(
+        id: 'steam_seen',
+        title: 'Seen Controller Game',
+        coverUrl: '',
+        tags: const ['Action', 'Single-player', 'Controller Support'],
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        sourceId: 'com.majika.service.steam',
+        status: 'OWNED',
+      ),
+    ]);
+
+    final recommendations = engine.rankCandidates(
+      profile,
+      [
+        MediaItem(
+          id: 'steam_candidate',
+          title: 'Mischief Village',
+          coverUrl: '',
+          tags: const ['Action', 'Adventure', 'Single-player'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+          description: 'Cause playful chaos in a small village.',
+        ),
+      ],
+      query: const RecommendationQuery(
+        request: 'fun game that makes you laugh a lot',
+        aiSelectedTags: {'Comedy', 'Funny'},
+        formats: {'SINGLE_PLAYER'},
+      ),
+    );
+
+    expect(recommendations, hasLength(1));
+    expect(recommendations.single.item.title, 'Mischief Village');
+  });
+
   test('harry potter-like requests prefer magic school candidates', () {
     final engine = TasteEngine();
     final profile = engine.buildProfile('tester', [

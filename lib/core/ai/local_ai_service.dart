@@ -1442,7 +1442,7 @@ Treat tags, requestTags, scores, and ranker reasons as evidence, not as the deci
 First filter for the strongest match to the user's request. Use the taste profile only as secondary guidance or a tie-breaker.
 Write the reason around why the chosen option fits the request; mention personal taste only when it adds useful context.
 Only the listed options are eligible for this request.
-Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
+Return JSON only. Use exactly these keys: id, reason. The id must match one option id. Keep reason to one short sentence under 25 words.
 ${_profilePromptEvidence(profile, tier, limits)}
 Search request: ${query.request}
 User-selected tags: ${query.selectedTags.join(', ')}
@@ -1473,7 +1473,7 @@ Do not pick a broadly popular or profile-shaped game when another option better 
 Write the reason around why the chosen game fits the request; mention personal taste only when it adds useful context.
 Only the listed Steam game options are eligible for this request.
 If missingPlayCapabilities is empty, that game satisfies every required Steam play capability.
-Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
+Return JSON only. Use exactly these keys: id, reason. The id must match one option id. Keep reason to one short sentence under 25 words.
 ${_profilePromptEvidence(profile, tier, limits)}
 Game request: ${query.request}
 User-selected Steam tags: ${query.selectedTags.join(', ')}
@@ -1504,7 +1504,7 @@ First filter for the strongest match to the user's request. Use the anime/manga 
 Write the reason around why the chosen title fits the request; mention personal taste only when it adds useful context.
 Only the listed AniList options are eligible for this request.
 If missingReleaseFormats is empty, that title satisfies the requested AniList release-format constraint.
-Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
+Return JSON only. Use exactly these keys: id, reason. The id must match one option id. Keep reason to one short sentence under 25 words.
 ${_profilePromptEvidence(profile, tier, limits)}
 Anime or manga request: ${query.request}
 User-selected AniList tags: ${query.selectedTags.join(', ')}
@@ -1707,7 +1707,7 @@ This is a direct recommendation, not tag selection and not option reranking. You
 The title must be an exact game title that Majika can search for on Steam. Do not invent a game and do not recommend a game the user already owns.
 Titles shown in profile evidence are already owned and are taste signals only, never valid recommendations.
 Respect required play capabilities when they are present.
-Return JSON only. Use exactly these keys: title, reason.
+Return JSON only. Use exactly these keys: title, reason. Keep reason to one short sentence under 25 words.
 ${_profilePromptEvidence(profile, tier, limits)}
 Game request: ${query.request}
 User-selected Steam tags: ${query.selectedTags.join(', ')}
@@ -1728,7 +1728,7 @@ The title must be an exact canonical title that Majika can search for on AniList
 Titles shown in profile evidence are already in the user's library and are taste signals only, never valid recommendations.
 Respect requested media types and release formats when they are present.
 ${_adultRecommendationGuidance(query, supportsAdultContent: true)}
-Return JSON only. Use exactly these keys: title, reason.
+Return JSON only. Use exactly these keys: title, reason. Keep reason to one short sentence under 25 words.
 ${_profilePromptEvidence(profile, tier, limits)}
 Anime or manga request: ${query.request}
 Requested AniList media types: ${query.effectiveMediaTypes().join(', ')}
@@ -1746,7 +1746,7 @@ This is a direct recommendation, not tag selection and not option reranking. You
 The title must be exact and searchable through ${profile.serviceName}. Do not invent a title and do not recommend a title already in the user's library.
 Titles shown in profile evidence are already in the user's library and are taste signals only, never valid recommendations.
 ${_adultRecommendationGuidance(query, supportsAdultContent: true)}
-Return JSON only. Use exactly these keys: title, reason.
+Return JSON only. Use exactly these keys: title, reason. Keep reason to one short sentence under 25 words.
 ${_profilePromptEvidence(profile, tier, limits)}
 User request: ${query.request}
 Requested source types: ${query.effectiveMediaTypes().join(', ')}
@@ -1811,7 +1811,7 @@ Return an exact title searchable through the chosen service. Do not invent a tit
 Titles shown in profile evidence are already owned and are taste signals only, never valid recommendations.
 Respect hard media-type and format/play-capability requirements when they apply to the chosen service.
 ${_adultRecommendationGuidance(query, supportsAdultContent: availableServices.any(_isAniListService))}
-Return JSON only. Use exactly these keys: service, title, reason. The service must exactly match one available service.
+Return JSON only. Use exactly these keys: service, title, reason. The service must exactly match one available service. Keep reason to one short sentence under 25 words.
 $profileEvidence
 Home request: ${query.request}
 Requested media types: ${query.effectiveMediaTypes().join(', ')}
@@ -2103,7 +2103,7 @@ If the user asks for a game, prefer Steam GAME options; if they ask for anime/ma
 Only the listed options are eligible for this request.
 Each option uses service-specific evidence fields: steamTags and playCapability for Steam, aniListTags and releaseFormat for AniList.
 If missingConstraints is empty, that option satisfies the applicable requested constraints.
-Return JSON only. Use exactly these keys: id, reason. The id must match one option id.
+Return JSON only. Use exactly these keys: id, reason. The id must match one option id. Keep reason to one short sentence under 25 words.
 Profiles summary: $profilesSummary
 $profileEvidence
 Search request: ${query.request}

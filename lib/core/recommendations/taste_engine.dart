@@ -96,6 +96,7 @@ class TasteEngine {
       ...query.inferredTags(availableTags),
     };
     final specificRequestedTags = query.specificRequestedTags(availableTags);
+    final hardRequestedTags = {...query.selectedTags, ...specificRequestedTags};
     final requestedFormats = query.effectiveFormats();
     final requestedMediaTypes = query.effectiveMediaTypes();
     final requireLocalCoOp = query.infersLocalCoOp;
@@ -116,12 +117,8 @@ class TasteEngine {
           )) {
         continue;
       }
-      if (requestedTags.isNotEmpty &&
-          !candidate.tags.any(requestedTags.contains)) {
-        continue;
-      }
-      if (specificRequestedTags.isNotEmpty &&
-          !_matchesSpecificRequestedTags(candidate, specificRequestedTags)) {
+      if (hardRequestedTags.isNotEmpty &&
+          !_matchesSpecificRequestedTags(candidate, hardRequestedTags)) {
         continue;
       }
       if (!query.matchesText(candidate)) continue;
