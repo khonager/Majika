@@ -188,7 +188,7 @@ class TasteEngine {
           .take(4)
           .toList();
       if (requestedGenreMatches.isNotEmpty) {
-        score += requestedGenreMatches.length * 4.0;
+        score += requestedGenreMatches.length * 6.0;
         signals.addAll(requestedGenreMatches.map((tag) => 'wanted $tag'));
       }
 
@@ -211,8 +211,15 @@ class TasteEngine {
         signals.add('adult filter');
       }
 
-      if (query.request.trim().isNotEmpty) {
-        score += _requestTextScore(candidate, query.request);
+      final hasNaturalLanguageRequest = query.request.trim().isNotEmpty;
+      if (hasNaturalLanguageRequest) {
+        final requestTextScore = _requestTextScore(candidate, query.request);
+        score += requestTextScore * 2.4;
+        if (requestTextScore == 0 &&
+            requestedTags.isNotEmpty &&
+            requestedGenreMatches.isEmpty) {
+          score *= 0.45;
+        }
       }
 
       if (score <= 0) continue;
@@ -333,15 +340,33 @@ class TasteEngine {
     final title = candidate.title.toLowerCase();
     final description = (candidate.description ?? '').toLowerCase();
     final tags = candidate.tags.join(' ').toLowerCase();
+    final titleTokens = _textTokens(candidate.title);
+    final descriptionTokens = _textTokens(candidate.description ?? '');
+    final tagTokens = _textTokens(candidate.tags.join(' '));
     var score = 0.0;
 
     for (final term in terms) {
-      if (title.contains(term)) score += 1.6;
-      if (tags.contains(term)) score += 1.1;
-      if (description.contains(term)) score += 0.5;
+      if (_matchesRequestTerm(title, titleTokens, term)) score += 1.6;
+      if (_matchesRequestTerm(tags, tagTokens, term)) score += 1.1;
+      if (_matchesRequestTerm(description, descriptionTokens, term)) {
+        score += 0.5;
+      }
     }
 
     return min(score, 5.0);
+  }
+
+  bool _matchesRequestTerm(String text, Set<String> tokens, String term) {
+    if (term.length <= 3) return tokens.contains(term);
+    return tokens.contains(term) || text.contains(term);
+  }
+
+  Set<String> _textTokens(String value) {
+    return value
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9+]+'))
+        .where((token) => token.isNotEmpty)
+        .toSet();
   }
 
   double _libraryItemWeight(MediaItem item) {

@@ -2015,11 +2015,17 @@ Known cross-service search-result hints, optional and non-exhaustive: ${jsonEnco
       Recommendation? chosen;
       String? reason;
       for (final candidate in _jsonObjects(response)) {
-        final id = candidate['id']?.toString();
+        final id = candidate['id']?.toString().trim() ?? '';
+        final title = candidate['title']?.toString().trim() ?? '';
+        final titleKey = _canonicalKey(title);
         for (final recommendation in selectableRecommendations) {
-          if (recommendation.item.id == id) {
+          if (recommendation.item.id == id ||
+              (titleKey.isNotEmpty &&
+                  _canonicalKey(recommendation.item.title) == titleKey)) {
             chosen = recommendation;
-            reason = candidate['reason']?.toString().trim();
+            reason =
+                candidate['reason']?.toString().trim() ??
+                candidate['reasoning']?.toString().trim();
             break;
           }
         }
@@ -2098,7 +2104,7 @@ Known cross-service search-result hints, optional and non-exhaustive: ${jsonEnco
 Prompt mode: ${budget.tier.name}.
 ${_promptScopeInstruction(budget.tier)}
 Pick the single best next recommendation across all services.
-This Home prompt can compare AniList anime/manga with Steam games. Prioritize the user's search request and the most relevant imported profile. Use tags and score as evidence, not as the whole decision.
+This Home prompt can compare AniList anime/manga with Steam games. First filter for the strongest match to the user's search request, then use the most relevant imported profile as secondary guidance. Use tags and score as evidence, not as the whole decision.
 If the user asks for a game, prefer Steam GAME options; if they ask for anime/manga, prefer AniList options. If they ask broadly, choose the strongest fit across services.
 Only the listed options are eligible for this request.
 Each option uses service-specific evidence fields: steamTags and playCapability for Steam, aniListTags and releaseFormat for AniList.
@@ -2132,11 +2138,17 @@ Options: ${jsonEncode(options)}
       Recommendation? chosen;
       String? reason;
       for (final candidate in _jsonObjects(response)) {
-        final id = candidate['id']?.toString();
+        final id = candidate['id']?.toString().trim() ?? '';
+        final title = candidate['title']?.toString().trim() ?? '';
+        final titleKey = _canonicalKey(title);
         for (final recommendation in selectableRecommendations) {
-          if (recommendation.item.id == id) {
+          if (recommendation.item.id == id ||
+              (titleKey.isNotEmpty &&
+                  _canonicalKey(recommendation.item.title) == titleKey)) {
             chosen = recommendation;
-            reason = candidate['reason']?.toString().trim();
+            reason =
+                candidate['reason']?.toString().trim() ??
+                candidate['reasoning']?.toString().trim();
             break;
           }
         }

@@ -351,6 +351,48 @@ void main() {
   });
 
   test(
+    'AI picker accepts title-shaped option responses from small models',
+    () async {
+      final service = FlutterGemmaLocalAiService(
+        textGenerator: (prompt, maxTokens) async {
+          return '{"title":"Untitled Goose Game","reasoning":"It best matches the request for a funny game."}';
+        },
+      );
+
+      final chosen = await service.chooseTopRecommendation(
+        _profile(serviceName: 'Steam'),
+        [
+          _recommendation(
+            'steam_cyberpunk',
+            'Cyberpunk 2077',
+            tags: const ['RPG', 'Single-player'],
+            mediaType: 'GAME',
+            format: 'SINGLE_PLAYER',
+            sourceId: 'com.majika.service.steam',
+          ),
+          _recommendation(
+            'steam_goose',
+            'Untitled Goose Game',
+            tags: const ['Action', 'Single-player'],
+            mediaType: 'GAME',
+            format: 'SINGLE_PLAYER',
+            sourceId: 'com.majika.service.steam',
+          ),
+        ],
+        query: const RecommendationQuery(
+          request: 'fun game that makes you laugh a lot',
+          aiSelectedTags: {'Comedy', 'Funny'},
+          formats: {'SINGLE_PLAYER'},
+        ),
+      );
+
+      expect(chosen?.item.id, 'steam_goose');
+      expect(chosen?.reason, 'It best matches the request for a funny game.');
+      expect(chosen?.isAiPick, isTrue);
+    },
+  );
+
+  test(
     'Steam picker prompt prioritizes request fit over profile shape',
     () async {
       late String capturedPrompt;

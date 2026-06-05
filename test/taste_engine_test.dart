@@ -642,6 +642,51 @@ void main() {
     expect(recommendations.single.item.title, 'Mischief Village');
   });
 
+  test('short request words do not match inside unrelated title fragments', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile(
+      'tester',
+      const [],
+      serviceName: 'Steam',
+    );
+
+    final recommendations = engine.rankCandidates(
+      profile,
+      [
+        MediaItem(
+          id: 'steam_funnel',
+          title: 'Funnel Runners',
+          coverUrl: '',
+          tags: const ['Action', 'Single-player'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+          description: 'A co-op survival game with escalating disasters.',
+        ),
+        MediaItem(
+          id: 'steam_fun',
+          title: "Lovers' Fun!",
+          coverUrl: '',
+          tags: const ['Casual', 'Single-player'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+          description: 'A light simulation about an absurd sudden proposal.',
+        ),
+      ],
+      query: const RecommendationQuery(
+        request: 'fun game',
+        formats: {'SINGLE_PLAYER'},
+      ),
+    );
+
+    expect(recommendations.first.item.title, "Lovers' Fun!");
+    expect(
+      recommendations.indexWhere((rec) => rec.item.title == 'Funnel Runners'),
+      greaterThan(0),
+    );
+  });
+
   test('harry potter-like requests prefer magic school candidates', () {
     final engine = TasteEngine();
     final profile = engine.buildProfile('tester', [
