@@ -111,6 +111,18 @@ flutter build linux --debug
 flutter build apk --debug
 ```
 
+## Android Releases
+
+Majika publishes rolling Android builds from two GitHub release channels:
+
+[![Get stable in Obtainium](https://img.shields.io/badge/Obtainium-Stable-1f6feb?style=for-the-badge)](https://github.com/khonager/Majika/releases/tag/stable-latest)
+[![Get unstable in Obtainium](https://img.shields.io/badge/Obtainium-Unstable-f97316?style=for-the-badge)](https://github.com/khonager/Majika/releases/tag/unstable-latest)
+
+- Stable: `https://github.com/khonager/Majika/releases/tag/stable-latest`
+- Unstable: `https://github.com/khonager/Majika/releases/tag/unstable-latest`
+
+Paste either release URL into Obtainium's Add App screen. Majika's GitHub Android releases are intended to be signed with one persistent release key so updates install over the previous version instead of forcing an uninstall.
+
 Local AI model benchmark on Linux desktop:
 
 ```bash

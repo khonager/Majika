@@ -13,12 +13,52 @@ class AniListService implements MediaService {
   static const sourceId = 'com.majika.service.anilist';
 
   final http.Client _client;
+  List<String>? _availableTagsCache;
 
   @override
   String get id => sourceId;
 
   @override
   String get displayName => 'AniList';
+
+  @override
+  String get connectTitle => 'Connect AniList';
+
+  @override
+  String get connectDescription =>
+      'Enter a public AniList username. Majika will read anime and manga lists, build a local taste profile, then rank current releases against it.';
+
+  @override
+  String get userNameHint => 'AniList username';
+
+  @override
+  String get userNameEmptyMessage => 'Enter an AniList username first.';
+
+  @override
+  String get importButtonLabel => 'Build profile';
+
+  @override
+  String get searchPlaceholder => 'Search a vibe, tag, format, or request';
+
+  @override
+  String get openTooltipLabel => 'Open on AniList';
+
+  @override
+  List<String> get supportedMediaTypes => RecommendationQuery.aniListMediaTypes;
+
+  @override
+  List<String> get supportedFormats => RecommendationQuery.aniListFormats;
+
+  @override
+  bool get supportsAdultContent => true;
+
+  @override
+  Future<ServiceUserProfile?> fetchUserProfile(String userName) async {
+    return ServiceUserProfile(
+      userName: userName,
+      profileUrl: 'https://anilist.co/user/$userName',
+    );
+  }
 
   @override
   Future<List<MediaItem>> fetchUserLibrary(String userName) async {
@@ -50,12 +90,19 @@ class AniListService implements MediaService {
   ) async {
     final mediaTypes = query.effectiveMediaTypes();
     final typesToSearch = mediaTypes.isEmpty
-        ? RecommendationQuery.allMediaTypes
-        : mediaTypes.toList();
+        ? RecommendationQuery.aniListMediaTypes
+        : mediaTypes
+              .where(RecommendationQuery.aniListMediaTypes.contains)
+              .toList();
+    if (typesToSearch.isEmpty) return [];
+
+    final availableTags = await fetchAvailableTags();
     final results = <MediaItem>[];
 
     for (final type in typesToSearch) {
-      results.addAll(await _searchCandidates(type, query));
+      results.addAll(
+        await _searchCandidates(type, query, availableTags: availableTags),
+      );
     }
 
     return _dedupe(results);
@@ -63,6 +110,9 @@ class AniListService implements MediaService {
 
   @override
   Future<List<String>> fetchAvailableTags() async {
+    final cachedTags = _availableTagsCache;
+    if (cachedTags != null) return cachedTags;
+
     final response = await _postGraphQl(_tagsQuery, const {});
     final decoded = jsonDecode(response.body);
     final tags = <String>[
@@ -79,7 +129,9 @@ class AniListService implements MediaService {
     }
 
     tags.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    return tags.toSet().toList();
+    final availableTags = tags.toSet().toList();
+    _availableTagsCache = availableTags;
+    return availableTags;
   }
 
   Future<List<MediaItem>> _fetchUserCollection(
@@ -108,30 +160,56 @@ class AniListService implements MediaService {
 
   Future<List<MediaItem>> _searchCandidates(
     String mediaType,
-    RecommendationQuery query,
-  ) async {
-    final formats = query.effectiveFormats();
-    final tags = query.effectiveTags(RecommendationQuery.browsableTags);
+    RecommendationQuery query, {
+    required Iterable<String> availableTags,
+  }) async {
+    final formats = RecommendationQuery.aniListReleaseFormatsFor(
+      query.effectiveFormats(),
+    );
+    final tags = query.effectiveTags(availableTags);
     final searchText = tags.isEmpty && formats.isEmpty
         ? query.aniListSearchText
         : '';
-    final variables = {
+    final genreTags = tags.where(_knownAniListGenres.contains).toList();
+    final mediaTags = tags
+        .where((tag) => !_knownAniListGenres.contains(tag))
+        .toList();
+    final variables = <String, dynamic>{
       'type': mediaType,
       'page': 1,
-      'perPage': 30,
-      'isAdult': query.includeAdult || query.infersAdult,
+      'perPage': 50,
+      'isAdult': query.allowsAdult,
       if (searchText.isNotEmpty) 'search': searchText,
       if (formats.isNotEmpty) 'formatIn': formats.toList(),
-      if (tags.isNotEmpty)
-        'genreIn': tags.where(_knownAniListGenres.contains).toList(),
-      if (tags.isNotEmpty)
-        'tagIn': tags
-            .where((tag) => !_knownAniListGenres.contains(tag))
-            .toList(),
+      if (genreTags.isNotEmpty) 'genreIn': genreTags,
+      if (mediaTags.isNotEmpty) 'tagIn': mediaTags,
     };
 
-    final response = await _postGraphQl(_searchQuery, variables);
-    return parseCandidates(jsonDecode(response.body));
+    final pageCount = tags.isEmpty && searchText.isEmpty ? 4 : 1;
+    final candidates = await _searchPages(variables, pageCount: pageCount);
+    if (candidates.isNotEmpty || mediaTags.isEmpty || genreTags.isEmpty) {
+      return candidates;
+    }
+
+    final relaxedVariables = {...variables}..remove('tagIn');
+    return _searchPages(relaxedVariables, pageCount: pageCount);
+  }
+
+  Future<List<MediaItem>> _searchPages(
+    Map<String, dynamic> variables, {
+    required int pageCount,
+  }) async {
+    final candidates = <MediaItem>[];
+    for (var page = 1; page <= pageCount; page++) {
+      final response = await _postGraphQl(_searchQuery, {
+        ...variables,
+        'page': page,
+      });
+      final pageCandidates = parseCandidates(jsonDecode(response.body));
+      if (pageCandidates.isEmpty) break;
+      candidates.addAll(pageCandidates);
+    }
+    return _dedupe(candidates);
   }
 
   Future<http.Response> _postGraphQl(

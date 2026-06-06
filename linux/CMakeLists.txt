@@ -53,9 +53,11 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 # System-level dependencies.
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0)
+pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
 
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
+target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::ZLIB)
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)

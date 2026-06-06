@@ -18,6 +18,9 @@ class MediaItem {
   final int? popularity;
   final int? updatedAt;
   final bool isAdult;
+  final int? playtimeMinutes;
+  final int? recentPlaytimeMinutes;
+  final int? lastPlayedAt;
 
   MediaItem({
     required this.id,
@@ -39,13 +42,23 @@ class MediaItem {
     this.popularity,
     this.updatedAt,
     this.isAdult = false,
+    this.playtimeMinutes,
+    this.recentPlaytimeMinutes,
+    this.lastPlayedAt,
   }) : sourceId = sourceId ?? extensionId;
 
   bool get hasCover => coverUrl.isNotEmpty;
 
   String get serviceLabel {
-    if (sourceId.contains('anilist') || extensionId.contains('anilist')) {
+    if (sourceId.contains('anilist') ||
+        extensionId.contains('anilist') ||
+        siteUrl.contains('anilist.co')) {
       return 'AniList';
+    }
+    if (sourceId.contains('steam') ||
+        extensionId.contains('steam') ||
+        siteUrl.contains('steampowered.com')) {
+      return 'Steam';
     }
     return sourceId.isEmpty ? 'Source' : sourceId;
   }
@@ -70,6 +83,9 @@ class MediaItem {
     int? popularity,
     int? updatedAt,
     bool? isAdult,
+    int? playtimeMinutes,
+    int? recentPlaytimeMinutes,
+    int? lastPlayedAt,
   }) {
     return MediaItem(
       id: id ?? this.id,
@@ -91,6 +107,10 @@ class MediaItem {
       popularity: popularity ?? this.popularity,
       updatedAt: updatedAt ?? this.updatedAt,
       isAdult: isAdult ?? this.isAdult,
+      playtimeMinutes: playtimeMinutes ?? this.playtimeMinutes,
+      recentPlaytimeMinutes:
+          recentPlaytimeMinutes ?? this.recentPlaytimeMinutes,
+      lastPlayedAt: lastPlayedAt ?? this.lastPlayedAt,
     );
   }
 
@@ -117,6 +137,9 @@ class MediaItem {
       popularity: json['popularity'] as int?,
       updatedAt: json['updatedAt'] as int?,
       isAdult: json['isAdult'] as bool? ?? false,
+      playtimeMinutes: json['playtimeMinutes'] as int?,
+      recentPlaytimeMinutes: json['recentPlaytimeMinutes'] as int?,
+      lastPlayedAt: json['lastPlayedAt'] as int?,
     );
   }
 
@@ -141,6 +164,9 @@ class MediaItem {
       'popularity': popularity,
       'updatedAt': updatedAt,
       'isAdult': isAdult,
+      'playtimeMinutes': playtimeMinutes,
+      'recentPlaytimeMinutes': recentPlaytimeMinutes,
+      'lastPlayedAt': lastPlayedAt,
     };
   }
 }

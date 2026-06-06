@@ -11,6 +11,11 @@ class TasteEngine {
     String userName,
     List<MediaItem> library, {
     UserTasteSignals signals = UserTasteSignals.empty,
+    String serviceId = 'com.majika.service.anilist',
+    String serviceName = 'AniList',
+    String? displayName,
+    String avatarUrl = '',
+    String profileUrl = '',
   }) {
     final genreWeights = <String, double>{};
     final formatWeights = <String, double>{};
@@ -20,7 +25,9 @@ class TasteEngine {
 
     for (final item in library) {
       final status = item.status ?? '';
+      if (status == 'OWNED') completedCount += 1;
       if (status == 'COMPLETED') completedCount += 1;
+      if (status == 'RECENTLY_PLAYED') currentCount += 1;
       if (status == 'CURRENT' || status == 'REPEATING') currentCount += 1;
 
       formatCounts.update(item.format, (count) => count + 1, ifAbsent: () => 1);
@@ -64,6 +71,11 @@ class TasteEngine {
       completedCount: completedCount,
       currentCount: currentCount,
       importedAt: DateTime.now(),
+      serviceId: serviceId,
+      serviceName: serviceName,
+      displayName: displayName,
+      avatarUrl: avatarUrl,
+      profileUrl: profileUrl,
     );
   }
 
@@ -83,13 +95,12 @@ class TasteEngine {
       ...query.aiSelectedTags,
       ...query.inferredTags(availableTags),
     };
-    final requestedFormats = query.formats.isNotEmpty
-        ? query.formats
-        : query.inferredFormats();
-    final requestedMediaTypes = query.mediaTypes.isNotEmpty
-        ? query.mediaTypes
-        : query.inferredMediaTypes();
-    final includeAdult = query.includeAdult || query.infersAdult;
+    final specificRequestedTags = query.specificRequestedTags(availableTags);
+    final hardRequestedTags = {...query.selectedTags, ...specificRequestedTags};
+    final requestedFormats = query.effectiveFormats();
+    final requestedMediaTypes = query.effectiveMediaTypes();
+    final requireLocalCoOp = query.infersLocalCoOp;
+    final includeAdult = query.allowsAdult;
 
     for (final candidate in candidates) {
       if (libraryIds.contains(candidate.id)) continue;
@@ -99,11 +110,15 @@ class TasteEngine {
         continue;
       }
       if (requestedFormats.isNotEmpty &&
-          !requestedFormats.contains(candidate.format)) {
+          !_matchesRequestedFormats(
+            candidate,
+            requestedFormats,
+            requireLocalCoOp: requireLocalCoOp,
+          )) {
         continue;
       }
-      if (requestedTags.isNotEmpty &&
-          !candidate.tags.any(requestedTags.contains)) {
+      if (hardRequestedTags.isNotEmpty &&
+          !_matchesSpecificRequestedTags(candidate, hardRequestedTags)) {
         continue;
       }
       if (!query.matchesText(candidate)) continue;
@@ -131,6 +146,10 @@ class TasteEngine {
 
       if (candidate.rating != null) {
         score += max(0, candidate.rating! - 6) * 0.85;
+      }
+
+      if (profile.serviceName == 'Steam') {
+        score += _steamCandidateScore(candidate);
       }
 
       final characterMatches = candidate.characters
@@ -169,11 +188,15 @@ class TasteEngine {
           .take(4)
           .toList();
       if (requestedGenreMatches.isNotEmpty) {
-        score += requestedGenreMatches.length * 4.0;
+        score += requestedGenreMatches.length * 6.0;
         signals.addAll(requestedGenreMatches.map((tag) => 'wanted $tag'));
       }
 
-      if (requestedFormats.contains(candidate.format)) {
+      if (_matchesRequestedFormats(
+        candidate,
+        requestedFormats,
+        requireLocalCoOp: requireLocalCoOp,
+      )) {
         score += 3.2;
         signals.add('wanted ${candidate.format.replaceAll('_', ' ')}');
       }
@@ -188,8 +211,27 @@ class TasteEngine {
         signals.add('adult filter');
       }
 
-      if (query.request.trim().isNotEmpty) {
-        score += _requestTextScore(candidate, query.request);
+      final hasNaturalLanguageRequest = query.request.trim().isNotEmpty;
+      if (hasNaturalLanguageRequest) {
+        final requestTextScore = _requestTextScore(candidate, query.request);
+        final requestTagEvidenceScore = _requestTagEvidenceScore(
+          candidate,
+          requestedTags,
+        );
+        final hasAdultRequestEvidence =
+            _isAdultRequest(query, requestedTags) &&
+            _hasAdultEvidence(candidate);
+        score += requestTextScore * 2.4;
+        score += requestTagEvidenceScore * 2.0;
+        final hasRequestEvidence =
+            requestTextScore > 0 ||
+            requestTagEvidenceScore > 0 ||
+            requestedGenreMatches.isNotEmpty ||
+            hasAdultRequestEvidence;
+        if (_requiresRequestEvidence(query, requestedTags) &&
+            !hasRequestEvidence) {
+          continue;
+        }
       }
 
       if (score <= 0) continue;
@@ -218,18 +260,27 @@ class TasteEngine {
     recommendations.sort((a, b) => b.rawScore.compareTo(a.rawScore));
     if (recommendations.isEmpty) return [];
 
-    final calibrated = _calibrateScores(recommendations);
+    final calibrated = _calibrateScores(recommendations, query: query);
     return [calibrated.first.copyWith(isTopPick: true), ...calibrated.skip(1)];
   }
 
   MediaItem? _recentActivity(List<MediaItem> library) {
     final current = library
-        .where((item) => item.status == 'CURRENT' || item.status == 'REPEATING')
+        .where(
+          (item) =>
+              item.status == 'CURRENT' ||
+              item.status == 'REPEATING' ||
+              item.status == 'RECENTLY_PLAYED',
+        )
         .toList();
     final candidates = current.isNotEmpty ? current : [...library];
     if (candidates.isEmpty) return null;
 
-    candidates.sort((a, b) => (b.updatedAt ?? 0).compareTo(a.updatedAt ?? 0));
+    candidates.sort((a, b) {
+      final bTime = b.lastPlayedAt ?? b.updatedAt ?? 0;
+      final aTime = a.lastPlayedAt ?? a.updatedAt ?? 0;
+      return bTime.compareTo(aTime);
+    });
     return candidates.first;
   }
 
@@ -256,18 +307,30 @@ class TasteEngine {
     }
 
     if (characterMatches.isNotEmpty) {
-      return 'Includes character signals you have favorited on AniList.';
+      return 'Includes character signals you have favorited on ${profile.serviceName}.';
     }
 
     if (studioMatches.isNotEmpty) {
-      return 'Comes from a studio you have favorited on AniList.';
+      return 'Comes from a creator signal you have favorited on ${profile.serviceName}.';
     }
 
     if (candidate.rating != null && candidate.rating! >= 8) {
       return 'A strong community signal that still fits your broader AniList pattern.';
     }
 
-    return 'Recommended from your AniList profile and current popular releases.';
+    return 'Recommended from your ${profile.serviceName} profile and current popular releases.';
+  }
+
+  bool _matchesSpecificRequestedTags(
+    MediaItem candidate,
+    Set<String> specificRequestedTags,
+  ) {
+    if (candidate.tags.any(specificRequestedTags.contains)) return true;
+    if (candidate.isAdult &&
+        specificRequestedTags.any(_adultRequestTags.contains)) {
+      return true;
+    }
+    return false;
   }
 
   List<String> _uniqueSignals(List<String> signals) {
@@ -279,30 +342,119 @@ class TasteEngine {
   }
 
   double _requestTextScore(MediaItem candidate, String request) {
-    final terms = request
-        .toLowerCase()
-        .split(RegExp(r'[^a-z0-9+]+'))
-        .where((term) => term.length > 2)
-        .toList();
+    final terms = _requestTextTerms(request);
     if (terms.isEmpty) return 0;
 
     final title = candidate.title.toLowerCase();
     final description = (candidate.description ?? '').toLowerCase();
     final tags = candidate.tags.join(' ').toLowerCase();
+    final titleTokens = _textTokens(candidate.title);
+    final descriptionTokens = _textTokens(candidate.description ?? '');
+    final tagTokens = _textTokens(candidate.tags.join(' '));
     var score = 0.0;
 
     for (final term in terms) {
-      if (title.contains(term)) score += 1.6;
-      if (tags.contains(term)) score += 1.1;
-      if (description.contains(term)) score += 0.5;
+      if (_matchesRequestTerm(title, titleTokens, term)) score += 1.6;
+      if (_matchesRequestTerm(tags, tagTokens, term)) score += 1.1;
+      if (_matchesRequestTerm(description, descriptionTokens, term)) {
+        score += 0.5;
+      }
     }
 
     return min(score, 5.0);
   }
 
+  List<String> _requestTextTerms(String request) {
+    return request
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9+]+'))
+        .where(
+          (term) =>
+              term.length > 2 &&
+              !_requestTextStopWords.contains(term) &&
+              !_requestStructuralTerms.contains(term) &&
+              !_lowSignalRequestTerms.contains(term),
+        )
+        .toList();
+  }
+
+  double _requestTagEvidenceScore(
+    MediaItem candidate,
+    Set<String> requestedTags,
+  ) {
+    if (requestedTags.isEmpty) return 0;
+    final haystack = _normalizedEvidenceText(candidate);
+    var score = 0.0;
+    for (final tag in requestedTags) {
+      final hints = _requestTagEvidenceHints[tag];
+      if (hints == null) continue;
+      if (hints.any((hint) => _containsWholePhrase(haystack, hint))) {
+        score += 1.0;
+      }
+    }
+    return min(score, 3.0);
+  }
+
+  bool _requiresRequestEvidence(
+    RecommendationQuery query,
+    Set<String> requestedTags,
+  ) {
+    return requestedTags.isNotEmpty || _isAdultRequest(query, requestedTags);
+  }
+
+  bool _isAdultRequest(RecommendationQuery query, Set<String> requestedTags) {
+    return query.infersAdult || requestedTags.any(_adultRequestTags.contains);
+  }
+
+  bool _hasAdultEvidence(MediaItem candidate) {
+    if (candidate.isAdult) return true;
+    final haystack = _normalizedEvidenceText(candidate);
+    return _adultEvidenceTerms.any(
+      (term) => _containsWholePhrase(haystack, term),
+    );
+  }
+
+  String _normalizedEvidenceText(MediaItem candidate) {
+    return [
+      candidate.title,
+      candidate.subtitle,
+      candidate.format,
+      candidate.mediaType,
+      candidate.description ?? '',
+      ...candidate.tags,
+    ].join(' ').toLowerCase().replaceAll(RegExp(r'[_-]+'), ' ').trim();
+  }
+
+  bool _containsWholePhrase(String text, String phrase) {
+    final escaped = RegExp.escape(phrase.toLowerCase());
+    return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(text);
+  }
+
+  bool _matchesRequestTerm(String text, Set<String> tokens, String term) {
+    if (term.length <= 3) return tokens.contains(term);
+    return tokens.contains(term) || text.contains(term);
+  }
+
+  Set<String> _textTokens(String value) {
+    return value
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9+]+'))
+        .where((token) => token.isNotEmpty)
+        .toSet();
+  }
+
   double _libraryItemWeight(MediaItem item) {
     final rating = item.rating;
-    final ratingWeight = rating == null ? 0.8 : max(0.15, rating / 7.2);
+    final playtimeHours = (item.playtimeMinutes ?? 0) / 60;
+    final playtimeWeight = playtimeHours <= 0
+        ? 0.0
+        : min(log(playtimeHours + 1) / log(10), 2.2);
+    final recentPlaytimeWeight = (item.recentPlaytimeMinutes ?? 0) > 0
+        ? 0.45
+        : 0.0;
+    final ratingWeight = rating == null
+        ? 0.8 + playtimeWeight + recentPlaytimeWeight
+        : max(0.15, rating / 7.2) + playtimeWeight + recentPlaytimeWeight;
     final status = item.status ?? '';
     final statusWeight = switch (status) {
       'CURRENT' => 1.25,
@@ -311,9 +463,11 @@ class TasteEngine {
       'PAUSED' => 0.7,
       'DROPPED' => 0.35,
       'PLANNING' => 0.45,
+      'OWNED' => 0.95,
+      'RECENTLY_PLAYED' => 1.28,
       _ => 0.85,
     };
-    final updatedAt = item.updatedAt;
+    final updatedAt = item.lastPlayedAt ?? item.updatedAt;
     final recentWeight = updatedAt == null
         ? 1.0
         : DateTime.fromMillisecondsSinceEpoch(
@@ -325,9 +479,123 @@ class TasteEngine {
     return ratingWeight * statusWeight * recentWeight;
   }
 
+  bool _matchesRequestedFormats(
+    MediaItem item,
+    Set<String> requestedFormats, {
+    required bool requireLocalCoOp,
+  }) {
+    if (requestedFormats.isEmpty) return true;
+
+    final steamFormats = requestedFormats
+        .where(RecommendationQuery.steamFormats.contains)
+        .toSet();
+    final otherFormats = requestedFormats.difference(steamFormats);
+
+    if (steamFormats.isNotEmpty &&
+        !steamFormats.every(
+          (format) =>
+              _matchesFormat(item, format, requireLocalCoOp: requireLocalCoOp),
+        )) {
+      return false;
+    }
+
+    if (otherFormats.isNotEmpty &&
+        !otherFormats.any(
+          (format) =>
+              _matchesFormat(item, format, requireLocalCoOp: requireLocalCoOp),
+        )) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool _matchesFormat(
+    MediaItem item,
+    String requestedFormat, {
+    required bool requireLocalCoOp,
+  }) {
+    if (requestedFormat == item.format) return true;
+    if (RecommendationQuery.aniListFormats.contains(requestedFormat)) {
+      return RecommendationQuery.aniListReleaseFormatsFor({
+        requestedFormat,
+      }).contains(item.format);
+    }
+    final normalizedTags = item.tags
+        .map((tag) => tag.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ''))
+        .toSet();
+    if (requestedFormat == 'CO_OP' && requireLocalCoOp) {
+      return _localCoOpAliases.any(normalizedTags.contains);
+    }
+    return _formatAliases(requestedFormat).any(normalizedTags.contains);
+  }
+
+  Set<String> get _localCoOpAliases => const {
+    'localcoop',
+    'localmultiplayer',
+    'sharedsplitscreencoop',
+    'sharedsplitscreen',
+    'splitscreencoop',
+    'splitscreen',
+    'remoteplaytogether',
+    'lancoop',
+  };
+
+  Set<String> _formatAliases(String format) {
+    return switch (format) {
+      'SINGLE_PLAYER' => {'singleplayer'},
+      'MULTIPLAYER' => {
+        'multiplayer',
+        'coop',
+        'localcoop',
+        'onlinecoop',
+        'pvp',
+        'onlinepvp',
+        'remoteplaytogether',
+        'sharedsplitscreencoop',
+        'sharedsplitscreenpvp',
+      },
+      'CO_OP' => {
+        'coop',
+        'localcoop',
+        'sharedsplitscreencoop',
+        'remoteplaytogether',
+      },
+      'ONLINE_CO_OP' => {'onlinecoop'},
+      'CONTROLLER' => {
+        'controller',
+        'controllersupport',
+        'fullcontrollersupport',
+        'partialcontrollersupport',
+      },
+      'STEAM_DECK' => {'steamdeck', 'steamdeckverified'},
+      _ => {format.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '')},
+    };
+  }
+
+  double _steamCandidateScore(MediaItem candidate) {
+    var score = 0.0;
+    if ((candidate.popularity ?? 0) > 0) {
+      score += min(log(candidate.popularity! + 1) / log(10), 5) * 0.4;
+    }
+    if (candidate.tags.contains('Steam Deck')) score += 0.35;
+    if (candidate.tags.contains('Controller Support')) score += 0.25;
+    return score;
+  }
+
   List<Recommendation> _calibrateScores(
-    List<_ScoredRecommendation> recommendations,
-  ) {
+    List<_ScoredRecommendation> recommendations, {
+    required RecommendationQuery query,
+  }) {
+    if (query.isActive && recommendations.length <= 3) {
+      return [
+        for (final entry in recommendations)
+          entry.recommendation.copyWith(
+            matchScore: max(52, min(92, 50 + entry.rawScore * 2.2)),
+          ),
+      ];
+    }
+
     final minScore = recommendations.last.rawScore;
     final maxScore = recommendations.first.rawScore;
     final range = maxScore - minScore;
@@ -341,6 +609,209 @@ class TasteEngine {
         ),
     ];
   }
+
+  static const Set<String> _adultRequestTags = {
+    'Hentai',
+    'Ecchi',
+    'Sexual Content',
+    'Nudity',
+    'Mature',
+    'NSFW',
+  };
+
+  static const Set<String> _requestTextStopWords = {
+    'about',
+    'and',
+    'best',
+    'find',
+    'for',
+    'give',
+    'good',
+    'like',
+    'lot',
+    'make',
+    'makes',
+    'really',
+    'recommend',
+    'recommendation',
+    'recommendations',
+    'similar',
+    'something',
+    'that',
+    'the',
+    'to',
+    'want',
+    'with',
+    'you',
+  };
+
+  static const Set<String> _requestStructuralTerms = {
+    'anime',
+    'book',
+    'comic',
+    'film',
+    'films',
+    'game',
+    'games',
+    'manga',
+    'movie',
+    'movies',
+    'novel',
+    'play',
+    'steam',
+    'series',
+    'show',
+    'shows',
+    'special',
+  };
+
+  static const Set<String> _lowSignalRequestTerms = {'entertaining', 'fun'};
+
+  static const Map<String, Set<String>> _requestTagEvidenceHints = {
+    'Hentai': {
+      '18+',
+      '18 plus',
+      'adult',
+      'adult visual novel',
+      'eroge',
+      'erotic',
+      'explicit',
+      'hentai',
+      'horny',
+      'lewd',
+      'naughty',
+      'nsfw',
+      'porn',
+      'pornography',
+      'r18',
+      'sex',
+      'sexual',
+      'sexual content',
+      'sexy',
+      'smut',
+      'steamy',
+      'uncensored',
+    },
+    'Ecchi': {'ecchi', 'fan service', 'fanservice', 'lewd', 'naughty', 'sexy'},
+    'Sexual Content': {
+      '18+',
+      '18 plus',
+      'adult',
+      'adult visual novel',
+      'erotic',
+      'explicit',
+      'horny',
+      'lewd',
+      'naughty',
+      'nsfw',
+      'porn',
+      'sex',
+      'sexual',
+      'sexual content',
+      'sexy',
+      'smut',
+      'steamy',
+      'uncensored',
+    },
+    'Nudity': {'naked', 'naughty', 'nude', 'nudity', 'sexy', 'uncensored'},
+    'Mature': {
+      '18+',
+      '18 plus',
+      'adult',
+      'adult visual novel',
+      'erotic',
+      'explicit',
+      'mature',
+      'nsfw',
+      'sex',
+      'sexual',
+      'sexual content',
+      'steamy',
+    },
+    'NSFW': {
+      '18+',
+      '18 plus',
+      'adult',
+      'erotic',
+      'explicit',
+      'horny',
+      'lewd',
+      'naughty',
+      'nsfw',
+      'porn',
+      'sex',
+      'sexual',
+      'sexual content',
+      'sexy',
+      'smut',
+    },
+    'Comedy': {
+      'absurd',
+      'comedy',
+      'comedic',
+      'funny',
+      'goofy',
+      'hilarious',
+      'humor',
+      'humour',
+      'joke',
+      'jokes',
+      'laugh',
+      'laughing',
+      'parody',
+      'satire',
+      'silly',
+      'slapstick',
+      'witty',
+    },
+    'Funny': {
+      'absurd',
+      'comedy',
+      'comedic',
+      'funny',
+      'goofy',
+      'hilarious',
+      'humor',
+      'humour',
+      'joke',
+      'jokes',
+      'laugh',
+      'laughing',
+      'parody',
+      'satire',
+      'silly',
+      'slapstick',
+      'witty',
+    },
+  };
+
+  static const Set<String> _adultEvidenceTerms = {
+    '18+',
+    '18 plus',
+    'adult',
+    'adult visual novel',
+    'eroge',
+    'erotic',
+    'explicit',
+    'hentai',
+    'horny',
+    'lewd',
+    'naked',
+    'naughty',
+    'nude',
+    'nudity',
+    'nsfw',
+    'porn',
+    'pornography',
+    'r18',
+    'sex',
+    'sexual',
+    'sexual content',
+    'sexy',
+    'smut',
+    'steamy',
+    'uncensored',
+  };
 }
 
 class _ScoredRecommendation {

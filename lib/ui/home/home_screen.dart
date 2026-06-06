@@ -1,27 +1,126 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:majika/core/ai/ai_console_log.dart';
+import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/ai/local_ai_service.dart';
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation.dart';
 import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/taste_profile.dart';
+import 'package:majika/core/models/user_taste_signals.dart';
 import 'package:majika/core/recommendations/taste_engine.dart';
 import 'package:majika/core/services/anilist_service.dart';
+import 'package:majika/core/services/firebase_steam_backend.dart';
 import 'package:majika/core/services/media_service.dart';
+import 'package:majika/core/services/steam_service.dart';
+import 'package:majika/core/storage/local_profile_store.dart';
 import 'package:majika/ui/settings/settings_screen.dart';
+import 'package:majika/ui/profile/profile_screen.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+enum _ActiveSurface { home, service }
+
+class _ServiceWorkspace {
+  final MediaService service;
+  TasteProfile? profile;
+  List<MediaItem> candidates;
+  List<MediaItem> baseCandidates;
+  List<String> serviceTags;
+  List<Recommendation> recommendations;
+  RecommendationQuery query;
+  String? error;
+  bool isLoading;
+  bool isRefreshingRecommendations;
+  bool adultCandidatesLoaded;
+  String userNameDraft;
+  int? activeRecommendationSearchRunId;
+
+  _ServiceWorkspace({required this.service})
+    : candidates = [],
+      baseCandidates = [],
+      serviceTags = [],
+      recommendations = [],
+      query = const RecommendationQuery(),
+      isLoading = false,
+      isRefreshingRecommendations = false,
+      adultCandidatesLoaded = false,
+      userNameDraft = '';
+
+  bool get hasProfile => profile != null;
+
+  LocalProfileSession? toLocalSession() {
+    final currentProfile = profile;
+    if (currentProfile == null) return null;
+    return LocalProfileSession(
+      serviceId: service.id,
+      profile: currentProfile,
+      candidates: candidates,
+      baseCandidates: baseCandidates,
+      serviceTags: serviceTags,
+      query: query,
+      adultCandidatesLoaded: adultCandidatesLoaded,
+      userNameDraft: userNameDraft,
+    );
+  }
+
+  void restore(
+    LocalProfileSession session, {
+    required TasteEngine tasteEngine,
+  }) {
+    profile = session.profile;
+    candidates = session.candidates;
+    baseCandidates = session.baseCandidates.isEmpty
+        ? session.candidates
+        : session.baseCandidates;
+    serviceTags = session.serviceTags;
+    query = session.query;
+    adultCandidatesLoaded = session.adultCandidatesLoaded;
+    userNameDraft = session.userNameDraft.isNotEmpty
+        ? session.userNameDraft
+        : session.profile.userName;
+    recommendations = tasteEngine.rankCandidates(
+      session.profile,
+      session.candidates,
+      query: session.query,
+    );
+    error = null;
+    isLoading = false;
+    isRefreshingRecommendations = false;
+    activeRecommendationSearchRunId = null;
+  }
+
+  void clear({String draft = ''}) {
+    profile = null;
+    candidates = [];
+    baseCandidates = [];
+    serviceTags = [];
+    recommendations = [];
+    query = const RecommendationQuery();
+    error = null;
+    isLoading = false;
+    isRefreshingRecommendations = false;
+    adultCandidatesLoaded = false;
+    userNameDraft = draft;
+    activeRecommendationSearchRunId = null;
+  }
+}
 
 class HomeScreen extends StatefulWidget {
   final MediaService? mediaService;
+  final List<MediaService>? mediaServices;
   final TasteEngine? tasteEngine;
   final LocalAiService? aiService;
 
   const HomeScreen({
     super.key,
     this.mediaService,
+    this.mediaServices,
     this.tasteEngine,
     this.aiService,
   });
@@ -31,164 +130,666 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  late final MediaService _mediaService;
+  late final List<MediaService> _mediaServices;
+  late MediaService _mediaService;
   late final TasteEngine _tasteEngine;
   late final LocalAiService _aiService;
+  late final LocalProfileStore _profileStore;
+  late final Map<String, _ServiceWorkspace> _workspaces;
   final TextEditingController _userNameController = TextEditingController();
 
-  TasteProfile? _profile;
-  List<MediaItem> _candidates = [];
-  List<String> _serviceTags = [];
-  List<Recommendation> _recommendations = [];
-  RecommendationQuery _recommendationQuery = const RecommendationQuery();
-  String? _error;
-  bool _isLoading = false;
-  bool _isRefreshingRecommendations = false;
-  bool _adultCandidatesLoaded = false;
+  _ActiveSurface _activeSurface = _ActiveSurface.home;
+  RecommendationQuery _homeQuery = const RecommendationQuery();
+  List<Recommendation> _homeRecommendations = [];
+  Map<String, List<Recommendation>> _homeRecommendationsByService = {};
+  String? _homeError;
+  bool _isRefreshingHome = false;
+  int _nextSearchRunId = 0;
+  int? _activeHomeSearchRunId;
+  AppProgressToast? _activeRecommendationProgressToast;
+  AppProgressToast? _activeHomeProgressToast;
 
   @override
   void initState() {
     super.initState();
-    _mediaService = widget.mediaService ?? AniListService();
+    _mediaServices =
+        widget.mediaServices ??
+        (widget.mediaService == null
+            ? [
+                AniListService(),
+                SteamService(protectedApi: FirebaseSteamProtectedApi()),
+              ]
+            : [widget.mediaService!]);
+    _mediaService = _mediaServices.first;
+    _activeSurface = widget.mediaService == null
+        ? _ActiveSurface.home
+        : _ActiveSurface.service;
     _tasteEngine = widget.tasteEngine ?? TasteEngine();
     _aiService = widget.aiService ?? const FlutterGemmaLocalAiService();
+    _profileStore = const LocalProfileStore();
+    _workspaces = {
+      for (final service in _mediaServices)
+        service.id: _ServiceWorkspace(service: service),
+    };
+    _loadSavedSessions();
   }
 
   @override
   void dispose() {
+    _activeRecommendationProgressToast?.dismiss();
+    _activeHomeProgressToast?.dismiss();
     _userNameController.dispose();
     super.dispose();
   }
 
-  Future<void> _importAniListProfile() async {
+  Future<void> _importProfile() async {
+    final workspace = _activeWorkspace;
     final userName = _userNameController.text.trim();
     if (userName.isEmpty) {
-      showErrorToast(context, 'Enter an AniList username first.');
+      showErrorToast(context, workspace.service.userNameEmptyMessage);
       return;
     }
 
     setState(() {
-      _isLoading = true;
-      _error = null;
+      workspace.isLoading = true;
+      workspace.error = null;
+      workspace.userNameDraft = userName;
     });
 
     try {
-      final libraryFuture = _mediaService.fetchUserLibrary(userName);
-      final signalsFuture = _mediaService.fetchTasteSignals(userName);
-      final candidatesFuture = _mediaService.fetchRecommendationCandidates();
-      final serviceTagsFuture = _mediaService.fetchAvailableTags();
-      final library = await libraryFuture;
-      final signals = await signalsFuture;
-      final candidates = await candidatesFuture;
-      final serviceTags = await serviceTagsFuture;
+      final service = workspace.service;
+      final initialQuery = RecommendationQuery(
+        excludeAdult:
+            service.supportsAdultContent && !await _allowsExplicitContent(),
+      );
+      final importResults = await Future.wait<Object?>([
+        service.fetchUserProfile(userName),
+        service.fetchUserLibrary(userName),
+        service.fetchTasteSignals(userName),
+        service.fetchRecommendationCandidates(
+          includeAdult: initialQuery.includeAdult,
+        ),
+        service.fetchAvailableTags(),
+      ]);
+      final serviceProfile = importResults[0] as ServiceUserProfile?;
+      final library = importResults[1] as List<MediaItem>;
+      final signals = importResults[2] as UserTasteSignals;
+      final candidates = importResults[3] as List<MediaItem>;
+      final serviceTags = importResults[4] as List<String>;
       final profile = _tasteEngine.buildProfile(
-        userName,
+        serviceProfile?.userName ?? userName,
         library,
         signals: signals,
+        serviceId: service.id,
+        serviceName: service.displayName,
+        displayName: serviceProfile?.displayName,
+        avatarUrl: serviceProfile?.avatarUrl ?? '',
+        profileUrl: serviceProfile?.profileUrl ?? '',
       );
-      final recommendations = await _withChosenTopRecommendation(
+      final selection = await _withChosenTopRecommendation(
+        service,
         profile,
-        _tasteEngine.rankCandidates(profile, candidates),
-        const RecommendationQuery(),
+        _tasteEngine.rankCandidates(profile, candidates, query: initialQuery),
+        initialQuery,
       );
+      final recommendations = selection.recommendations;
+      final storedCandidates = _dedupeCandidates([
+        ...candidates,
+        if (selection.discoveredItem != null) selection.discoveredItem!,
+      ]);
 
       if (!mounted) return;
       setState(() {
-        _profile = profile;
-        _candidates = candidates;
-        _serviceTags = serviceTags;
-        _recommendations = recommendations;
-        _recommendationQuery = const RecommendationQuery();
-        _adultCandidatesLoaded = false;
-        _isLoading = false;
+        workspace.profile = profile;
+        workspace.candidates = storedCandidates;
+        workspace.baseCandidates = candidates;
+        workspace.serviceTags = serviceTags;
+        workspace.recommendations = recommendations;
+        workspace.query = initialQuery;
+        workspace.adultCandidatesLoaded = initialQuery.includeAdult;
+        workspace.isLoading = false;
+        workspace.userNameDraft = userName;
       });
+      unawaited(_persistWorkspace(workspace));
+      _rebuildHomeRecommendationsSync();
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _error = error.toString();
-        _isLoading = false;
+        workspace.error = error.toString();
+        workspace.isLoading = false;
       });
     }
   }
 
-  void _signOut() {
+  void _signOut({bool keepDraft = false}) {
+    final workspace = _activeWorkspace;
+    final draft = keepDraft
+        ? workspace.profile?.userName ?? _userNameController.text.trim()
+        : '';
     setState(() {
-      _profile = null;
-      _candidates = [];
-      _serviceTags = [];
-      _recommendations = [];
-      _recommendationQuery = const RecommendationQuery();
-      _error = null;
-      _isLoading = false;
-      _isRefreshingRecommendations = false;
-      _adultCandidatesLoaded = false;
-      _userNameController.clear();
+      workspace.clear(draft: draft);
+      _userNameController.text = draft;
     });
+    unawaited(_profileStore.removeSession(workspace.service.id));
+    _rebuildHomeRecommendationsSync();
   }
 
   void _switchUser() {
-    final previousUser = _profile?.userName ?? _userNameController.text.trim();
-    _signOut();
-    _userNameController.text = previousUser;
+    _signOut(keepDraft: true);
+  }
+
+  void _selectService(MediaService service) {
+    _activeWorkspace.userNameDraft = _userNameController.text.trim();
+    setState(() {
+      _mediaService = service;
+      _activeSurface = _ActiveSurface.service;
+      final nextWorkspace = _activeWorkspace;
+      _userNameController.text = nextWorkspace.userNameDraft.isNotEmpty
+          ? nextWorkspace.userNameDraft
+          : nextWorkspace.profile?.userName ?? '';
+    });
+  }
+
+  void _selectHome() {
+    _activeWorkspace.userNameDraft = _userNameController.text.trim();
+    setState(() => _activeSurface = _ActiveSurface.home);
   }
 
   Future<void> _updateRecommendationQuery(RecommendationQuery rawQuery) async {
-    final profile = _profile;
+    final workspace = _activeWorkspace;
+    final profile = workspace.profile;
     if (profile == null) return;
+    final allowExplicitContent = await _allowsExplicitContent();
+    final requestQuery = rawQuery.copyWith(
+      includeAdult: false,
+      excludeAdult:
+          workspace.service.supportsAdultContent && !allowExplicitContent,
+    );
+    if (!mounted) return;
+    final searchRunId = ++_nextSearchRunId;
 
     setState(() {
-      _recommendationQuery = rawQuery;
-      _isRefreshingRecommendations = true;
+      workspace.query = requestQuery;
+      workspace.isRefreshingRecommendations = true;
+      workspace.activeRecommendationSearchRunId = searchRunId;
     });
+    final aiLog = AiConsoleLog();
+    final progressToast = showProgressToast(
+      context,
+      'Reading your request for ${workspace.service.displayName}...',
+      consoleLog: aiLog,
+    );
+    _activeRecommendationProgressToast = progressToast;
 
     try {
-      final query = await _aiService.interpretRecommendationRequest(
-        rawQuery,
-        availableTags: _availableTags,
+      await runZoned(
+        () async {
+          progressToast.update(
+            'Interpreting request with local AI or rules...',
+          );
+          final query = await _aiService.interpretRecommendationRequest(
+            requestQuery,
+            availableTags: _availableTags,
+            serviceName: workspace.service.displayName,
+            allowedMediaTypes: workspace.service.supportedMediaTypes,
+            allowedFormats: workspace.service.supportedFormats,
+          );
+          var baseCandidates = workspace.baseCandidates;
+          var candidates = query.isActive ? <MediaItem>[] : [...baseCandidates];
+          final needsAdultCandidates =
+              query.allowsAdult && !workspace.adultCandidatesLoaded;
+
+          if (query.isActive) {
+            progressToast.update(
+              'Searching ${workspace.service.displayName} candidates...',
+            );
+            final searchedCandidates = await workspace.service
+                .searchRecommendationCandidates(query);
+            candidates = _dedupeCandidates([
+              ...searchedCandidates,
+              ...candidates,
+            ]);
+          }
+
+          if (needsAdultCandidates) {
+            progressToast.update('Adding adult-content candidates...');
+            final adultCandidates = await workspace.service
+                .fetchRecommendationCandidates(includeAdult: true);
+            baseCandidates = _dedupeCandidates([
+              ...baseCandidates,
+              ...adultCandidates,
+            ]);
+            candidates = _dedupeCandidates([...candidates, ...adultCandidates]);
+          }
+
+          if (query.isActive) {
+            progressToast.update(
+              'Asking AI for known ${workspace.service.displayName} matches...',
+            );
+            final preliminaryRecommendations = _tasteEngine.rankCandidates(
+              profile,
+              candidates,
+              query: query,
+            );
+            final aiDiscovered = await _discoverAiSuggestedItems(
+              service: workspace.service,
+              profile: profile,
+              knownRecommendations: preliminaryRecommendations,
+              query: query,
+            );
+            if (aiDiscovered.isNotEmpty) {
+              candidates = _dedupeCandidates([...aiDiscovered, ...candidates]);
+            }
+          }
+
+          progressToast.update('Ranking matches against your profile...');
+          final recommendations = _tasteEngine.rankCandidates(
+            profile,
+            candidates,
+            query: query,
+          );
+          progressToast.update('Choosing the lead recommendation...');
+          final selection = await _withChosenTopRecommendation(
+            workspace.service,
+            profile,
+            recommendations,
+            query,
+          );
+          final orderedRecommendations = selection.recommendations;
+          if (selection.discoveredItem != null) {
+            candidates = _dedupeCandidates([
+              ...candidates,
+              selection.discoveredItem!,
+            ]);
+          }
+
+          if (!mounted ||
+              workspace.activeRecommendationSearchRunId != searchRunId) {
+            return;
+          }
+          setState(() {
+            workspace.query = query;
+            workspace.baseCandidates = baseCandidates;
+            workspace.candidates = candidates;
+            workspace.recommendations = orderedRecommendations;
+            workspace.adultCandidatesLoaded =
+                workspace.adultCandidatesLoaded || needsAdultCandidates;
+            workspace.isRefreshingRecommendations = false;
+            workspace.activeRecommendationSearchRunId = null;
+          });
+          unawaited(_persistWorkspace(workspace));
+          _rebuildHomeRecommendationsSync();
+        },
+        zoneValues: {
+          localAiConsoleLogZoneKey: aiLog,
+          manualAiRequestHandlerZoneKey: _handleManualAiRequest,
+        },
       );
-      var candidates = _candidates;
-      final needsAdultCandidates =
-          (query.includeAdult || query.infersAdult) && !_adultCandidatesLoaded;
-
-      if (query.isActive) {
-        final searchedCandidates = await _mediaService
-            .searchRecommendationCandidates(query);
-        candidates = _dedupeCandidates([...searchedCandidates, ...candidates]);
-      }
-
-      if (needsAdultCandidates) {
-        final adultCandidates = await _mediaService
-            .fetchRecommendationCandidates(includeAdult: true);
-        candidates = _dedupeCandidates([...candidates, ...adultCandidates]);
-      }
-
-      final recommendations = _tasteEngine.rankCandidates(
-        profile,
-        candidates,
-        query: query,
-      );
-      final orderedRecommendations = await _withChosenTopRecommendation(
-        profile,
-        recommendations,
-        query,
-      );
-
-      if (!mounted) return;
-      setState(() {
-        _recommendationQuery = query;
-        _candidates = candidates;
-        _recommendations = orderedRecommendations;
-        _adultCandidatesLoaded = _adultCandidatesLoaded || needsAdultCandidates;
-        _isRefreshingRecommendations = false;
-      });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted ||
+          workspace.activeRecommendationSearchRunId != searchRunId) {
+        return;
+      }
       setState(() {
-        _error = error.toString();
-        _isRefreshingRecommendations = false;
+        workspace.error = error.toString();
+        workspace.isRefreshingRecommendations = false;
+        workspace.activeRecommendationSearchRunId = null;
       });
       showErrorToast(context, 'Could not refresh recommendations: $error');
+    } finally {
+      if (_activeRecommendationProgressToast == progressToast) {
+        _activeRecommendationProgressToast = null;
+      }
+      progressToast.dismiss();
     }
+  }
+
+  Future<void> _updateHomeRecommendationQuery(
+    RecommendationQuery rawQuery,
+  ) async {
+    final allowExplicitContent = await _allowsExplicitContent();
+    final homeRequestQuery = rawQuery.copyWith(
+      includeAdult: false,
+      excludeAdult: !allowExplicitContent,
+    );
+    if (!mounted) return;
+    final importedWorkspaces = _importedWorkspaces;
+    if (importedWorkspaces.isEmpty) {
+      setState(() => _homeQuery = homeRequestQuery);
+      return;
+    }
+    final searchRunId = ++_nextSearchRunId;
+
+    setState(() {
+      _homeQuery = homeRequestQuery;
+      _isRefreshingHome = true;
+      _homeError = null;
+      _activeHomeSearchRunId = searchRunId;
+    });
+    final aiLog = AiConsoleLog();
+    final progressToast = showProgressToast(
+      context,
+      'Reading your Home search across services...',
+      consoleLog: aiLog,
+    );
+    _activeHomeProgressToast = progressToast;
+
+    try {
+      await runZoned(
+        () async {
+          final byService = <String, List<Recommendation>>{};
+          final merged = <Recommendation>[];
+          var chooserQuery = homeRequestQuery;
+
+          for (final workspace in importedWorkspaces) {
+            final profile = workspace.profile;
+            if (profile == null) continue;
+            final serviceRequestQuery = rawQuery.copyWith(
+              includeAdult: false,
+              excludeAdult:
+                  workspace.service.supportsAdultContent &&
+                  !allowExplicitContent,
+            );
+            progressToast.update(
+              'Interpreting ${workspace.service.displayName} filters...',
+            );
+            final query = await _aiService.interpretRecommendationRequest(
+              serviceRequestQuery,
+              availableTags: _availableTagsFor(workspace),
+              serviceName: workspace.service.displayName,
+              allowedMediaTypes: workspace.service.supportedMediaTypes,
+              allowedFormats: workspace.service.supportedFormats,
+            );
+            chooserQuery = chooserQuery.copyWith(
+              aiSelectedTags: {
+                ...chooserQuery.aiSelectedTags,
+                ...query.aiSelectedTags,
+              },
+              mediaTypes: {...chooserQuery.mediaTypes, ...query.mediaTypes},
+              formats: {...chooserQuery.formats, ...query.formats},
+              includeAdult: chooserQuery.includeAdult || query.includeAdult,
+              excludeAdult: chooserQuery.excludeAdult || query.excludeAdult,
+            );
+
+            var baseCandidates = workspace.baseCandidates;
+            var candidates = query.isActive
+                ? <MediaItem>[]
+                : [...baseCandidates];
+            final needsAdultCandidates =
+                query.allowsAdult && !workspace.adultCandidatesLoaded;
+
+            if (query.isActive) {
+              progressToast.update(
+                'Searching ${workspace.service.displayName} candidates...',
+              );
+              final searchedCandidates = await workspace.service
+                  .searchRecommendationCandidates(query);
+              candidates = _dedupeCandidates([
+                ...searchedCandidates,
+                ...candidates,
+              ]);
+            }
+
+            if (needsAdultCandidates) {
+              progressToast.update(
+                'Adding ${workspace.service.displayName} adult-content candidates...',
+              );
+              final adultCandidates = await workspace.service
+                  .fetchRecommendationCandidates(includeAdult: true);
+              baseCandidates = _dedupeCandidates([
+                ...baseCandidates,
+                ...adultCandidates,
+              ]);
+              candidates = _dedupeCandidates([
+                ...candidates,
+                ...adultCandidates,
+              ]);
+            }
+
+            if (query.isActive) {
+              progressToast.update(
+                'Asking AI for known ${workspace.service.displayName} matches...',
+              );
+              final preliminaryRecommendations = _tasteEngine.rankCandidates(
+                profile,
+                candidates,
+                query: query,
+              );
+              final aiDiscovered = await _discoverAiSuggestedItems(
+                service: workspace.service,
+                profile: profile,
+                knownRecommendations: preliminaryRecommendations,
+                query: query,
+              );
+              if (aiDiscovered.isNotEmpty) {
+                candidates = _dedupeCandidates([
+                  ...aiDiscovered,
+                  ...candidates,
+                ]);
+              }
+            }
+
+            progressToast.update(
+              'Ranking ${workspace.service.displayName} matches...',
+            );
+            final recommendations = _tasteEngine.rankCandidates(
+              profile,
+              candidates,
+              query: query,
+            );
+            if (recommendations.isEmpty) continue;
+
+            workspace.baseCandidates = baseCandidates;
+            workspace.candidates = candidates;
+            workspace.adultCandidatesLoaded =
+                workspace.adultCandidatesLoaded || needsAdultCandidates;
+            unawaited(_persistWorkspace(workspace));
+
+            byService[workspace.service.id] = recommendations;
+            merged.addAll(recommendations);
+          }
+
+          merged.sort((a, b) => b.matchScore.compareTo(a.matchScore));
+          progressToast.update('Choosing the best Home recommendation...');
+          final profiles = importedWorkspaces
+              .map((workspace) => workspace.profile!)
+              .toList();
+          final suggestion = await _aiService.suggestHomeRecommendation(
+            profiles,
+            merged,
+            query: chooserQuery,
+          );
+          Recommendation? chosen;
+          if (suggestion != null) {
+            final targetWorkspace = _workspaceForSuggestedService(
+              importedWorkspaces,
+              suggestion.serviceName,
+            );
+            final targetProfile = targetWorkspace?.profile;
+            if (targetWorkspace != null && targetProfile != null) {
+              final resolved = await _resolveDirectSuggestion(
+                service: targetWorkspace.service,
+                profile: targetProfile,
+                knownRecommendations:
+                    byService[targetWorkspace.service.id] ?? const [],
+                query: chooserQuery,
+                suggestion: suggestion,
+              );
+              chosen = resolved.recommendation;
+              if (chosen != null) {
+                final directChosen = chosen;
+                final serviceRecommendations = <Recommendation>[
+                  directChosen,
+                  for (final recommendation
+                      in byService[targetWorkspace.service.id] ??
+                          const <Recommendation>[])
+                    if (recommendation.item.id != directChosen.item.id)
+                      recommendation,
+                ];
+                byService[targetWorkspace.service.id] = serviceRecommendations;
+                merged.removeWhere(
+                  (recommendation) =>
+                      recommendation.item.id == directChosen.item.id,
+                );
+                merged.add(directChosen);
+                if (resolved.discoveredItem != null) {
+                  targetWorkspace.candidates = _dedupeCandidates([
+                    ...targetWorkspace.candidates,
+                    resolved.discoveredItem!,
+                  ]);
+                  unawaited(_persistWorkspace(targetWorkspace));
+                }
+              }
+            }
+          }
+          chosen ??= await _aiService.chooseHomeRecommendation(
+            profiles,
+            merged,
+            query: chooserQuery,
+          );
+          final ordered = _promoteChosenRecommendation(merged, chosen);
+
+          if (!mounted || _activeHomeSearchRunId != searchRunId) return;
+          setState(() {
+            _homeQuery = homeRequestQuery;
+            _homeRecommendationsByService = byService;
+            _homeRecommendations = ordered;
+            _isRefreshingHome = false;
+            _activeHomeSearchRunId = null;
+          });
+        },
+        zoneValues: {
+          localAiConsoleLogZoneKey: aiLog,
+          manualAiRequestHandlerZoneKey: _handleManualAiRequest,
+        },
+      );
+    } catch (error) {
+      if (!mounted || _activeHomeSearchRunId != searchRunId) return;
+      setState(() {
+        _homeError = error.toString();
+        _isRefreshingHome = false;
+        _activeHomeSearchRunId = null;
+      });
+      showErrorToast(context, 'Could not refresh Home: $error');
+    } finally {
+      if (_activeHomeProgressToast == progressToast) {
+        _activeHomeProgressToast = null;
+      }
+      progressToast.dismiss();
+    }
+  }
+
+  Future<String> _handleManualAiRequest(ManualAiRequest request) async {
+    if (!mounted) {
+      throw StateError('Manual AI prompt could not be shown.');
+    }
+    var responseText = '';
+    final response = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return AlertDialog(
+          title: const Text('Manual AI response'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 680),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Copy this prompt into ChatGPT or another AI, then paste the response here.',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 220),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: theme.dividerColor.withValues(alpha: 0.4),
+                      ),
+                    ),
+                    child: SingleChildScrollView(
+                      child: SelectableText(
+                        request.prompt,
+                        key: const ValueKey('manual-ai-prompt'),
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: const ValueKey('manual-ai-response'),
+                    onChanged: (value) => responseText = value,
+                    minLines: 5,
+                    maxLines: 10,
+                    decoration: const InputDecoration(
+                      labelText: 'AI response',
+                      alignLabelWithHint: true,
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton.icon(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: request.prompt));
+                showInfoToast(context, 'Prompt copied.');
+              },
+              icon: const Icon(Icons.copy_rounded),
+              label: const Text('Copy prompt'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(context, responseText.trim()),
+              icon: const Icon(Icons.check_rounded),
+              label: const Text('Use response'),
+            ),
+          ],
+        );
+      },
+    );
+    if (response == null || response.trim().isEmpty) {
+      throw StateError('Manual AI response was empty.');
+    }
+    return response.trim();
+  }
+
+  void _cancelRecommendationSearch() {
+    final workspace = _activeWorkspace;
+    if (!workspace.isRefreshingRecommendations) return;
+    setState(() {
+      workspace.activeRecommendationSearchRunId = null;
+      workspace.isRefreshingRecommendations = false;
+    });
+    _activeRecommendationProgressToast?.dismiss();
+    _activeRecommendationProgressToast = null;
+    showInfoToast(context, 'Recommendation search canceled.');
+  }
+
+  void _cancelHomeSearch() {
+    if (!_isRefreshingHome) return;
+    setState(() {
+      _activeHomeSearchRunId = null;
+      _isRefreshingHome = false;
+    });
+    _activeHomeProgressToast?.dismiss();
+    _activeHomeProgressToast = null;
+    showInfoToast(context, 'Home search canceled.');
   }
 
   void _openSettings() {
@@ -198,24 +799,313 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<List<Recommendation>> _withChosenTopRecommendation(
+  void _openProfile() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const ProfileScreen()),
+    );
+  }
+
+  Future<({List<Recommendation> recommendations, MediaItem? discoveredItem})>
+  _withChosenTopRecommendation(
+    MediaService service,
     TasteProfile profile,
     List<Recommendation> recommendations,
     RecommendationQuery query,
   ) async {
-    if (recommendations.isEmpty) return recommendations;
+    final suggestion = await _aiService.suggestRecommendation(
+      profile,
+      recommendations,
+      query: query,
+    );
+    if (suggestion != null) {
+      final resolved = await _resolveDirectSuggestion(
+        service: service,
+        profile: profile,
+        knownRecommendations: recommendations,
+        query: query,
+        suggestion: suggestion,
+      );
+      final direct = resolved.recommendation;
+      if (direct != null) {
+        return (
+          recommendations: [
+            direct.copyWith(isTopPick: true),
+            for (final recommendation in recommendations)
+              if (recommendation.item.id != direct.item.id)
+                recommendation.copyWith(isTopPick: false),
+          ],
+          discoveredItem: resolved.discoveredItem,
+        );
+      }
+    }
+
+    if (recommendations.isEmpty) {
+      return (recommendations: recommendations, discoveredItem: null);
+    }
 
     final chosen = await _aiService.chooseTopRecommendation(
       profile,
       recommendations,
       query: query,
     );
-    if (chosen == null) return recommendations;
+    if (chosen == null) {
+      return (recommendations: recommendations, discoveredItem: null);
+    }
 
+    return (
+      recommendations: [
+        chosen.copyWith(isTopPick: true),
+        for (final recommendation in recommendations)
+          if (recommendation.item.id != chosen.item.id)
+            recommendation.copyWith(isTopPick: false),
+      ],
+      discoveredItem: null,
+    );
+  }
+
+  _ServiceWorkspace? _workspaceForSuggestedService(
+    Iterable<_ServiceWorkspace> workspaces,
+    String serviceName,
+  ) {
+    final target = _normalizedTitle(serviceName);
+    for (final workspace in workspaces) {
+      if (_normalizedTitle(workspace.service.displayName) == target ||
+          _normalizedTitle(workspace.service.id) == target) {
+        return workspace;
+      }
+    }
+    return null;
+  }
+
+  Future<List<MediaItem>> _discoverAiSuggestedItems({
+    required MediaService service,
+    required TasteProfile profile,
+    required List<Recommendation> knownRecommendations,
+    required RecommendationQuery query,
+  }) async {
+    final suggestions = await _aiService.suggestRecommendationCandidates(
+      profile,
+      knownRecommendations,
+      query: query,
+      limit: 5,
+    );
+    if (suggestions.isEmpty) return const [];
+
+    final discovered = <MediaItem>[];
+    for (final suggestion in suggestions) {
+      if (_normalizedTitle(suggestion.serviceName) !=
+          _normalizedTitle(profile.serviceName)) {
+        continue;
+      }
+      final item = await _resolveSuggestedItem(
+        service: service,
+        profile: profile,
+        query: query,
+        suggestion: suggestion,
+      );
+      if (item != null) discovered.add(item);
+    }
+    return _dedupeCandidates(discovered);
+  }
+
+  Future<MediaItem?> _resolveSuggestedItem({
+    required MediaService service,
+    required TasteProfile profile,
+    required RecommendationQuery query,
+    required AiRecommendationSuggestion suggestion,
+  }) async {
+    final titleKey = _normalizedTitle(suggestion.title);
+    if (titleKey.isEmpty) return null;
+
+    final searchResults = await service.searchRecommendationCandidates(
+      RecommendationQuery(
+        request: suggestion.title,
+        includeAdult: query.allowsAdult,
+        excludeAdult: query.excludeAdult,
+      ),
+    );
+    MediaItem? item;
+    for (final result in searchResults) {
+      if (_normalizedTitle(result.title) == titleKey) {
+        item = result;
+        break;
+      }
+    }
+    if (item == null) return null;
+
+    final resolvedItem = item;
+    if (profile.library.any(
+      (owned) =>
+          owned.id == resolvedItem.id ||
+          _normalizedTitle(owned.title) == _normalizedTitle(resolvedItem.title),
+    )) {
+      return null;
+    }
+
+    final requiredMediaTypes = query.effectiveMediaTypes();
+    if (requiredMediaTypes.isNotEmpty &&
+        !requiredMediaTypes.contains(resolvedItem.mediaType)) {
+      return null;
+    }
+    if (resolvedItem.isAdult && !query.allowsAdult) return null;
+
+    final validated = _tasteEngine.rankCandidates(profile, [
+      resolvedItem,
+    ], query: _hardValidationQueryFor(service, query));
+    return validated.isEmpty ? null : resolvedItem;
+  }
+
+  RecommendationQuery _hardValidationQueryFor(
+    MediaService service,
+    RecommendationQuery query,
+  ) {
+    final applicableFormats = query
+        .effectiveFormats()
+        .where(service.supportedFormats.contains)
+        .toSet();
+    final applicableMediaTypes = query
+        .effectiveMediaTypes()
+        .where(service.supportedMediaTypes.contains)
+        .toSet();
+    return RecommendationQuery(
+      includeAdult: query.allowsAdult,
+      excludeAdult: query.excludeAdult,
+      mediaTypes: applicableMediaTypes,
+      formats: applicableFormats,
+    );
+  }
+
+  Future<({Recommendation? recommendation, MediaItem? discoveredItem})>
+  _resolveDirectSuggestion({
+    required MediaService service,
+    required TasteProfile profile,
+    required List<Recommendation> knownRecommendations,
+    required RecommendationQuery query,
+    required AiRecommendationSuggestion suggestion,
+  }) async {
+    final titleKey = _normalizedTitle(suggestion.title);
+    if (titleKey.isEmpty) {
+      return (recommendation: null, discoveredItem: null);
+    }
+
+    for (final recommendation in knownRecommendations) {
+      if (_normalizedTitle(recommendation.item.title) == titleKey) {
+        return (
+          recommendation: recommendation.copyWith(
+            reason: suggestion.reason,
+            isAiPick: true,
+          ),
+          discoveredItem: null,
+        );
+      }
+    }
+
+    try {
+      final item = await _resolveSuggestedItem(
+        service: service,
+        profile: profile,
+        query: query,
+        suggestion: suggestion,
+      );
+      if (item == null) {
+        return (recommendation: null, discoveredItem: null);
+      }
+      final validated = _tasteEngine.rankCandidates(profile, [
+        item,
+      ], query: _hardValidationQueryFor(service, query));
+      if (validated.isEmpty) {
+        return (recommendation: null, discoveredItem: null);
+      }
+      return (
+        recommendation: validated.first.copyWith(
+          reason: suggestion.reason,
+          isAiPick: true,
+        ),
+        discoveredItem: item,
+      );
+    } catch (_) {
+      return (recommendation: null, discoveredItem: null);
+    }
+  }
+
+  String _normalizedTitle(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  Future<void> _loadSavedSessions() async {
+    final sessions = await _profileStore.loadSessions();
+    if (!mounted || sessions.isEmpty) return;
+    final allowExplicitContent = await _allowsExplicitContent();
+    if (!mounted) return;
+
+    setState(() {
+      for (final entry in sessions.entries) {
+        final workspace = _workspaces[entry.key];
+        if (workspace == null) continue;
+        final session = entry.value;
+        workspace.restore(
+          session.copyWith(
+            query: session.query.copyWith(
+              includeAdult: false,
+              excludeAdult:
+                  workspace.service.supportsAdultContent &&
+                  !allowExplicitContent,
+            ),
+          ),
+          tasteEngine: _tasteEngine,
+        );
+      }
+      final activeWorkspace = _activeWorkspace;
+      _userNameController.text = activeWorkspace.userNameDraft.isNotEmpty
+          ? activeWorkspace.userNameDraft
+          : activeWorkspace.profile?.userName ?? '';
+    });
+    _rebuildHomeRecommendationsSync();
+  }
+
+  Future<bool> _allowsExplicitContent() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(LocalAiSettingsKeys.allowExplicitContent) ?? false;
+  }
+
+  Future<void> _persistWorkspace(_ServiceWorkspace workspace) async {
+    final session = workspace.toLocalSession();
+    if (session == null) return;
+    await _profileStore.saveSession(session);
+  }
+
+  void _rebuildHomeRecommendationsSync() {
+    final byService = <String, List<Recommendation>>{};
+    final merged = <Recommendation>[];
+    for (final workspace in _importedWorkspaces) {
+      final recommendations = workspace.recommendations;
+      if (recommendations.isEmpty) continue;
+      byService[workspace.service.id] = recommendations;
+      merged.addAll(recommendations);
+    }
+    merged.sort((a, b) => b.matchScore.compareTo(a.matchScore));
+    final ordered = _promoteChosenRecommendation(
+      merged,
+      merged.isEmpty ? null : merged.first,
+    );
+    if (!mounted) return;
+    setState(() {
+      _homeRecommendationsByService = byService;
+      _homeRecommendations = ordered;
+    });
+  }
+
+  List<Recommendation> _promoteChosenRecommendation(
+    List<Recommendation> recommendations,
+    Recommendation? chosen,
+  ) {
+    if (recommendations.isEmpty) return recommendations;
+    final top = chosen ?? recommendations.first;
     return [
-      chosen.copyWith(isTopPick: true),
+      top.copyWith(isTopPick: true),
       for (final recommendation in recommendations)
-        if (recommendation.item.id != chosen.item.id)
+        if (recommendation.item.id != top.item.id)
           recommendation.copyWith(isTopPick: false),
     ];
   }
@@ -235,22 +1125,41 @@ class _HomeScreenState extends State<HomeScreen> {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final isDesktop = constraints.maxWidth >= 900;
-              final shell = _ContentShell(
-                isMobileSurface: !isDesktop,
-                profile: _profile,
-                recommendations: _recommendations,
-                isLoading: _isLoading,
-                error: _error,
-                aiService: _aiService,
-                userNameController: _userNameController,
-                onImport: _importAniListProfile,
-                onSignOut: _signOut,
-                onSwitchUser: _switchUser,
-                query: _recommendationQuery,
-                isRefreshingRecommendations: _isRefreshingRecommendations,
-                availableTags: _availableTags,
-                onQueryChanged: _updateRecommendationQuery,
-              );
+              final workspace = _activeWorkspace;
+              final shell = _activeSurface == _ActiveSurface.home
+                  ? _HomeContentShell(
+                      isMobileSurface: !isDesktop,
+                      services: _mediaServices,
+                      workspaces: _workspaces,
+                      query: _homeQuery,
+                      recommendations: _homeRecommendations,
+                      recommendationsByService: _homeRecommendationsByService,
+                      isRefreshing: _isRefreshingHome,
+                      error: _homeError,
+                      aiService: _aiService,
+                      onQueryChanged: _updateHomeRecommendationQuery,
+                      onCancelSearch: _cancelHomeSearch,
+                      onConnectService: _selectService,
+                    )
+                  : _ContentShell(
+                      isMobileSurface: !isDesktop,
+                      profile: workspace.profile,
+                      recommendations: workspace.recommendations,
+                      isLoading: workspace.isLoading,
+                      error: workspace.error,
+                      aiService: _aiService,
+                      userNameController: _userNameController,
+                      mediaService: workspace.service,
+                      onImport: _importProfile,
+                      onSignOut: _signOut,
+                      onSwitchUser: _switchUser,
+                      query: workspace.query,
+                      isRefreshingRecommendations:
+                          workspace.isRefreshingRecommendations,
+                      availableTags: _availableTags,
+                      onQueryChanged: _updateRecommendationQuery,
+                      onCancelSearch: _cancelRecommendationSearch,
+                    );
 
               if (isDesktop) {
                 return Column(
@@ -265,7 +1174,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       padding: const EdgeInsets.fromLTRB(22, 0, 22, 18),
                       child: _ServiceDock(
                         isDesktop: true,
+                        services: _mediaServices,
+                        activeServiceId: _mediaService.id,
+                        isHomeActive: _activeSurface == _ActiveSurface.home,
+                        onHomeTap: _selectHome,
+                        onServiceTap: _selectService,
                         onSettingsTap: _openSettings,
+                        onProfileTap: _openProfile,
                         onUnavailableTap: (label) =>
                             showFeatureComingSoon(context, label),
                       ),
@@ -276,8 +1191,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
               return _MobileLiquidShell(
                 onSettingsTap: _openSettings,
+                services: _mediaServices,
+                activeServiceId: _mediaService.id,
+                isHomeActive: _activeSurface == _ActiveSurface.home,
+                onHomeTap: _selectHome,
+                onServiceTap: _selectService,
                 onUnavailableTap: (label) =>
                     showFeatureComingSoon(context, label),
+                onProfileTap: _openProfile,
                 child: shell,
               );
             },
@@ -288,11 +1209,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<String> get _availableTags {
+    return _availableTagsFor(_activeWorkspace);
+  }
+
+  List<String> _availableTagsFor(_ServiceWorkspace workspace) {
     final counts = <String, int>{};
-    for (final tag in _profile?.favoriteGenres ?? const <String>[]) {
+    for (final tag in workspace.profile?.favoriteGenres ?? const <String>[]) {
       counts.update(tag, (count) => count + 4, ifAbsent: () => 4);
     }
-    for (final item in _candidates) {
+    for (final item in workspace.baseCandidates) {
       for (final tag in item.tags) {
         counts.update(tag, (count) => count + 1, ifAbsent: () => 1);
       }
@@ -300,11 +1225,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final entries = counts.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
+    final baseTags = workspace.service.displayName == 'Steam'
+        ? RecommendationQuery.steamBrowsableTags
+        : RecommendationQuery.aniListBrowsableTags;
     return {
-      ...RecommendationQuery.browsableTags,
-      ..._serviceTags,
+      ...baseTags,
+      ...workspace.serviceTags,
       ...entries.map((entry) => entry.key),
     }.toList();
+  }
+
+  _ServiceWorkspace get _activeWorkspace => _workspaces[_mediaService.id]!;
+
+  List<_ServiceWorkspace> get _importedWorkspaces {
+    return [
+      for (final service in _mediaServices)
+        if (_workspaces[service.id]?.hasProfile ?? false)
+          _workspaces[service.id]!,
+    ];
   }
 
   List<MediaItem> _dedupeCandidates(List<MediaItem> candidates) {
@@ -316,29 +1254,544 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-Future<void> _openMediaOnAniList(BuildContext context, MediaItem item) async {
+Future<void> _openMedia(BuildContext context, MediaItem item) async {
   final fallbackId = item.id.startsWith('anilist_')
       ? item.id.replaceFirst('anilist_', '')
+      : '';
+  final steamFallbackId = item.id.startsWith('steam_')
+      ? item.id.replaceFirst('steam_', '')
       : '';
   final url = item.siteUrl.isNotEmpty
       ? item.siteUrl
       : fallbackId.isNotEmpty
       ? 'https://anilist.co/${item.mediaType.toLowerCase()}/$fallbackId'
+      : steamFallbackId.isNotEmpty
+      ? 'https://store.steampowered.com/app/$steamFallbackId'
       : '';
   final uri = Uri.tryParse(url);
   if (uri == null || url.isEmpty) {
-    showErrorToast(context, 'No AniList page is available for this item.');
+    showErrorToast(
+      context,
+      'No ${item.serviceLabel} page is available for this item.',
+    );
     return;
   }
 
   final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
   if (!launched && context.mounted) {
-    showErrorToast(context, 'Could not open AniList.');
+    showErrorToast(context, 'Could not open ${item.serviceLabel}.');
+  }
+}
+
+class _HomeContentShell extends StatelessWidget {
+  final bool isMobileSurface;
+  final List<MediaService> services;
+  final Map<String, _ServiceWorkspace> workspaces;
+  final RecommendationQuery query;
+  final List<Recommendation> recommendations;
+  final Map<String, List<Recommendation>> recommendationsByService;
+  final bool isRefreshing;
+  final String? error;
+  final LocalAiService aiService;
+  final ValueChanged<RecommendationQuery> onQueryChanged;
+  final VoidCallback onCancelSearch;
+  final ValueChanged<MediaService> onConnectService;
+
+  const _HomeContentShell({
+    required this.isMobileSurface,
+    required this.services,
+    required this.workspaces,
+    required this.query,
+    required this.recommendations,
+    required this.recommendationsByService,
+    required this.isRefreshing,
+    required this.error,
+    required this.aiService,
+    required this.onQueryChanged,
+    required this.onCancelSearch,
+    required this.onConnectService,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final borderRadius = BorderRadius.circular(isMobileSurface ? 0 : 34);
+    final shellPadding = isMobileSurface
+        ? const EdgeInsets.fromLTRB(14, 16, 14, 0)
+        : const EdgeInsets.fromLTRB(18, 18, 18, 0);
+    final imported = [
+      for (final service in services)
+        if (workspaces[service.id]?.profile != null) workspaces[service.id]!,
+    ];
+    final missing = [
+      for (final service in services)
+        if (workspaces[service.id]?.profile == null) service,
+    ];
+    final readableInset = EdgeInsets.only(left: isMobileSurface ? 54 : 0);
+
+    final shell = Container(
+      decoration: BoxDecoration(
+        color: isMobileSurface
+            ? Colors.transparent
+            : Colors.white.withValues(alpha: 0.055),
+        borderRadius: borderRadius,
+        border: isMobileSurface
+            ? null
+            : Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment.topRight,
+                  radius: 1.2,
+                  colors: [
+                    const Color(
+                      0xFF89D6B3,
+                    ).withValues(alpha: isMobileSurface ? 0.14 : 0.09),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: shellPadding,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _HomeHeader(aiService: aiService),
+                const SizedBox(height: 14),
+                Expanded(
+                  child: CustomScrollView(
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: readableInset,
+                          child: _HomeSearchPanel(
+                            query: query,
+                            isRefreshing: isRefreshing,
+                            onQueryChanged: onQueryChanged,
+                            onCancelSearch: onCancelSearch,
+                          ),
+                        ),
+                      ),
+                      if (error != null)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: readableInset.add(
+                              const EdgeInsets.only(top: 12),
+                            ),
+                            child: Text(
+                              error!,
+                              style: const TextStyle(color: Color(0xFFFF9AA8)),
+                            ),
+                          ),
+                        ),
+                      if (imported.isEmpty)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: readableInset.add(
+                              const EdgeInsets.only(top: 14),
+                            ),
+                            child: _HomeConnectGrid(
+                              services: services,
+                              onConnectService: onConnectService,
+                            ),
+                          ),
+                        )
+                      else ...[
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 14),
+                            child: recommendations.isEmpty
+                                ? Padding(
+                                    padding: readableInset,
+                                    child: _EmptyHomeRecommendations(
+                                      query: query,
+                                    ),
+                                  )
+                                : _TopRecommendationCard(
+                                    recommendation: recommendations.first,
+                                  ),
+                          ),
+                        ),
+                        if (missing.isNotEmpty)
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding: readableInset.add(
+                                const EdgeInsets.only(top: 14),
+                              ),
+                              child: _MissingServiceStrip(
+                                services: missing,
+                                onConnectService: onConnectService,
+                              ),
+                            ),
+                          ),
+                        for (final workspace in imported)
+                          _HomeServiceSection(
+                            workspace: workspace,
+                            recommendations:
+                                recommendationsByService[workspace
+                                    .service
+                                    .id] ??
+                                workspace.recommendations,
+                            readableInset: readableInset,
+                          ),
+                      ],
+                      const SliverToBoxAdapter(child: SizedBox(height: 96)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (isMobileSurface) return shell;
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+        child: shell,
+      ),
+    );
+  }
+}
+
+class _HomeHeader extends StatelessWidget {
+  final LocalAiService aiService;
+
+  const _HomeHeader({required this.aiService});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Majika',
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'One local feed across your imported services.',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.64),
+                ),
+              ),
+            ],
+          ),
+        ),
+        _StatusPill(
+          icon: Icons.auto_awesome_rounded,
+          label: aiService.isConfigured ? 'Local AI' : 'Local rules',
+        ),
+      ],
+    );
+  }
+}
+
+class _HomeSearchPanel extends StatefulWidget {
+  final RecommendationQuery query;
+  final bool isRefreshing;
+  final ValueChanged<RecommendationQuery> onQueryChanged;
+  final VoidCallback onCancelSearch;
+
+  const _HomeSearchPanel({
+    required this.query,
+    required this.isRefreshing,
+    required this.onQueryChanged,
+    required this.onCancelSearch,
+  });
+
+  @override
+  State<_HomeSearchPanel> createState() => _HomeSearchPanelState();
+}
+
+class _HomeSearchPanelState extends State<_HomeSearchPanel> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.query.request);
+  }
+
+  @override
+  void didUpdateWidget(covariant _HomeSearchPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.query.request != widget.query.request &&
+        widget.query.request != _controller.text) {
+      _controller.text = widget.query.request;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final request = _controller.text.trim();
+    final requestChanged = request != widget.query.request.trim();
+    widget.onQueryChanged(
+      widget.query.copyWith(
+        request: request,
+        aiSelectedTags: requestChanged
+            ? <String>{}
+            : widget.query.aiSelectedTags,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _GlassCard(
+      padding: const EdgeInsets.all(14),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              key: const ValueKey('home-recommendation-query'),
+              controller: _controller,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _submit(),
+              decoration: InputDecoration(
+                hintText: 'Ask for what you want next',
+                prefixIcon: const Icon(Icons.auto_awesome_rounded),
+                filled: true,
+                fillColor: Colors.black.withValues(alpha: 0.22),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton.filledTonal(
+            tooltip: widget.isRefreshing
+                ? 'Cancel Home search'
+                : 'Search Home recommendations',
+            onPressed: widget.isRefreshing ? widget.onCancelSearch : _submit,
+            icon: widget.isRefreshing
+                ? const Icon(Icons.close_rounded)
+                : const Icon(Icons.arrow_forward_rounded),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeConnectGrid extends StatelessWidget {
+  final List<MediaService> services;
+  final ValueChanged<MediaService> onConnectService;
+
+  const _HomeConnectGrid({
+    required this.services,
+    required this.onConnectService,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 560;
+        return Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (final service in services)
+              SizedBox(
+                width: isNarrow ? constraints.maxWidth : 260,
+                child: _HomeConnectCard(
+                  service: service,
+                  onConnect: () => onConnectService(service),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _MissingServiceStrip extends StatelessWidget {
+  final List<MediaService> services;
+  final ValueChanged<MediaService> onConnectService;
+
+  const _MissingServiceStrip({
+    required this.services,
+    required this.onConnectService,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final service in services)
+          ActionChip(
+            avatar: Icon(_serviceIcon(service), size: 18),
+            label: Text('Connect ${service.displayName}'),
+            onPressed: () => onConnectService(service),
+            backgroundColor: Colors.white.withValues(alpha: 0.07),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+          ),
+      ],
+    );
+  }
+}
+
+class _HomeConnectCard extends StatelessWidget {
+  final MediaService service;
+  final VoidCallback onConnect;
+
+  const _HomeConnectCard({required this.service, required this.onConnect});
+
+  @override
+  Widget build(BuildContext context) {
+    return _GlassCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(_serviceIcon(service), color: Colors.white70),
+          const SizedBox(height: 10),
+          Text(
+            service.connectTitle,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            service.connectDescription,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Colors.white.withValues(alpha: 0.68),
+              height: 1.32,
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: onConnect,
+            icon: const Icon(Icons.login_rounded),
+            label: Text(service.importButtonLabel),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeServiceSection extends StatelessWidget {
+  final _ServiceWorkspace workspace;
+  final List<Recommendation> recommendations;
+  final EdgeInsets readableInset;
+
+  const _HomeServiceSection({
+    required this.workspace,
+    required this.recommendations,
+    required this.readableInset,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = recommendations.take(4).toList();
+    if (visible.isEmpty) return const SliverToBoxAdapter(child: SizedBox());
+
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.only(top: 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: readableInset,
+              child: Row(
+                children: [
+                  Icon(
+                    _serviceIcon(workspace.service),
+                    color: Colors.white.withValues(alpha: 0.7),
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    workspace.service.displayName,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            for (final recommendation in visible) ...[
+              _RecommendationTile(recommendation: recommendation),
+              const SizedBox(height: 10),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyHomeRecommendations extends StatelessWidget {
+  final RecommendationQuery query;
+
+  const _EmptyHomeRecommendations({required this.query});
+
+  @override
+  Widget build(BuildContext context) {
+    return _GlassCard(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.travel_explore_rounded,
+            color: Colors.white70,
+            size: 36,
+          ),
+          const SizedBox(height: 10),
+          Text(
+            query.isActive
+                ? 'No cross-service matches for this request yet.'
+                : 'Imported services are ready. Ask for a mood, format, or activity.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Colors.white.withValues(alpha: 0.72),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
 class _ContentShell extends StatelessWidget {
   final bool isMobileSurface;
+  final MediaService mediaService;
   final TasteProfile? profile;
   final List<Recommendation> recommendations;
   final bool isLoading;
@@ -352,9 +1805,11 @@ class _ContentShell extends StatelessWidget {
   final bool isRefreshingRecommendations;
   final List<String> availableTags;
   final ValueChanged<RecommendationQuery> onQueryChanged;
+  final VoidCallback onCancelSearch;
 
   const _ContentShell({
     this.isMobileSurface = false,
+    required this.mediaService,
     required this.profile,
     required this.recommendations,
     required this.isLoading,
@@ -368,6 +1823,7 @@ class _ContentShell extends StatelessWidget {
     required this.isRefreshingRecommendations,
     required this.availableTags,
     required this.onQueryChanged,
+    required this.onCancelSearch,
   });
 
   @override
@@ -412,6 +1868,7 @@ class _ContentShell extends StatelessWidget {
                 _ShellHeader(
                   profile: profile,
                   aiService: aiService,
+                  serviceName: mediaService.displayName,
                   onSignOut: onSignOut,
                   onSwitchUser: onSwitchUser,
                 ),
@@ -425,6 +1882,7 @@ class _ContentShell extends StatelessWidget {
                             isLoading: isLoading,
                             error: error,
                             controller: userNameController,
+                            mediaService: mediaService,
                             onImport: onImport,
                           )
                         : _RecommendationState(
@@ -434,8 +1892,10 @@ class _ContentShell extends StatelessWidget {
                             query: query,
                             isRefreshing: isRefreshingRecommendations,
                             availableTags: availableTags,
+                            mediaService: mediaService,
                             isMobileSurface: isMobileSurface,
                             onQueryChanged: onQueryChanged,
+                            onCancelSearch: onCancelSearch,
                           ),
                   ),
                 ),
@@ -462,12 +1922,24 @@ class _ContentShell extends StatelessWidget {
 
 class _MobileLiquidShell extends StatelessWidget {
   final Widget child;
+  final List<MediaService> services;
+  final String activeServiceId;
+  final bool isHomeActive;
+  final VoidCallback onHomeTap;
+  final ValueChanged<MediaService> onServiceTap;
   final VoidCallback onSettingsTap;
+  final VoidCallback onProfileTap;
   final ValueChanged<String> onUnavailableTap;
 
   const _MobileLiquidShell({
     required this.child,
+    required this.services,
+    required this.activeServiceId,
+    required this.isHomeActive,
+    required this.onHomeTap,
+    required this.onServiceTap,
     required this.onSettingsTap,
+    required this.onProfileTap,
     required this.onUnavailableTap,
   });
 
@@ -478,11 +1950,17 @@ class _MobileLiquidShell extends StatelessWidget {
       children: [
         Positioned.fill(child: child),
         Positioned(
-          top: 88,
+          top: 132,
           bottom: 16,
           left: 6,
           child: _MobileLiquidRail(
+            services: services,
+            activeServiceId: activeServiceId,
+            isHomeActive: isHomeActive,
+            onHomeTap: onHomeTap,
+            onServiceTap: onServiceTap,
             onSettingsTap: onSettingsTap,
+            onProfileTap: onProfileTap,
             onUnavailableTap: onUnavailableTap,
           ),
         ),
@@ -494,12 +1972,14 @@ class _MobileLiquidShell extends StatelessWidget {
 class _ShellHeader extends StatelessWidget {
   final TasteProfile? profile;
   final LocalAiService aiService;
+  final String serviceName;
   final VoidCallback onSignOut;
   final VoidCallback onSwitchUser;
 
   const _ShellHeader({
     required this.profile,
     required this.aiService,
+    required this.serviceName,
     required this.onSignOut,
     required this.onSwitchUser,
   });
@@ -523,8 +2003,8 @@ class _ShellHeader extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               profile == null
-                  ? 'Build a local taste profile from AniList.'
-                  : '@${profile!.userName} · ${profile!.primaryTaste}',
+                  ? 'Build a local taste profile from $serviceName.'
+                  : '@${profile!.displayName} · ${profile!.primaryTaste}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodyMedium?.copyWith(
@@ -579,6 +2059,7 @@ class _ConnectState extends StatelessWidget {
   final bool isLoading;
   final String? error;
   final TextEditingController controller;
+  final MediaService mediaService;
   final VoidCallback onImport;
 
   const _ConnectState({
@@ -586,6 +2067,7 @@ class _ConnectState extends StatelessWidget {
     required this.isLoading,
     required this.error,
     required this.controller,
+    required this.mediaService,
     required this.onImport,
   });
 
@@ -608,7 +2090,7 @@ class _ConnectState extends StatelessWidget {
               ),
               const SizedBox(height: 18),
               Text(
-                'Connect AniList',
+                mediaService.connectTitle,
                 textAlign: TextAlign.center,
                 style: theme.textTheme.headlineMedium?.copyWith(
                   color: Colors.white,
@@ -617,7 +2099,7 @@ class _ConnectState extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               Text(
-                'Enter a public AniList username. Majika will read anime and manga lists, build a local taste profile, then rank current releases against it.',
+                mediaService.connectDescription,
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: Colors.white.withValues(alpha: 0.72),
@@ -631,7 +2113,7 @@ class _ConnectState extends StatelessWidget {
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) => onImport(),
                 decoration: InputDecoration(
-                  hintText: 'AniList username',
+                  hintText: mediaService.userNameHint,
                   prefixIcon: const Icon(Icons.person_search_rounded),
                   filled: true,
                   fillColor: Colors.black.withValues(alpha: 0.24),
@@ -660,11 +2142,17 @@ class _ConnectState extends StatelessWidget {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.sync_rounded),
-                label: Text(isLoading ? 'Importing profile' : 'Build profile'),
+                label: Text(
+                  isLoading
+                      ? 'Importing profile'
+                      : mediaService.importButtonLabel,
+                ),
               ),
               const SizedBox(height: 14),
               Text(
-                'OAuth and Firebase sync are designed for later; this slice stays local-first.',
+                mediaService.displayName == 'Steam'
+                    ? 'Steam OpenID account linking is designed for later; this slice uses public data and a local API key.'
+                    : 'OAuth and Firebase sync are designed for later; this slice stays local-first.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: Colors.white.withValues(alpha: 0.48),
@@ -684,8 +2172,10 @@ class _RecommendationState extends StatelessWidget {
   final RecommendationQuery query;
   final bool isRefreshing;
   final List<String> availableTags;
+  final MediaService mediaService;
   final bool isMobileSurface;
   final ValueChanged<RecommendationQuery> onQueryChanged;
+  final VoidCallback onCancelSearch;
 
   const _RecommendationState({
     super.key,
@@ -694,8 +2184,10 @@ class _RecommendationState extends StatelessWidget {
     required this.query,
     required this.isRefreshing,
     required this.availableTags,
+    required this.mediaService,
     required this.isMobileSurface,
     required this.onQueryChanged,
+    required this.onCancelSearch,
   });
 
   @override
@@ -714,7 +2206,9 @@ class _RecommendationState extends StatelessWidget {
                 children: [
                   Padding(
                     padding: readableInset,
-                    child: _TasteSummary(profile: profile),
+                    child: mediaService.displayName == 'Steam'
+                        ? _SteamDashboardSummary(profile: profile)
+                        : _TasteSummary(profile: profile),
                   ),
                   const SizedBox(height: 14),
                   Padding(
@@ -723,7 +2217,9 @@ class _RecommendationState extends StatelessWidget {
                       query: query,
                       isRefreshing: isRefreshing,
                       availableTags: availableTags,
+                      mediaService: mediaService,
                       onQueryChanged: onQueryChanged,
+                      onCancelSearch: onCancelSearch,
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -737,18 +2233,23 @@ class _RecommendationState extends StatelessWidget {
                     )
                   else
                     _TopRecommendationCard(recommendation: topPick),
-                  const SizedBox(height: 18),
-                  Padding(
-                    padding: readableInset,
-                    child: Text(
-                      'More for this profile',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
+                  if (otherPicks.isNotEmpty) ...[
+                    const SizedBox(height: 18),
+                    Padding(
+                      padding: readableInset,
+                      child: Text(
+                        query.isActive
+                            ? 'More matching this request'
+                            : 'More for this profile',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                            ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
+                    const SizedBox(height: 10),
+                  ],
                 ],
               ),
             ),
@@ -814,17 +2315,156 @@ class _TasteSummary extends StatelessWidget {
   }
 }
 
+class _SteamDashboardSummary extends StatelessWidget {
+  final TasteProfile profile;
+
+  const _SteamDashboardSummary({required this.profile});
+
+  @override
+  Widget build(BuildContext context) {
+    final totalHours = profile.library.fold<int>(
+      0,
+      (total, item) => total + ((item.playtimeMinutes ?? 0) / 60).round(),
+    );
+    final mostPlayed = [...profile.library]
+      ..sort(
+        (a, b) => (b.playtimeMinutes ?? 0).compareTo(a.playtimeMinutes ?? 0),
+      );
+
+    return _GlassCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 28,
+                backgroundColor: Colors.white.withValues(alpha: 0.12),
+                backgroundImage: profile.avatarUrl.isEmpty
+                    ? null
+                    : NetworkImage(profile.avatarUrl),
+                child: profile.avatarUrl.isEmpty
+                    ? const Icon(Icons.sports_esports_rounded)
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      profile.displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      '${profile.library.length} games · $totalHours hours tracked',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.62),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final genre in profile.favoriteGenres.take(6))
+                _TextChip(label: genre),
+            ],
+          ),
+          if (mostPlayed.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              height: 86,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemBuilder: (context, index) {
+                  final item = mostPlayed[index];
+                  final hours = ((item.playtimeMinutes ?? 0) / 60).round();
+                  return Container(
+                    width: 190,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 58,
+                          height: 58,
+                          child: _CoverImage(item: item, borderRadius: 10),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                item.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '$hours h',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.62),
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                separatorBuilder: (context, index) => const SizedBox(width: 8),
+                itemCount: min(5, mostPlayed.length),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _RecommendationSearchPanel extends StatefulWidget {
   final RecommendationQuery query;
   final bool isRefreshing;
   final List<String> availableTags;
+  final MediaService mediaService;
   final ValueChanged<RecommendationQuery> onQueryChanged;
+  final VoidCallback onCancelSearch;
 
   const _RecommendationSearchPanel({
     required this.query,
     required this.isRefreshing,
     required this.availableTags,
+    required this.mediaService,
     required this.onQueryChanged,
+    required this.onCancelSearch,
   });
 
   @override
@@ -845,7 +2485,8 @@ class _RecommendationSearchPanelState
   @override
   void didUpdateWidget(covariant _RecommendationSearchPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.query.request != _searchController.text) {
+    if (oldWidget.query.request != widget.query.request &&
+        widget.query.request != _searchController.text) {
       _searchController.text = widget.query.request;
     }
   }
@@ -884,7 +2525,7 @@ class _RecommendationSearchPanelState
                   textInputAction: TextInputAction.search,
                   onSubmitted: (_) => _submitRequest(),
                   decoration: InputDecoration(
-                    hintText: 'Search a vibe, tag, format, or request',
+                    hintText: widget.mediaService.searchPlaceholder,
                     prefixIcon: const Icon(Icons.manage_search_rounded),
                     filled: true,
                     fillColor: Colors.black.withValues(alpha: 0.22),
@@ -901,49 +2542,45 @@ class _RecommendationSearchPanelState
               ),
               const SizedBox(width: 8),
               IconButton.filledTonal(
-                tooltip: 'Search recommendations',
-                onPressed: widget.isRefreshing ? null : _submitRequest,
+                tooltip: widget.isRefreshing
+                    ? 'Cancel recommendation search'
+                    : 'Search recommendations',
+                onPressed: widget.isRefreshing
+                    ? widget.onCancelSearch
+                    : _submitRequest,
                 icon: widget.isRefreshing
-                    ? const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
+                    ? const Icon(Icons.close_rounded)
                     : const Icon(Icons.arrow_forward_rounded),
               ),
             ],
           ),
           const SizedBox(height: 12),
+          if (widget.mediaService.displayName != 'AniList') ...[
+            _FilterSection(
+              label: 'Type',
+              children: [
+                for (final mediaType in widget.mediaService.supportedMediaTypes)
+                  _FilterChipButton(
+                    key: ValueKey('filter-type-${mediaType.toLowerCase()}'),
+                    label: _mediaTypeLabel(mediaType),
+                    selected: widget.query.effectiveMediaTypes().contains(
+                      mediaType,
+                    ),
+                    onSelected: () => _toggleMediaType(mediaType),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+          ],
           _FilterSection(
-            label: 'Type',
-            children: [
-              _FilterChipButton(
-                key: const ValueKey('filter-type-anime'),
-                label: 'Anime',
-                selected: widget.query.mediaTypes.contains('ANIME'),
-                onSelected: () => _toggleMediaType('ANIME'),
-              ),
-              _FilterChipButton(
-                key: const ValueKey('filter-type-manga'),
-                label: 'Manga',
-                selected: widget.query.mediaTypes.contains('MANGA'),
-                onSelected: () => _toggleMediaType('MANGA'),
-              ),
-              _FilterChipButton(
-                key: const ValueKey('filter-adult'),
-                label: 'Adult',
-                selected: widget.query.includeAdult || widget.query.infersAdult,
-                onSelected: _toggleAdult,
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _FilterSection(
-            label: 'Format',
-            children: RecommendationQuery.allFormats.map((format) {
+            label: widget.mediaService.displayName == 'Steam'
+                ? 'Modes'
+                : 'Format',
+            children: widget.mediaService.supportedFormats.map((format) {
               return _FilterChipButton(
                 key: ValueKey('filter-format-${format.toLowerCase()}'),
                 label: _formatLabel(format),
-                selected: widget.query.formats.contains(format),
+                selected: widget.query.effectiveFormats().contains(format),
                 onSelected: () => _toggleFormat(format),
               );
             }).toList(),
@@ -979,17 +2616,26 @@ class _RecommendationSearchPanelState
 
   String _formatLabel(String format) {
     return switch (format) {
-      'TV' => 'TV',
-      'TV_SHORT' => 'TV Short',
+      'SERIES' => 'Series',
       'MOVIE' => 'Movie',
-      'OVA' => 'OVA',
-      'ONA' => 'ONA',
-      'MUSIC' => 'Music',
       'MANGA' => 'Manga',
-      'NOVEL' => 'Novel',
-      'SPECIAL' => 'Special',
-      'ONE_SHOT' => 'One-shot',
+      'BOOK' => 'Book',
+      'SINGLE_PLAYER' => 'Single-player',
+      'MULTIPLAYER' => 'Multiplayer',
+      'CO_OP' => 'Co-op',
+      'ONLINE_CO_OP' => 'Online co-op',
+      'CONTROLLER' => 'Controller',
+      'STEAM_DECK' => 'Steam Deck',
       _ => format[0] + format.substring(1).toLowerCase(),
+    };
+  }
+
+  String _mediaTypeLabel(String mediaType) {
+    return switch (mediaType) {
+      'ANIME' => 'Anime',
+      'MANGA' => 'Manga',
+      'GAME' => 'Games',
+      _ => mediaType,
     };
   }
 
@@ -1035,14 +2681,28 @@ class _RecommendationSearchPanelState
   }
 
   void _toggleFormat(String format) {
-    final formats = {...widget.query.formats};
-    formats.contains(format) ? formats.remove(format) : formats.add(format);
-    widget.onQueryChanged(widget.query.copyWith(formats: formats));
-  }
-
-  void _toggleAdult() {
+    final formats = {
+      for (final selected in widget.query.formats)
+        RecommendationQuery.canonicalFormat(selected),
+    };
+    if (widget.mediaService.displayName == 'AniList') {
+      if (formats.contains(format)) {
+        formats.remove(format);
+      } else {
+        formats
+          ..clear()
+          ..add(format);
+      }
+    } else {
+      formats.contains(format) ? formats.remove(format) : formats.add(format);
+    }
     widget.onQueryChanged(
-      widget.query.copyWith(includeAdult: !widget.query.includeAdult),
+      widget.query.copyWith(
+        formats: formats,
+        mediaTypes: widget.mediaService.displayName == 'AniList'
+            ? RecommendationQuery.aniListMediaTypesForFormats(formats)
+            : widget.query.mediaTypes,
+      ),
     );
   }
 }
@@ -1431,7 +3091,10 @@ class _TopRecommendationDetails extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          recommendation.reason,
+          _recommendationSummary(
+            recommendation,
+            preferAiReason: recommendation.isAiPick,
+          ),
           maxLines: compact ? 3 : 4,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodyMedium?.copyWith(
@@ -1499,7 +3162,10 @@ class _RecommendationTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    recommendation.reason,
+                    _recommendationSummary(
+                      recommendation,
+                      preferAiReason: recommendation.isAiPick,
+                    ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
@@ -1519,6 +3185,26 @@ class _RecommendationTile extends StatelessWidget {
   }
 }
 
+String _recommendationSummary(
+  Recommendation recommendation, {
+  required bool preferAiReason,
+}) {
+  final reason = recommendation.reason.trim();
+  if (preferAiReason && reason.isNotEmpty) return reason;
+
+  final description = _cleanMediaDescription(recommendation.item.description);
+  if (description.isNotEmpty) return description;
+  return reason;
+}
+
+String _cleanMediaDescription(String? description) {
+  if (description == null) return '';
+  return description
+      .replaceAll(RegExp(r'<[^>]*>'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
 class _OpenableRecommendation extends StatelessWidget {
   final MediaItem item;
   final Widget child;
@@ -1528,15 +3214,15 @@ class _OpenableRecommendation extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: 'Open on AniList',
+      message: 'Open on ${item.serviceLabel}',
       child: Semantics(
         button: true,
-        label: 'Open ${item.title} on AniList',
+        label: 'Open ${item.title} on ${item.serviceLabel}',
         child: MouseRegion(
           cursor: SystemMouseCursors.click,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: () => _openMediaOnAniList(context, item),
+            onTap: () => _openMedia(context, item),
             child: child,
           ),
         ),
@@ -1650,80 +3336,110 @@ class _EmptyRecommendations extends StatelessWidget {
 }
 
 class _MobileLiquidRail extends StatelessWidget {
+  final List<MediaService> services;
+  final String activeServiceId;
+  final bool isHomeActive;
+  final VoidCallback onHomeTap;
+  final ValueChanged<MediaService> onServiceTap;
   final VoidCallback onSettingsTap;
+  final VoidCallback onProfileTap;
   final ValueChanged<String> onUnavailableTap;
 
   const _MobileLiquidRail({
+    required this.services,
+    required this.activeServiceId,
+    required this.isHomeActive,
+    required this.onHomeTap,
+    required this.onServiceTap,
     required this.onSettingsTap,
+    required this.onProfileTap,
     required this.onUnavailableTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      key: const ValueKey('mobile-liquid-rail'),
-      width: 50,
+    final primaryPod = _LiquidGlassPod(
+      borderRadius: BorderRadius.circular(26),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 3),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          _LiquidGlassPod(
-            borderRadius: BorderRadius.circular(26),
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 3),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _LiquidRailButton(
-                  icon: Icons.home_rounded,
-                  label: 'Home',
-                  isActive: true,
-                  onTap: () {},
-                ),
-                _LiquidRailButton(
-                  icon: Icons.animation_rounded,
-                  label: 'AniList',
-                  onTap: () => onUnavailableTap('AniList OAuth'),
-                ),
-                _LiquidRailButton(
-                  icon: Icons.sports_esports_rounded,
-                  label: 'Steam',
-                  onTap: () => onUnavailableTap('Steam'),
-                ),
-                _LiquidRailButton(
-                  icon: Icons.local_movies_rounded,
-                  label: 'Movies/TV',
-                  onTap: () => onUnavailableTap('Movies and TV'),
-                ),
-                _LiquidRailButton(
-                  icon: Icons.add_rounded,
-                  label: 'Add service',
-                  onTap: () => onUnavailableTap('Add service'),
-                ),
-              ],
-            ),
+          _LiquidRailButton(
+            icon: Icons.home_rounded,
+            label: 'Home',
+            isActive: isHomeActive,
+            onTap: onHomeTap,
           ),
-          const Spacer(),
-          _LiquidGlassPod(
-            borderRadius: BorderRadius.circular(24),
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 3),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _LiquidRailButton(
-                  icon: Icons.settings_rounded,
-                  label: 'Settings',
-                  onTap: onSettingsTap,
-                ),
-                _LiquidRailButton(
-                  icon: Icons.person_rounded,
-                  label: 'Profile',
-                  onTap: () => onUnavailableTap('Profile'),
-                ),
-              ],
+          for (final service in services)
+            _LiquidRailButton(
+              icon: _serviceIcon(service),
+              label: service.displayName,
+              isActive: !isHomeActive && activeServiceId == service.id,
+              onTap: () => onServiceTap(service),
             ),
+          _LiquidRailButton(
+            icon: Icons.local_movies_rounded,
+            label: 'Movies/TV',
+            onTap: () => onUnavailableTap('Movies and TV'),
+          ),
+          _LiquidRailButton(
+            icon: Icons.add_rounded,
+            label: 'Add service',
+            onTap: () => onUnavailableTap('Add service'),
           ),
         ],
       ),
     );
+    final secondaryPod = _LiquidGlassPod(
+      borderRadius: BorderRadius.circular(24),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 3),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _LiquidRailButton(
+            icon: Icons.settings_rounded,
+            label: 'Settings',
+            onTap: onSettingsTap,
+          ),
+          _LiquidRailButton(
+            icon: Icons.person_rounded,
+            label: 'Profile',
+            onTap: onProfileTap,
+          ),
+        ],
+      ),
+    );
+
+    return SizedBox(
+      key: const ValueKey('mobile-liquid-rail'),
+      width: 50,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const compactRailHeight = 372.0;
+          if (constraints.maxHeight < compactRailHeight) {
+            return SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  primaryPod,
+                  const SizedBox(height: 10),
+                  secondaryPod,
+                ],
+              ),
+            );
+          }
+
+          return Column(children: [primaryPod, const Spacer(), secondaryPod]);
+        },
+      ),
+    );
   }
+}
+
+IconData _serviceIcon(MediaService service) {
+  return service.displayName == 'Steam'
+      ? Icons.sports_esports_rounded
+      : Icons.animation_rounded;
 }
 
 class _LiquidGlassPod extends StatelessWidget {
@@ -1778,18 +3494,6 @@ class _LiquidGlassPod extends StatelessWidget {
                       ],
                       stops: const [0, 0.42, 1],
                     ),
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 2,
-                left: 8,
-                right: 8,
-                height: 1.2,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.34),
-                    borderRadius: BorderRadius.circular(999),
                   ),
                 ),
               ),
@@ -1855,35 +3559,43 @@ class _LiquidRailButton extends StatelessWidget {
 
 class _ServiceDock extends StatelessWidget {
   final bool isDesktop;
+  final List<MediaService> services;
+  final String activeServiceId;
+  final bool isHomeActive;
+  final VoidCallback onHomeTap;
+  final ValueChanged<MediaService> onServiceTap;
   final VoidCallback onSettingsTap;
+  final VoidCallback onProfileTap;
   final ValueChanged<String> onUnavailableTap;
 
   const _ServiceDock({
     required this.isDesktop,
+    required this.services,
+    required this.activeServiceId,
+    required this.isHomeActive,
+    required this.onHomeTap,
+    required this.onServiceTap,
     required this.onSettingsTap,
+    required this.onProfileTap,
     required this.onUnavailableTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final children = [
+    final primaryChildren = [
       _DockButton(
         icon: Icons.home_rounded,
         label: 'Home',
-        isActive: true,
-        onTap: () {},
+        isActive: isHomeActive,
+        onTap: onHomeTap,
       ),
-      _DockButton(
-        icon: Icons.animation_rounded,
-        label: 'AniList',
-        isActive: true,
-        onTap: () => onUnavailableTap('AniList OAuth'),
-      ),
-      _DockButton(
-        icon: Icons.sports_esports_rounded,
-        label: 'Steam',
-        onTap: () => onUnavailableTap('Steam'),
-      ),
+      for (final service in services)
+        _DockButton(
+          icon: _serviceIcon(service),
+          label: service.displayName,
+          isActive: !isHomeActive && activeServiceId == service.id,
+          onTap: () => onServiceTap(service),
+        ),
       _DockButton(
         icon: Icons.local_movies_rounded,
         label: 'Movies/TV',
@@ -1894,6 +3606,8 @@ class _ServiceDock extends StatelessWidget {
         label: 'Add service',
         onTap: () => onUnavailableTap('Add service'),
       ),
+    ];
+    final secondaryChildren = [
       if (!isDesktop) const Spacer(),
       _DockButton(
         icon: Icons.settings_rounded,
@@ -1903,9 +3617,10 @@ class _ServiceDock extends StatelessWidget {
       _DockButton(
         icon: Icons.person_rounded,
         label: 'Profile',
-        onTap: () => onUnavailableTap('Profile'),
+        onTap: onProfileTap,
       ),
     ];
+    final children = [...primaryChildren, ...secondaryChildren];
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(28),
@@ -1927,9 +3642,9 @@ class _ServiceDock extends StatelessWidget {
               ? Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    ...children.take(5),
+                    ...primaryChildren,
                     const Spacer(),
-                    ...children.skip(5),
+                    ...secondaryChildren,
                   ],
                 )
               : Column(children: children),

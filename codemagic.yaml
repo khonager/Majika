@@ -1,0 +1,123 @@
+workflows:
+  ios-testflight:
+    name: iOS TestFlight Release
+    max_build_duration: 120
+    instance_type: mac_mini_m1
+
+    environment:
+      groups:
+        - app_store_credentials
+        - firebase_credentials
+
+      vars:
+        BUNDLE_ID: "de.khonager.majika"
+
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+
+    scripts:
+      - name: Restore Firebase iOS config
+        script: |
+          if [ -n "$GOOGLE_SERVICE_INFO_PLIST_BASE64" ]; then
+            python3 -c 'import base64, os, pathlib; output = pathlib.Path("ios/Runner/GoogleService-Info.plist"); output.parent.mkdir(parents=True, exist_ok=True); output.write_bytes(base64.b64decode(os.environ["GOOGLE_SERVICE_INFO_PLIST_BASE64"]))'
+          fi
+
+      - name: Get Flutter packages
+        script: |
+          flutter pub get
+
+      - name: Install pods
+        script: |
+          if [ -f ios/Podfile ]; then
+            (cd ios && pod install)
+          else
+            echo "No ios/Podfile found; Flutter build will use generated/default iOS setup."
+          fi
+
+      - name: Set up code signing
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
+          xcode-project use-profiles --project ios/Runner.xcodeproj
+
+      - name: Flutter build ipa
+        script: |
+          flutter build ipa --release \
+            --no-tree-shake-icons \
+            --build-name=$(grep '^version:' pubspec.yaml | sed 's/version: //; s/+.*//') \
+            --build-number=$(grep '^version:' pubspec.yaml | sed 's/.*+//') \
+            --export-options-plist=/Users/builder/export_options.plist
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - flutter_drive.log
+
+    publishing:
+      email:
+        recipients:
+          - support@khonager.de
+        notify:
+          success: true
+          failure: true
+
+      app_store_connect:
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+        submit_to_testflight: false
+        submit_to_app_store: false
+
+  ios-development:
+    name: iOS Development Build
+    max_build_duration: 120
+    instance_type: mac_mini_m1
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: "develop"
+          include: true
+
+    environment:
+      groups:
+        - firebase_credentials
+
+      vars:
+        BUNDLE_ID: "de.khonager.majika"
+
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+
+    scripts:
+      - name: Restore Firebase iOS config
+        script: |
+          if [ -n "$GOOGLE_SERVICE_INFO_PLIST_BASE64" ]; then
+            python3 -c 'import base64, os, pathlib; output = pathlib.Path("ios/Runner/GoogleService-Info.plist"); output.parent.mkdir(parents=True, exist_ok=True); output.write_bytes(base64.b64decode(os.environ["GOOGLE_SERVICE_INFO_PLIST_BASE64"]))'
+          fi
+
+      - name: Get Flutter packages
+        script: |
+          flutter pub get
+
+      - name: Install pods
+        script: |
+          if [ -f ios/Podfile ]; then
+            (cd ios && pod install)
+          else
+            echo "No ios/Podfile found; Flutter build will use generated/default iOS setup."
+          fi
+
+      - name: Build iOS without signing
+        script: |
+          flutter build ios --release --no-codesign
+
+    artifacts:
+      - build/ios/iphoneos/*.app
+      - /tmp/xcodebuild_logs/*.log
