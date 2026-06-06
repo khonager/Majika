@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
+import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/firebase/firebase_bootstrap.dart';
 import 'package:majika/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -37,6 +38,7 @@ class AppUserProfile {
   final String displayName;
   final String? steamProfile;
   final String? huggingFaceToken;
+  final Map<String, String> cloudApiKeys;
   final DateTime? updatedAt;
 
   const AppUserProfile({
@@ -45,6 +47,7 @@ class AppUserProfile {
     required this.displayName,
     this.steamProfile,
     this.huggingFaceToken,
+    this.cloudApiKeys = const {},
     this.updatedAt,
   });
 
@@ -66,6 +69,7 @@ class AppUserProfile {
       huggingFaceToken: json?['tokens'] is Map
           ? (json!['tokens'] as Map)['huggingFace']?.toString()
           : null,
+      cloudApiKeys: cloudApiKeysFromJson(json?['cloudApiKeysJson']?.toString()),
       updatedAt: updatedAt is Timestamp
           ? updatedAt.toDate()
           : updatedAt is DateTime
@@ -183,6 +187,21 @@ class FirebaseProfileService {
 
     await _profileDoc(user.uid).set({
       'tokens': {'huggingFace': trimmed},
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    return true;
+  }
+
+  Future<bool> saveCloudApiKeysIfSignedIn(Map<String, String> keys) async {
+    if (_useRest) {
+      return _restClient.saveCloudApiKeysIfSignedIn(keys);
+    }
+    if (!isConfigured) return false;
+    final user = _auth.currentUser;
+    if (user == null) return false;
+
+    await _profileDoc(user.uid).set({
+      'cloudApiKeysJson': cloudApiKeysToJson(keys),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
     return true;
@@ -312,6 +331,27 @@ class _FirebaseRestProfileClient {
           'fields': {'huggingFace': _firestoreString(token)},
         },
       },
+      'updatedAt': {'timestampValue': now.toIso8601String()},
+    };
+
+    final response = await http.patch(
+      _firestoreDocumentUri(session.uid),
+      headers: {
+        'Authorization': 'Bearer ${await currentIdToken()}',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'fields': fields}),
+    );
+    _throwForFirebaseError(response);
+    return true;
+  }
+
+  Future<bool> saveCloudApiKeysIfSignedIn(Map<String, String> keys) async {
+    final session = await _requireSessionOrNull();
+    if (session == null) return false;
+    final now = DateTime.now().toUtc();
+    final fields = {
+      'cloudApiKeysJson': _firestoreString(cloudApiKeysToJson(keys)),
       'updatedAt': {'timestampValue': now.toIso8601String()},
     };
 

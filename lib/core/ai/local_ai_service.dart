@@ -466,11 +466,16 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     }
 
     if (settings.usesExternalServer || settings.usesExternalCloud) {
-      return _generateExternalText(
-        prompt,
-        maxTokens: maxTokens,
-        settings: settings,
-      );
+      try {
+        return await _generateExternalText(
+          prompt,
+          maxTokens: maxTokens,
+          settings: settings,
+        );
+      } catch (error) {
+        log?.addLine('AI request failed: $error');
+        rethrow;
+      }
     }
 
     if (!isConfigured) {
@@ -487,11 +492,13 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       );
       log?.addSection('Response', response);
       return response;
-    } catch (_) {
+    } catch (error) {
+      log?.addLine('AI request failed: $error');
       if (preferredBackend == null ||
           preferredBackend == PreferredBackend.cpu) {
         rethrow;
       }
+      log?.addLine('Retrying on-device AI with CPU backend.');
       final response = await _generateOnDeviceText(
         prompt,
         contextWindowTokens: settings.contextWindowTokens,

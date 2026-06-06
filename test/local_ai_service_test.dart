@@ -928,7 +928,7 @@ void main() {
         cloudProvider: 'Google Gemini',
         cloudEndpoint:
             'https://generativelanguage.googleapis.com/v1beta/openai',
-        cloudModel: 'gemini-3.1-flash-lite',
+        cloudModel: 'gemini-2.5-flash-lite',
         cloudApiKey: 'gemini_test_key',
         contextItems: 24,
       ),
@@ -966,7 +966,7 @@ void main() {
     expect(requestBody, isA<Map<String, dynamic>>());
     expect(
       (requestBody as Map<String, dynamic>)['model'],
-      'gemini-3.1-flash-lite',
+      'gemini-2.5-flash-lite',
     );
     expect(interpreted.aiSelectedTags, contains('Mystery'));
     expect(interpreted.formats, contains('SERIES'));
@@ -1025,6 +1025,44 @@ void main() {
     expect(log.value, contains('mystery tv'));
     expect(log.value, contains('Response'));
     expect(log.value, contains('"Mystery"'));
+  });
+
+  test('local AI service writes cloud failures to console log', () async {
+    final log = AiConsoleLog();
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        mode: localAiModeExternalCloud,
+        provider: externalCloudAiProvider,
+        endpoint: defaultLocalAiEndpoint,
+        serverModel: defaultLocalAiModel,
+        cloudProvider: 'Google Gemini',
+        cloudEndpoint: defaultCloudAiEndpoint,
+        cloudModel: defaultCloudAiModel,
+        cloudApiKey: 'gemini_test_key',
+        contextItems: 24,
+      ),
+      httpPost: (url, {headers, body}) async {
+        return http.Response(
+          '{"error":{"message":"models/gemini-3.1-flash-lite is not found"}}',
+          404,
+        );
+      },
+    );
+
+    final interpreted = await runZoned(
+      () => service.interpretRecommendationRequest(
+        const RecommendationQuery(request: 'mystery tv'),
+        availableTags: const ['Mystery', 'Romance'],
+      ),
+      zoneValues: {localAiConsoleLogZoneKey: log},
+    );
+
+    expect(interpreted.aiSelectedTags, contains('Mystery'));
+    expect(log.value, contains('AI request failed'));
+    expect(log.value, contains('HTTP 404'));
+    expect(log.value, contains('gemini-3.1-flash-lite'));
   });
 
   test('local AI service respects the configured context budget', () async {
@@ -1124,7 +1162,7 @@ void main() {
     expect(
       resolveAiContextWindowTokens(
         mode: localAiModeExternalCloud,
-        modelName: 'gemini-3.1-flash-lite',
+        modelName: 'gemini-2.5-flash-lite',
         cloudProvider: 'Google Gemini',
       ),
       1048576,
@@ -1543,7 +1581,7 @@ void main() {
         endpoint: defaultLocalAiEndpoint,
         serverModel: defaultLocalAiModel,
         cloudProvider: 'Google Gemini',
-        cloudModel: 'gemini-3.1-flash-lite',
+        cloudModel: 'gemini-2.5-flash-lite',
         contextItems: 24,
       ),
       textGenerator: (prompt, maxTokens) async {
@@ -1626,7 +1664,7 @@ void main() {
           endpoint: defaultLocalAiEndpoint,
           serverModel: defaultLocalAiModel,
           cloudProvider: 'Google Gemini',
-          cloudModel: 'gemini-3.1-flash-lite',
+          cloudModel: 'gemini-2.5-flash-lite',
           contextItems: 24,
         ),
         textGenerator: (prompt, maxTokens) async {
@@ -1743,6 +1781,53 @@ void main() {
       );
       expect(settings.cloudModel, 'meta-llama/llama-3.2-3b-instruct:free');
       expect(settings.cloudApiKey, 'or_test_key');
+    },
+  );
+
+  test(
+    'local AI runtime settings loads provider-specific cloud API key',
+    () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        LocalAiSettingsKeys.localAiMode,
+        localAiModeExternalCloud,
+      );
+      await prefs.setString(LocalAiSettingsKeys.cloudAiProvider, 'Groq');
+      await prefs.setString(
+        LocalAiSettingsKeys.cloudApiKeys,
+        cloudApiKeysToJson({
+          cloudApiKeySlot('Google Gemini'): 'gemini_key',
+          cloudApiKeySlot('Groq'): 'groq_key',
+        }),
+      );
+      await prefs.setString(LocalAiSettingsKeys.cloudApiKey, 'legacy_key');
+
+      final settings = await LocalAiRuntimeSettings.load();
+
+      expect(settings.cloudApiKey, 'groq_key');
+    },
+  );
+
+  test(
+    'local AI runtime settings migrates legacy Gemini default model',
+    () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        LocalAiSettingsKeys.localAiMode,
+        localAiModeExternalCloud,
+      );
+      await prefs.setString(
+        LocalAiSettingsKeys.cloudAiProvider,
+        defaultCloudAiProvider,
+      );
+      await prefs.setString(
+        LocalAiSettingsKeys.cloudModel,
+        legacyGeminiCloudAiModel,
+      );
+
+      final settings = await LocalAiRuntimeSettings.load();
+
+      expect(settings.cloudModel, defaultCloudAiModel);
     },
   );
 }

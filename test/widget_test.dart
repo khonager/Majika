@@ -1200,7 +1200,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Cloud API key'), findsOneWidget);
-    expect(find.text('Google Gemini · gemini-3.1-flash-lite'), findsOneWidget);
+    expect(find.text('Google Gemini · gemini-2.5-flash-lite'), findsOneWidget);
     expect(find.text('Cloud endpoint'), findsOneWidget);
     expect(find.text('Cloud model'), findsOneWidget);
     expect(find.textContaining('Cloud privacy note'), findsOneWidget);
@@ -1213,11 +1213,24 @@ void main() {
 
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString(LocalAiSettingsKeys.cloudApiKey), 'gemini_test_key');
+    expect(
+      cloudApiKeysFromJson(
+        prefs.getString(LocalAiSettingsKeys.cloudApiKeys),
+      )[cloudApiKeySlot('Google Gemini')],
+      'gemini_test_key',
+    );
 
-    await tester.tap(find.text('Google Gemini · gemini-3.1-flash-lite'));
+    await tester.tap(find.text('Google Gemini · gemini-2.5-flash-lite'));
     await tester.pumpAndSettle();
     await tester.tap(
       find.text('OpenRouter · meta-llama/llama-3.2-3b-instruct:free').last,
+    );
+    await tester.pumpAndSettle();
+    expect(prefs.getString(LocalAiSettingsKeys.cloudApiKey), '');
+
+    await tester.enterText(
+      find.byKey(const ValueKey('cloud-ai-api-key')),
+      'openrouter_test_key',
     );
     await tester.pumpAndSettle();
 
@@ -1230,6 +1243,11 @@ void main() {
       prefs.getString(LocalAiSettingsKeys.cloudModel),
       'meta-llama/llama-3.2-3b-instruct:free',
     );
+    final cloudApiKeys = cloudApiKeysFromJson(
+      prefs.getString(LocalAiSettingsKeys.cloudApiKeys),
+    );
+    expect(cloudApiKeys[cloudApiKeySlot('Google Gemini')], 'gemini_test_key');
+    expect(cloudApiKeys[cloudApiKeySlot('OpenRouter')], 'openrouter_test_key');
   });
 
   testWidgets('settings can select manual copy paste AI mode', (

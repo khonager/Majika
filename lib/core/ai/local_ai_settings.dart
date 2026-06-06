@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -18,7 +20,8 @@ const defaultLocalAiModel = 'qwen3:4b-instruct';
 const defaultCloudAiProvider = 'Google Gemini';
 const defaultCloudAiEndpoint =
     'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
-const defaultCloudAiModel = 'gemini-3.1-flash-lite';
+const defaultCloudAiModel = 'gemini-2.5-flash-lite';
+const legacyGeminiCloudAiModel = 'gemini-3.1-flash-lite';
 const defaultOnDeviceContextWindowTokens = 4096;
 const defaultLocalServerContextWindowTokens = 16384;
 const defaultCloudContextWindowTokens = 131072;
@@ -50,6 +53,7 @@ class LocalAiSettingsKeys {
   static const cloudEndpoint = 'settings.cloudEndpoint';
   static const cloudModel = 'settings.cloudModel';
   static const cloudApiKey = 'settings.cloudApiKey';
+  static const cloudApiKeys = 'settings.cloudApiKeys';
   static const steamApiKey = 'settings.steamApiKey';
 }
 
@@ -193,6 +197,24 @@ class LocalAiRuntimeSettings {
             mode == localAiModeExternalCloud ||
             mode == localAiModeManual);
 
+    final cloudProvider =
+        prefs.getString(LocalAiSettingsKeys.cloudAiProvider) ??
+        defaultCloudAiProvider;
+    final cloudModel = _normalizedCloudModel(
+      provider: cloudProvider,
+      model:
+          prefs.getString(LocalAiSettingsKeys.cloudModel) ??
+          defaultCloudAiModel,
+    );
+    final cloudApiKeys = cloudApiKeysFromJson(
+      prefs.getString(LocalAiSettingsKeys.cloudApiKeys),
+    );
+    final cloudApiKey = cloudApiKeyForProvider(
+      cloudApiKeys,
+      cloudProvider,
+      legacyApiKey: prefs.getString(LocalAiSettingsKeys.cloudApiKey),
+    );
+
     return LocalAiRuntimeSettings(
       useLocalAi: mode == localAiModeRulesOnly ? false : useLocalAi,
       useAiForSearch: prefs.getBool(LocalAiSettingsKeys.useAiForSearch) ?? true,
@@ -204,16 +226,12 @@ class LocalAiRuntimeSettings {
       serverModel:
           prefs.getString(LocalAiSettingsKeys.localServerModel) ??
           defaultLocalAiModel,
-      cloudProvider:
-          prefs.getString(LocalAiSettingsKeys.cloudAiProvider) ??
-          defaultCloudAiProvider,
+      cloudProvider: cloudProvider,
       cloudEndpoint:
           prefs.getString(LocalAiSettingsKeys.cloudEndpoint) ??
           defaultCloudAiEndpoint,
-      cloudModel:
-          prefs.getString(LocalAiSettingsKeys.cloudModel) ??
-          defaultCloudAiModel,
-      cloudApiKey: prefs.getString(LocalAiSettingsKeys.cloudApiKey) ?? '',
+      cloudModel: cloudModel,
+      cloudApiKey: cloudApiKey,
       deviceModelName:
           prefs.getString(LocalAiSettingsKeys.selectedModelName) ??
           prefs.getString(LocalAiSettingsKeys.downloadedModelName) ??
@@ -240,6 +258,69 @@ class LocalAiRuntimeSettings {
       _ => localAiModeOnDevice,
     };
   }
+
+  static String _normalizedCloudModel({
+    required String provider,
+    required String model,
+  }) {
+    if (provider == defaultCloudAiProvider &&
+        model.trim() == legacyGeminiCloudAiModel) {
+      return defaultCloudAiModel;
+    }
+    return model;
+  }
+}
+
+String cloudApiKeySlot(String provider) {
+  final normalized = provider.trim().toLowerCase();
+  if (normalized.isEmpty) return 'custom';
+  final buffer = StringBuffer();
+  var lastWasSeparator = true;
+  for (final codeUnit in normalized.codeUnits) {
+    final isDigit = codeUnit >= 48 && codeUnit <= 57;
+    final isLowercaseLetter = codeUnit >= 97 && codeUnit <= 122;
+    if (isDigit || isLowercaseLetter) {
+      buffer.writeCharCode(codeUnit);
+      lastWasSeparator = false;
+    } else if (!lastWasSeparator) {
+      buffer.write('_');
+      lastWasSeparator = true;
+    }
+  }
+  final value = buffer.toString();
+  return value.endsWith('_') ? value.substring(0, value.length - 1) : value;
+}
+
+Map<String, String> cloudApiKeysFromJson(String? raw) {
+  if (raw == null || raw.trim().isEmpty) return {};
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) return {};
+    return {
+      for (final entry in decoded.entries)
+        if (entry.value != null && entry.value.toString().trim().isNotEmpty)
+          entry.key.toString(): entry.value.toString().trim(),
+    };
+  } catch (_) {
+    return {};
+  }
+}
+
+String cloudApiKeysToJson(Map<String, String> keys) {
+  return jsonEncode({
+    for (final entry in keys.entries)
+      if (entry.value.trim().isNotEmpty) entry.key: entry.value.trim(),
+  });
+}
+
+String cloudApiKeyForProvider(
+  Map<String, String> keys,
+  String provider, {
+  String? legacyApiKey,
+}) {
+  final providerKey = keys[cloudApiKeySlot(provider)]?.trim();
+  if (providerKey != null && providerKey.isNotEmpty) return providerKey;
+  return legacyApiKey?.trim() ?? '';
 }
 
 int resolveAiContextWindowTokens({

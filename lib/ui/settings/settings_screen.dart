@@ -263,7 +263,7 @@ const _externalCloudAiPresets = [
     provider: 'Google Gemini',
     endpoint:
         'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-    model: 'gemini-3.1-flash-lite',
+    model: defaultCloudAiModel,
     tier: _AiModelTier.recommended,
     freeLabel: 'Free Gemini API tier',
     keyUrl: 'https://aistudio.google.com/app/apikey',
@@ -289,6 +289,16 @@ const _externalCloudAiPresets = [
     keyUrl: 'https://openrouter.ai/settings/keys',
     description:
         'Aggregator option for users who want a rotating catalog of free models. Use model IDs ending in :free to avoid paid routing.',
+  ),
+  _CloudAiProviderPreset(
+    provider: 'Custom OpenAI-compatible',
+    endpoint: 'https://api.example.com/v1',
+    model: 'model-id',
+    tier: _AiModelTier.low,
+    freeLabel: 'Custom provider',
+    keyUrl: '',
+    description:
+        'Bring any OpenAI-compatible chat completions endpoint. Majika saves this key separately from the built-in providers.',
   ),
 ];
 
@@ -337,6 +347,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _contextWindowController = TextEditingController();
   final _huggingFaceTokenController = TextEditingController();
   Timer? _huggingFaceTokenSyncTimer;
+  Timer? _cloudApiKeySyncTimer;
+  Map<String, String> _cloudApiKeys = const {};
 
   bool get _hasDownloadedModel =>
       _downloadedModelId != null || _downloadedModelName != null;
@@ -422,6 +434,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return _externalCloudAiPresets.first;
   }
 
+  String get _cloudApiKeyStorageSlot => cloudApiKeySlot(_localAiProvider);
+
   String get _ollamaServeCommand => 'ollama run $_effectiveServerModelName';
 
   String get _ollamaPullCommand => 'ollama pull $_effectiveServerModelName';
@@ -466,6 +480,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
+    final savedCloudApiKeys = cloudApiKeysFromJson(
+      prefs.getString(LocalAiSettingsKeys.cloudApiKeys),
+    );
 
     final selectedModelId = prefs.getString(
       LocalAiSettingsKeys.selectedModelId,
@@ -488,6 +505,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         savedMode == localAiModeOnDevice && !_supportsOnDeviceAi
         ? localAiModeExternalServer
         : savedMode;
+
+    final cloudProvider = normalizedMode == localAiModeExternalCloud
+        ? (prefs.getString(LocalAiSettingsKeys.cloudAiProvider) ??
+              defaultCloudAiProvider)
+        : (legacyProvider ?? selectedModel?.providerLabel ?? _localAiProvider);
 
     setState(() {
       _immersiveReader =
@@ -517,12 +539,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (_localAiMode == localAiModeRulesOnly) {
         _useLocalAi = false;
       }
-      _localAiProvider = normalizedMode == localAiModeExternalCloud
-          ? (prefs.getString(LocalAiSettingsKeys.cloudAiProvider) ??
-                defaultCloudAiProvider)
-          : (legacyProvider ??
-                selectedModel?.providerLabel ??
-                _localAiProvider);
+      _localAiProvider = cloudProvider;
       _selectedModel = selectedModel ?? _selectedModel;
       _downloadedModelId = prefs.getString(
         LocalAiSettingsKeys.downloadedModelId,
@@ -547,12 +564,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _cloudModelController.text =
           prefs.getString(LocalAiSettingsKeys.cloudModel) ??
           _cloudModelController.text;
-      _cloudApiKeyController.text =
-          prefs.getString(LocalAiSettingsKeys.cloudApiKey) ?? '';
+      _cloudApiKeys = savedCloudApiKeys;
+      _cloudApiKeyController.text = cloudApiKeyForProvider(
+        savedCloudApiKeys,
+        cloudProvider,
+        legacyApiKey: prefs.getString(LocalAiSettingsKeys.cloudApiKey),
+      );
       _huggingFaceTokenController.text =
           prefs.getString(LocalAiSettingsKeys.huggingFaceToken) ?? '';
     });
     _loadProfileHuggingFaceTokenIfNeeded();
+    _loadProfileCloudApiKeysIfNeeded();
     unawaited(_refreshServerModels());
   }
 
@@ -702,12 +724,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _useCloudProvider(_CloudAiProviderPreset preset) async {
+    final savedKey = cloudApiKeyForProvider(_cloudApiKeys, preset.provider);
     setState(() {
       _localAiMode = localAiModeExternalCloud;
       _useLocalAi = true;
       _localAiProvider = preset.provider;
       _cloudEndpointController.text = preset.endpoint;
       _cloudModelController.text = preset.model;
+      _cloudApiKeyController.text = savedKey;
     });
     await _saveString(
       LocalAiSettingsKeys.localAiMode,
@@ -721,6 +745,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _saveString(LocalAiSettingsKeys.cloudAiProvider, preset.provider);
     await _saveString(LocalAiSettingsKeys.cloudEndpoint, preset.endpoint);
     await _saveString(LocalAiSettingsKeys.cloudModel, preset.model);
+    await _saveString(LocalAiSettingsKeys.cloudApiKey, savedKey);
   }
 
   Future<void> _saveDownloadedModel(_DownloadableModel model) async {
@@ -765,12 +790,70 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _loadProfileCloudApiKeysIfNeeded() async {
+    try {
+      final profile = await const FirebaseProfileService().fetchProfile();
+      final profileKeys = profile?.cloudApiKeys ?? const <String, String>{};
+      if (!mounted || profileKeys.isEmpty) return;
+      final merged = {..._cloudApiKeys, ...profileKeys};
+      final currentKey = cloudApiKeyForProvider(
+        merged,
+        _localAiProvider,
+        legacyApiKey: _cloudApiKeyController.text,
+      );
+      setState(() {
+        _cloudApiKeys = merged;
+        _cloudApiKeyController.text = currentKey;
+      });
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        LocalAiSettingsKeys.cloudApiKeys,
+        cloudApiKeysToJson(merged),
+      );
+      await prefs.setString(LocalAiSettingsKeys.cloudApiKey, currentKey);
+    } catch (_) {
+      // Profile sync is optional; local-only use should not be blocked.
+    }
+  }
+
   Future<void> _saveHuggingFaceToken(String value) async {
     await _saveString(LocalAiSettingsKeys.huggingFaceToken, value.trim());
     _huggingFaceTokenSyncTimer?.cancel();
     _huggingFaceTokenSyncTimer = Timer(const Duration(milliseconds: 700), () {
       unawaited(_syncHuggingFaceTokenToProfile(value));
     });
+  }
+
+  Future<void> _saveCloudApiKey(String value) async {
+    final trimmed = value.trim();
+    final slot = _cloudApiKeyStorageSlot;
+    final nextKeys = {..._cloudApiKeys};
+    if (trimmed.isEmpty) {
+      nextKeys.remove(slot);
+    } else {
+      nextKeys[slot] = trimmed;
+    }
+    setState(() => _cloudApiKeys = nextKeys);
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      LocalAiSettingsKeys.cloudApiKeys,
+      cloudApiKeysToJson(nextKeys),
+    );
+    await prefs.setString(LocalAiSettingsKeys.cloudApiKey, trimmed);
+
+    _cloudApiKeySyncTimer?.cancel();
+    _cloudApiKeySyncTimer = Timer(const Duration(milliseconds: 700), () {
+      unawaited(_syncCloudApiKeysToProfile(nextKeys));
+    });
+  }
+
+  Future<void> _syncCloudApiKeysToProfile(Map<String, String> keys) async {
+    try {
+      await const FirebaseProfileService().saveCloudApiKeysIfSignedIn(keys);
+    } catch (_) {
+      // Keep keys local if profile sync is unavailable or the user is signed out.
+    }
   }
 
   Future<void> _syncHuggingFaceTokenToProfile(String value) async {
@@ -939,6 +1022,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     _huggingFaceTokenSyncTimer?.cancel();
+    _cloudApiKeySyncTimer?.cancel();
     _localEndpointController.dispose();
     _localServerModelController.dispose();
     _cloudEndpointController.dispose();
@@ -1406,14 +1490,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     icon: Icons.key_rounded,
                     title: 'Cloud API key',
                     subtitle:
-                        'Each user should paste their own key. Majika saves it locally on this device.',
+                        'Saved separately for $_localAiProvider. Signed-in profiles sync keys across devices; signed-out use stays local.',
                     controller: _cloudApiKeyController,
                     hintText: 'Paste provider API key',
                     obscureText: true,
-                    onChanged: (value) => _saveString(
-                      LocalAiSettingsKeys.cloudApiKey,
-                      value.trim(),
-                    ),
+                    onChanged: (value) => _saveCloudApiKey(value),
                   ),
                 if (_usesExternalCloud)
                   _TextFieldRow(
@@ -1859,12 +1940,14 @@ class _CloudAiProviderCard extends StatelessWidget {
             selectedPreset.description,
             style: const TextStyle(color: Colors.white70, height: 1.35),
           ),
-          const SizedBox(height: 10),
-          TextButton.icon(
-            onPressed: () => _openCloudProviderKeys(selectedPreset),
-            icon: const Icon(Icons.open_in_new_rounded, size: 16),
-            label: const Text('Get API key'),
-          ),
+          if (selectedPreset.keyUrl.trim().isNotEmpty) ...[
+            const SizedBox(height: 10),
+            TextButton.icon(
+              onPressed: () => _openCloudProviderKeys(selectedPreset),
+              icon: const Icon(Icons.open_in_new_rounded, size: 16),
+              label: const Text('Get API key'),
+            ),
+          ],
         ],
       ),
     );
