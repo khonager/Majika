@@ -66,7 +66,7 @@ void main() {
     );
 
     await tester.enterText(find.byType(TextField), 'tester');
-    await tester.tap(find.text('Build game profile'));
+    await tester.tap(find.text('Build profile'));
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -166,7 +166,7 @@ void main() {
     );
 
     await tester.enterText(find.byType(TextField).first, 'tester');
-    await tester.tap(find.text('Build game profile'));
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -279,6 +279,71 @@ void main() {
     expect(find.textContaining('time travel changes'), findsOneWidget);
     expect(find.text('Romance'), findsWidgets);
     expect(find.text('Time Manipulation'), findsWidgets);
+  });
+
+  testWidgets('AI chat button opens recommendation chat', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
+    );
+
+    expect(find.text('AI chat'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Open AI chat'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('recommendation-chat-input')), findsOne);
+    expect(
+      find.textContaining('Ask me about the current recommendations'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('AI chat sends messages and action chips run search', (
+    WidgetTester tester,
+  ) async {
+    final aiService = _ChatActionAiService();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          mediaService: _FakeMediaService(),
+          aiService: aiService,
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Open AI chat'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('recommendation-chat-input')),
+      'Find time travel romance',
+    );
+    await tester.tap(find.byTooltip('Send chat message'));
+    await tester.pump();
+
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+
+    await tester.pumpAndSettle();
+    expect(
+      find.text('I can search for a time travel romance movie.'),
+      findsOne,
+    );
+    expect(find.text('Run time search'), findsOneWidget);
+    expect(
+      aiService.lastRequest?.messages.last.text,
+      'Find time travel romance',
+    );
+
+    await tester.tap(find.text('Run time search'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Time Travel Movie'), findsOneWidget);
+    expect(find.text('Search complete.'), findsOneWidget);
   });
 
   testWidgets('direct AI pick can resolve a title outside fetched candidates', (
@@ -449,6 +514,16 @@ void main() {
     await tester.enterText(find.byKey(const ValueKey('manual-ai-response')), '''
 {"tags":["Romance","Time Manipulation"],"formats":["MOVIE"],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"romance movie"}
 ''');
+    await tester.tap(find.text('Use response'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('Manual AI response'), findsOneWidget);
+    expect(find.textContaining('Suggest up to'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('manual-ai-response')),
+      '{"titles":["Time Travel Movie"]}',
+    );
     await tester.tap(find.text('Use response'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 250));
@@ -1673,6 +1748,31 @@ class _DirectSuggestionAiService extends DeterministicLocalAiService {
       title: 'AI Outside Pick',
       serviceName: 'AniList',
       reason: 'A personal recommendation beyond the fetched tag results.',
+    );
+  }
+}
+
+class _ChatActionAiService extends DeterministicLocalAiService {
+  AiChatRequest? lastRequest;
+
+  @override
+  Future<AiChatResponse> chatAboutRecommendations(AiChatRequest request) async {
+    lastRequest = request;
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    return const AiChatResponse(
+      message: 'I can search for a time travel romance movie.',
+      actions: [
+        AiChatAction(
+          type: AiChatActionType.runSearch,
+          label: 'Run time search',
+          query: RecommendationQuery(
+            request: 'romance movie about time travel',
+            aiSelectedTags: {'Time Manipulation', 'Romance'},
+            formats: {'MOVIE'},
+            mediaTypes: {'ANIME'},
+          ),
+        ),
+      ],
     );
   }
 }

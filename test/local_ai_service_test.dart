@@ -1065,6 +1065,181 @@ void main() {
     expect(log.value, contains('gemini-3.1-flash-lite'));
   });
 
+  test('AI recommendation chat prompt includes current context', () async {
+    late String capturedPrompt;
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        capturedPrompt = prompt;
+        return '{"message":"Hollow Knight fits your mystery taste.","actions":[{"type":"explainRecommendation","label":"Explain top pick","recommendationId":"steam_hollow"}]}';
+      },
+    );
+
+    final response = await service.chatAboutRecommendations(
+      AiChatRequest(
+        surface: AiChatSurface.service,
+        serviceName: 'Steam',
+        profiles: [_profile(serviceName: 'Steam')],
+        query: const RecommendationQuery(request: 'moody metroidvania'),
+        recommendations: [
+          _recommendation(
+            'steam_hollow',
+            'Hollow Knight',
+            tags: const ['Metroidvania', 'Atmospheric'],
+            mediaType: 'GAME',
+            sourceId: 'com.majika.service.steam',
+          ),
+        ],
+        messages: [AiChatMessage(role: AiChatRole.user, text: 'Why this one?')],
+        availableTags: RecommendationQuery.steamBrowsableTags,
+        availableServices: const ['Steam'],
+      ),
+    );
+
+    expect(capturedPrompt, contains('Prompt mode: compact'));
+    expect(capturedPrompt, contains('moody metroidvania'));
+    expect(capturedPrompt, contains('User taste: Mystery'));
+    expect(capturedPrompt, contains('Hollow Knight'));
+    expect(capturedPrompt, contains('Why this one?'));
+    expect(response.message, contains('Hollow Knight'));
+    expect(
+      response.actions.single.type,
+      AiChatActionType.explainRecommendation,
+    );
+    expect(response.actions.single.recommendationId, 'steam_hollow');
+  });
+
+  test(
+    'compact AI chat prompt trims history and recommendation context',
+    () async {
+      late String capturedPrompt;
+      final service = FlutterGemmaLocalAiService(
+        settingsLoader: () async => const LocalAiRuntimeSettings(
+          useLocalAi: true,
+          useAiForSearch: true,
+          mode: localAiModeExternalServer,
+          provider: externalLocalAiProvider,
+          endpoint: defaultLocalAiEndpoint,
+          serverModel: 'tiny',
+          contextItems: 48,
+          contextWindowOverrideTokens: 4096,
+        ),
+        textGenerator: (prompt, maxTokens) async {
+          capturedPrompt = prompt;
+          return '{"message":"Compact answer.","actions":[]}';
+        },
+      );
+
+      await service.chatAboutRecommendations(
+        AiChatRequest(
+          surface: AiChatSurface.home,
+          serviceName: 'Home',
+          profiles: [_profile()],
+          query: const RecommendationQuery(request: 'mystery'),
+          recommendations: [
+            for (var index = 0; index < 6; index++)
+              _recommendation('anilist_$index', 'Chat Title $index'),
+          ],
+          messages: [
+            for (var index = 0; index < 8; index++)
+              AiChatMessage(role: AiChatRole.user, text: 'old message $index'),
+          ],
+        ),
+      );
+
+      expect(capturedPrompt, contains('Token budget: 4K context'));
+      expect(capturedPrompt, contains('Prompt mode: compact'));
+      expect(capturedPrompt, contains('Chat Title 2'));
+      expect(capturedPrompt, isNot(contains('Chat Title 3')));
+      expect(capturedPrompt, isNot(contains('old message 3')));
+      expect(capturedPrompt, contains('old message 4'));
+    },
+  );
+
+  test('AI recommendation chat parses query actions', () async {
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        return '{"message":"Let us search for co-op games.","actions":[{"type":"runSearch","label":"Run co-op search","query":{"request":"fun local co-op","tags":["Co-op"],"formats":["CO_OP"],"mediaTypes":["GAME"],"includeAdult":false}}]}';
+      },
+    );
+
+    final response = await service.chatAboutRecommendations(
+      AiChatRequest(
+        surface: AiChatSurface.service,
+        serviceName: 'Steam',
+        profiles: [_profile(serviceName: 'Steam')],
+        query: const RecommendationQuery(),
+        recommendations: const [],
+        messages: [
+          AiChatMessage(role: AiChatRole.user, text: 'Find couch co-op'),
+        ],
+        availableTags: RecommendationQuery.steamBrowsableTags,
+      ),
+    );
+
+    final action = response.actions.single;
+    expect(action.type, AiChatActionType.runSearch);
+    expect(action.label, 'Run co-op search');
+    expect(action.query?.request, 'fun local co-op');
+    expect(action.query?.aiSelectedTags, contains('Co-op'));
+    expect(action.query?.formats, contains('CO_OP'));
+    expect(action.query?.mediaTypes, contains('GAME'));
+  });
+
+  test('malformed AI chat output falls back to plain response', () async {
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async => 'Plain chat answer.',
+    );
+
+    final response = await service.chatAboutRecommendations(
+      AiChatRequest(
+        surface: AiChatSurface.service,
+        serviceName: 'AniList',
+        profiles: [_profile()],
+        query: const RecommendationQuery(request: 'mystery'),
+        recommendations: const [],
+        messages: [AiChatMessage(role: AiChatRole.user, text: 'What now?')],
+      ),
+    );
+
+    expect(response.message, 'Plain chat answer.');
+    expect(response.actions, isEmpty);
+  });
+
+  test('AI chat actions cannot enable adult content when hidden', () async {
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        mode: localAiModeExternalServer,
+        provider: externalLocalAiProvider,
+        endpoint: defaultLocalAiEndpoint,
+        serverModel: defaultLocalAiModel,
+        contextItems: 24,
+        allowExplicitContent: false,
+      ),
+      textGenerator: (prompt, maxTokens) async {
+        return '{"message":"I will keep explicit content hidden.","actions":[{"type":"runSearch","query":{"request":"hentai romance","tags":["Hentai"],"includeAdult":true}}]}';
+      },
+    );
+
+    final response = await service.chatAboutRecommendations(
+      AiChatRequest(
+        surface: AiChatSurface.service,
+        serviceName: 'AniList',
+        profiles: [_profile()],
+        query: const RecommendationQuery(),
+        recommendations: const [],
+        messages: [AiChatMessage(role: AiChatRole.user, text: 'adult romance')],
+        availableTags: RecommendationQuery.aniListBrowsableTags,
+      ),
+    );
+
+    final query = response.actions.single.query;
+    expect(query?.includeAdult, isFalse);
+    expect(query?.excludeAdult, isTrue);
+    expect(query?.aiSelectedTags, isNot(contains('Hentai')));
+  });
+
   test('local AI service respects the configured context budget', () async {
     late String capturedPrompt;
     final service = FlutterGemmaLocalAiService(

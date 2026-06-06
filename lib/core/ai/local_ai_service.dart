@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
@@ -116,6 +117,76 @@ class AiRecommendationSuggestion {
   });
 }
 
+enum AiChatRole { user, assistant, system }
+
+enum AiChatSurface { home, service }
+
+enum AiChatActionType {
+  applyQuery,
+  runSearch,
+  discoverCandidates,
+  explainRecommendation,
+  backgroundPrompt,
+}
+
+class AiChatMessage {
+  final AiChatRole role;
+  final String text;
+  final DateTime timestamp;
+
+  AiChatMessage({required this.role, required this.text, DateTime? timestamp})
+    : timestamp = timestamp ?? DateTime.now();
+}
+
+class AiChatAction {
+  final AiChatActionType type;
+  final String label;
+  final RecommendationQuery? query;
+  final String? recommendationId;
+  final String? serviceName;
+  final String? prompt;
+
+  const AiChatAction({
+    required this.type,
+    required this.label,
+    this.query,
+    this.recommendationId,
+    this.serviceName,
+    this.prompt,
+  });
+}
+
+class AiChatRequest {
+  final AiChatSurface surface;
+  final String serviceName;
+  final List<TasteProfile> profiles;
+  final RecommendationQuery query;
+  final List<Recommendation> recommendations;
+  final Map<String, List<Recommendation>> recommendationsByService;
+  final List<AiChatMessage> messages;
+  final List<String> availableTags;
+  final List<String> availableServices;
+
+  const AiChatRequest({
+    required this.surface,
+    required this.serviceName,
+    required this.profiles,
+    required this.query,
+    required this.recommendations,
+    this.recommendationsByService = const {},
+    required this.messages,
+    this.availableTags = const [],
+    this.availableServices = const [],
+  });
+}
+
+class AiChatResponse {
+  final String message;
+  final List<AiChatAction> actions;
+
+  const AiChatResponse({required this.message, this.actions = const []});
+}
+
 abstract class LocalAiService {
   bool get isConfigured;
 
@@ -164,6 +235,8 @@ abstract class LocalAiService {
     List<Recommendation> recommendations, {
     required RecommendationQuery query,
   });
+
+  Future<AiChatResponse> chatAboutRecommendations(AiChatRequest request);
 }
 
 class DeterministicLocalAiService implements LocalAiService {
@@ -240,6 +313,31 @@ class DeterministicLocalAiService implements LocalAiService {
     required RecommendationQuery query,
   }) async {
     return recommendations.isEmpty ? null : recommendations.first;
+  }
+
+  @override
+  Future<AiChatResponse> chatAboutRecommendations(AiChatRequest request) async {
+    final latestUserMessage = request.messages.reversed
+        .where((message) => message.role == AiChatRole.user)
+        .map((message) => message.text.trim())
+        .firstWhere((message) => message.isNotEmpty, orElse: () => '');
+    final topPick = request.recommendations.isEmpty
+        ? null
+        : request.recommendations.first;
+    final profileText = request.profiles.isEmpty
+        ? 'your imported taste'
+        : request.profiles
+              .map(
+                (profile) => '${profile.serviceName}: ${profile.primaryTaste}',
+              )
+              .join(' and ');
+    final topText = topPick == null
+        ? 'I do not have recommendations on screen yet.'
+        : 'The current top pick is ${topPick.item.title}, because ${topPick.reason}';
+    final suffix = latestUserMessage.isEmpty
+        ? ''
+        : ' For "$latestUserMessage", try refining the search text or tags if you want the list to move.';
+    return AiChatResponse(message: '$topText I am using $profileText.$suffix');
   }
 }
 
@@ -1279,6 +1377,272 @@ Favorite tags: ${profile.favoriteGenres.take(limits.profileItemLimit).join(', ')
     };
   }
 
+  String _recommendationChatPrompt({
+    required AiChatRequest request,
+    required _AiPromptTier tier,
+    required _PromptLimits limits,
+    required bool allowExplicitContent,
+  }) {
+    final messageLimit = switch (tier) {
+      _AiPromptTier.compact => 4,
+      _AiPromptTier.balanced => 8,
+      _AiPromptTier.rich => 14,
+    };
+    final optionLimit = switch (tier) {
+      _AiPromptTier.compact => 3,
+      _AiPromptTier.balanced => 8,
+      _AiPromptTier.rich => 18,
+    };
+    final history = request.messages
+        .skip(max(0, request.messages.length - messageLimit))
+        .map((message) => {'role': message.role.name, 'text': message.text})
+        .toList();
+    final profileEvidence = request.profiles
+        .take(tier == _AiPromptTier.compact ? 1 : request.profiles.length)
+        .map((profile) => _profilePromptEvidence(profile, tier, limits))
+        .join('\n');
+    final recommendations = request.recommendations
+        .take(optionLimit)
+        .map(
+          (recommendation) => _chatRecommendationEvidence(
+            recommendation,
+            tier: tier,
+            tagLimit: limits.optionTagLimit,
+            signalLimit: limits.signalLimit,
+          ),
+        )
+        .toList();
+    final byService = {
+      for (final entry in request.recommendationsByService.entries)
+        entry.key: entry.value
+            .take(tier == _AiPromptTier.compact ? 3 : optionLimit)
+            .map(
+              (recommendation) => _chatRecommendationEvidence(
+                recommendation,
+                tier: tier,
+                tagLimit: limits.optionTagLimit,
+                signalLimit: limits.signalLimit,
+              ),
+            )
+            .toList(),
+    };
+    final availableTags = request.availableTags.take(limits.tagLimit).toList();
+    final explicitGuidance = allowExplicitContent
+        ? 'Explicit/adult content may be discussed, but only request it when the user asks.'
+        : 'Explicit/adult content is hidden. Do not suggest adult tags, adult searches, or adult candidate discovery actions.';
+
+    return '''
+Prompt mode: ${tier.name}.
+${_promptScopeInstruction(tier)}
+You are Majika's contextual recommendation chat.
+Answer the user's latest message about the current recommendations, taste profile, filters, and available services.
+You may propose safe actions, but actions are suggestions for Majika to validate and execute through its own APIs. Do not claim an action already happened.
+Allowed action types: applyQuery, runSearch, discoverCandidates, explainRecommendation, backgroundPrompt.
+Use applyQuery when the user might want to inspect a refined search before running it.
+Use runSearch only when the user clearly asks to search or change the list now.
+Use discoverCandidates when the current list seems too shallow and the user asks for fresh or outside-the-list ideas.
+Use explainRecommendation with a recommendationId from the supplied recommendations.
+Use backgroundPrompt for longer comparison or summary work that can finish separately.
+$explicitGuidance
+Return JSON only. Use exactly this shape: {"message":"short helpful response","actions":[{"type":"runSearch","label":"Run search","query":{"request":"...","tags":[],"formats":[],"mediaTypes":[],"includeAdult":false}},{"type":"explainRecommendation","label":"Explain top pick","recommendationId":"..."}]}.
+The query object may use these keys: request, tags, formats, mediaTypes, includeAdult. Keep labels short.
+Active surface: ${request.surface.name}
+Active service: ${request.serviceName}
+Available services: ${request.availableServices.join(', ')}
+Current query: ${jsonEncode(request.query.toJson())}
+Available tags: ${jsonEncode(availableTags)}
+$profileEvidence
+Current recommendations: ${jsonEncode(recommendations)}
+Recommendations by service: ${jsonEncode(byService)}
+Recent chat messages: ${jsonEncode(history)}
+''';
+  }
+
+  Map<String, Object?> _chatRecommendationEvidence(
+    Recommendation recommendation, {
+    required _AiPromptTier tier,
+    required int tagLimit,
+    required int signalLimit,
+  }) {
+    final item = recommendation.item;
+    return {
+      'id': item.id,
+      'title': item.title,
+      'service': item.serviceLabel,
+      'score': recommendation.matchScore.round(),
+      'reason': recommendation.reason,
+      'signals': recommendation.signals.take(signalLimit).toList(),
+      'tags': item.tags.take(tagLimit).toList(),
+      'mediaType': item.mediaType,
+      'format': item.format,
+      if (tier != _AiPromptTier.compact) ...{
+        'subtitle': item.subtitle,
+        'description': item.description,
+        'rating': item.rating,
+      },
+      if (tier == _AiPromptTier.rich) ...{
+        'status': item.status,
+        'startYear': item.startYear,
+        'popularity': item.popularity,
+        'playtimeMinutes': item.playtimeMinutes,
+        'recentPlaytimeMinutes': item.recentPlaytimeMinutes,
+        'characters': item.characters,
+        'studios': item.studios,
+      },
+    };
+  }
+
+  AiChatResponse? _chatResponseFromModelJson(
+    String response, {
+    required RecommendationQuery originalQuery,
+    required Iterable<String> availableTags,
+    required bool allowExplicitContent,
+  }) {
+    Map<String, dynamic>? decoded;
+    for (final candidate in _jsonObjects(response)) {
+      if (candidate.containsKey('message') ||
+          candidate.containsKey('actions')) {
+        decoded = candidate;
+      }
+    }
+    if (decoded == null) return null;
+
+    final message = decoded['message']?.toString().trim() ?? '';
+    final rawActions = decoded['actions'];
+    final actions = <AiChatAction>[];
+    if (rawActions is List) {
+      for (final rawAction in rawActions) {
+        if (rawAction is Map) {
+          final parsed = _chatActionFromJson(
+            Map<String, dynamic>.from(rawAction),
+            originalQuery: originalQuery,
+            availableTags: availableTags,
+            allowExplicitContent: allowExplicitContent,
+          );
+          if (parsed != null) actions.add(parsed);
+        }
+      }
+    }
+
+    if (message.isEmpty && actions.isEmpty) return null;
+    return AiChatResponse(
+      message: message.isEmpty ? 'I found a possible next step.' : message,
+      actions: actions,
+    );
+  }
+
+  AiChatAction? _chatActionFromJson(
+    Map<String, dynamic> json, {
+    required RecommendationQuery originalQuery,
+    required Iterable<String> availableTags,
+    required bool allowExplicitContent,
+  }) {
+    final type = switch (json['type']?.toString().trim()) {
+      'applyQuery' => AiChatActionType.applyQuery,
+      'runSearch' => AiChatActionType.runSearch,
+      'discoverCandidates' => AiChatActionType.discoverCandidates,
+      'explainRecommendation' => AiChatActionType.explainRecommendation,
+      'backgroundPrompt' => AiChatActionType.backgroundPrompt,
+      _ => null,
+    };
+    if (type == null) return null;
+    final label = json['label']?.toString().trim();
+    final query = json['query'] is Map
+        ? _chatQueryFromJson(
+            Map<String, dynamic>.from(json['query'] as Map),
+            originalQuery: originalQuery,
+            availableTags: availableTags,
+            allowExplicitContent: allowExplicitContent,
+          )
+        : null;
+    final recommendationId =
+        json['recommendationId']?.toString().trim() ??
+        json['id']?.toString().trim();
+    final prompt = json['prompt']?.toString().trim();
+    final serviceName = json['service']?.toString().trim();
+
+    if ((type == AiChatActionType.applyQuery ||
+            type == AiChatActionType.runSearch ||
+            type == AiChatActionType.discoverCandidates) &&
+        query == null) {
+      return null;
+    }
+    if (type == AiChatActionType.explainRecommendation &&
+        (recommendationId == null || recommendationId.isEmpty)) {
+      return null;
+    }
+    if (type == AiChatActionType.backgroundPrompt &&
+        (prompt == null || prompt.isEmpty)) {
+      return null;
+    }
+
+    return AiChatAction(
+      type: type,
+      label: label == null || label.isEmpty
+          ? _defaultChatActionLabel(type)
+          : label,
+      query: query,
+      recommendationId: recommendationId,
+      serviceName: serviceName == null || serviceName.isEmpty
+          ? null
+          : serviceName,
+      prompt: prompt,
+    );
+  }
+
+  RecommendationQuery _chatQueryFromJson(
+    Map<String, dynamic> json, {
+    required RecommendationQuery originalQuery,
+    required Iterable<String> availableTags,
+    required bool allowExplicitContent,
+  }) {
+    final availableTagSet = _canonicalLookup(availableTags);
+    final tags = _stringList(json['tags'])
+        .map((tag) => availableTagSet[_canonicalKey(tag)])
+        .whereType<String>()
+        .where((tag) => allowExplicitContent || !_adultTagNames.contains(tag))
+        .toSet();
+    final formats = _stringList(json['formats'])
+        .map(RecommendationQuery.canonicalFormat)
+        .where((format) => RecommendationQuery.allFormats.contains(format))
+        .toSet();
+    final mediaTypes = _stringList(json['mediaTypes'])
+        .map((type) => type.toUpperCase())
+        .where((type) => RecommendationQuery.allMediaTypes.contains(type))
+        .toSet();
+    final includeAdult = allowExplicitContent && json['includeAdult'] == true;
+    final requestText = json['request']?.toString().trim();
+    return originalQuery.copyWith(
+      request: requestText == null || requestText.isEmpty
+          ? originalQuery.request
+          : requestText,
+      aiSelectedTags: tags,
+      formats: formats,
+      mediaTypes: mediaTypes,
+      includeAdult: includeAdult,
+      excludeAdult: originalQuery.excludeAdult || !allowExplicitContent,
+    );
+  }
+
+  String _defaultChatActionLabel(AiChatActionType type) {
+    return switch (type) {
+      AiChatActionType.applyQuery => 'Apply search',
+      AiChatActionType.runSearch => 'Run search',
+      AiChatActionType.discoverCandidates => 'Find candidates',
+      AiChatActionType.explainRecommendation => 'Explain pick',
+      AiChatActionType.backgroundPrompt => 'Think more',
+    };
+  }
+
+  static const Set<String> _adultTagNames = {
+    'Ecchi',
+    'Hentai',
+    'Sexual Content',
+    'Nudity',
+    'Mature',
+    'NSFW',
+  };
+
   bool _looksLikeQueryJson(Map<String, dynamic> decoded) {
     return decoded.containsKey('tags') ||
         decoded.containsKey('formats') ||
@@ -2191,6 +2555,45 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     } catch (_) {
       return null;
     }
+  }
+
+  @override
+  Future<AiChatResponse> chatAboutRecommendations(AiChatRequest request) async {
+    final settings = await _runtimeSettings();
+    if (!settings.useLocalAi && textGenerator == null) {
+      return fallback.chatAboutRecommendations(request);
+    }
+
+    final budget = _promptBudget(settings, responseTokens: 768);
+    try {
+      final packed = _packPrompt(
+        budget: budget,
+        initialLimits: _promptLimits(budget.tier),
+        build: (limits) => _recommendationChatPrompt(
+          request: request,
+          tier: budget.tier,
+          limits: limits,
+          allowExplicitContent: settings.allowExplicitContent,
+        ),
+      );
+      final response = await _generateText(
+        packed.prompt,
+        maxTokens: budget.responseTokens,
+        settings: settings,
+      );
+      final parsed = _chatResponseFromModelJson(
+        response,
+        originalQuery: request.query,
+        availableTags: request.availableTags,
+        allowExplicitContent: settings.allowExplicitContent,
+      );
+      if (parsed != null) return parsed;
+      final text = response.trim();
+      if (text.isNotEmpty) return AiChatResponse(message: text);
+    } catch (_) {
+      return fallback.chatAboutRecommendations(request);
+    }
+    return fallback.chatAboutRecommendations(request);
   }
 
   @override

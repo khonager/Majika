@@ -148,6 +148,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int? _activeHomeSearchRunId;
   AppProgressToast? _activeRecommendationProgressToast;
   AppProgressToast? _activeHomeProgressToast;
+  final Map<String, List<AiChatMessage>> _chatMessagesBySurface = {};
 
   @override
   void initState() {
@@ -1110,6 +1111,197 @@ class _HomeScreenState extends State<HomeScreen> {
     ];
   }
 
+  Future<void> _openRecommendationChat() async {
+    final key = _activeSurface == _ActiveSurface.home
+        ? 'home'
+        : 'service:${_mediaService.id}';
+    final messages = _chatMessagesBySurface.putIfAbsent(key, () => []);
+    final isDesktop = MediaQuery.sizeOf(context).width >= 720;
+    final sheet = _RecommendationChatSheet(
+      initialMessages: messages,
+      onSend: (text) => _sendChatMessage(key, text),
+      onAction: (action) => _runChatAction(key, action),
+    );
+
+    if (isDesktop) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) {
+          return Dialog(
+            alignment: Alignment.centerRight,
+            insetPadding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+            backgroundColor: Colors.transparent,
+            child: SizedBox(width: 430, child: sheet),
+          );
+        },
+      );
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.82,
+          minChildSize: 0.42,
+          maxChildSize: 0.96,
+          expand: false,
+          builder: (context, scrollController) {
+            return _RecommendationChatSheet(
+              initialMessages: messages,
+              scrollController: scrollController,
+              onSend: (text) => _sendChatMessage(key, text),
+              onAction: (action) => _runChatAction(key, action),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<AiChatResponse> _sendChatMessage(String key, String text) async {
+    final messages = _chatMessagesBySurface.putIfAbsent(key, () => []);
+    messages.add(AiChatMessage(role: AiChatRole.user, text: text));
+    final aiLog = AiConsoleLog();
+    try {
+      final response = await runZoned(
+        () => _aiService.chatAboutRecommendations(_chatRequestFor(messages)),
+        zoneValues: {
+          localAiConsoleLogZoneKey: aiLog,
+          manualAiRequestHandlerZoneKey: _handleManualAiRequest,
+        },
+      );
+      messages.add(
+        AiChatMessage(role: AiChatRole.assistant, text: response.message),
+      );
+      return response;
+    } catch (error) {
+      final response = AiChatResponse(message: 'I could not answer: $error');
+      messages.add(
+        AiChatMessage(role: AiChatRole.assistant, text: response.message),
+      );
+      return response;
+    }
+  }
+
+  AiChatRequest _chatRequestFor(List<AiChatMessage> messages) {
+    if (_activeSurface == _ActiveSurface.home) {
+      final imported = _importedWorkspaces;
+      return AiChatRequest(
+        surface: AiChatSurface.home,
+        serviceName: 'Home',
+        profiles: [
+          for (final workspace in imported)
+            if (workspace.profile != null) workspace.profile!,
+        ],
+        query: _homeQuery,
+        recommendations: _homeRecommendations,
+        recommendationsByService: _homeRecommendationsByService,
+        messages: List.unmodifiable(messages),
+        availableTags: {
+          for (final workspace in imported) ..._availableTagsFor(workspace),
+        }.toList(),
+        availableServices: _mediaServices
+            .map((service) => service.displayName)
+            .toList(),
+      );
+    }
+
+    final workspace = _activeWorkspace;
+    return AiChatRequest(
+      surface: AiChatSurface.service,
+      serviceName: workspace.service.displayName,
+      profiles: [if (workspace.profile != null) workspace.profile!],
+      query: workspace.query,
+      recommendations: workspace.recommendations,
+      recommendationsByService: {
+        workspace.service.id: workspace.recommendations,
+      },
+      messages: List.unmodifiable(messages),
+      availableTags: _availableTagsFor(workspace),
+      availableServices: [workspace.service.displayName],
+    );
+  }
+
+  Future<String> _runChatAction(String key, AiChatAction action) async {
+    switch (action.type) {
+      case AiChatActionType.applyQuery:
+        final query = action.query;
+        if (query == null) return 'No search change was provided.';
+        setState(() {
+          if (_activeSurface == _ActiveSurface.home) {
+            _homeQuery = query;
+          } else {
+            _activeWorkspace.query = query;
+          }
+        });
+        return 'Search controls updated. Run the search when you are ready.';
+      case AiChatActionType.runSearch:
+      case AiChatActionType.discoverCandidates:
+        final query = action.query;
+        if (query == null) return 'No search query was provided.';
+        if (_activeSurface == _ActiveSurface.home) {
+          await _updateHomeRecommendationQuery(query);
+        } else {
+          await _updateRecommendationQuery(query);
+        }
+        return action.type == AiChatActionType.discoverCandidates
+            ? 'I searched for fresh candidates and refreshed the list.'
+            : 'Search complete.';
+      case AiChatActionType.explainRecommendation:
+        final recommendation = _recommendationById(action.recommendationId);
+        final profile = _profileForRecommendation(recommendation);
+        if (recommendation == null || profile == null) {
+          return 'I could not find that recommendation anymore.';
+        }
+        final explanation = await runZoned(
+          () => _aiService.explainRecommendation(profile, recommendation),
+          zoneValues: {manualAiRequestHandlerZoneKey: _handleManualAiRequest},
+        );
+        _chatMessagesBySurface[key]?.add(
+          AiChatMessage(role: AiChatRole.assistant, text: explanation),
+        );
+        return explanation;
+      case AiChatActionType.backgroundPrompt:
+        final prompt = action.prompt?.trim();
+        if (prompt == null || prompt.isEmpty) {
+          return 'No background prompt was provided.';
+        }
+        final response = await _sendChatMessage(key, prompt);
+        return response.message;
+    }
+  }
+
+  Recommendation? _recommendationById(String? id) {
+    if (id == null || id.isEmpty) return null;
+    for (final recommendation in [
+      ..._homeRecommendations,
+      ..._activeWorkspace.recommendations,
+    ]) {
+      if (recommendation.item.id == id) return recommendation;
+    }
+    return null;
+  }
+
+  TasteProfile? _profileForRecommendation(Recommendation? recommendation) {
+    if (recommendation == null) return null;
+    for (final workspace in _importedWorkspaces) {
+      final profile = workspace.profile;
+      if (profile == null) continue;
+      if (workspace.service.displayName == recommendation.item.serviceLabel ||
+          workspace.service.id == recommendation.item.sourceId ||
+          workspace.recommendations.any(
+            (entry) => entry.item.id == recommendation.item.id,
+          )) {
+        return profile;
+      }
+    }
+    return _activeWorkspace.profile;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1140,6 +1332,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       onQueryChanged: _updateHomeRecommendationQuery,
                       onCancelSearch: _cancelHomeSearch,
                       onConnectService: _selectService,
+                      onChatTap: _openRecommendationChat,
                     )
                   : _ContentShell(
                       isMobileSurface: !isDesktop,
@@ -1159,6 +1352,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       availableTags: _availableTags,
                       onQueryChanged: _updateRecommendationQuery,
                       onCancelSearch: _cancelRecommendationSearch,
+                      onChatTap: _openRecommendationChat,
                     );
 
               if (isDesktop) {
@@ -1296,6 +1490,7 @@ class _HomeContentShell extends StatelessWidget {
   final ValueChanged<RecommendationQuery> onQueryChanged;
   final VoidCallback onCancelSearch;
   final ValueChanged<MediaService> onConnectService;
+  final VoidCallback onChatTap;
 
   const _HomeContentShell({
     required this.isMobileSurface,
@@ -1310,6 +1505,7 @@ class _HomeContentShell extends StatelessWidget {
     required this.onQueryChanged,
     required this.onCancelSearch,
     required this.onConnectService,
+    required this.onChatTap,
   });
 
   @override
@@ -1361,7 +1557,7 @@ class _HomeContentShell extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _HomeHeader(aiService: aiService),
+                _HomeHeader(aiService: aiService, onChatTap: onChatTap),
                 const SizedBox(height: 14),
                 Expanded(
                   child: CustomScrollView(
@@ -1464,8 +1660,9 @@ class _HomeContentShell extends StatelessWidget {
 
 class _HomeHeader extends StatelessWidget {
   final LocalAiService aiService;
+  final VoidCallback onChatTap;
 
-  const _HomeHeader({required this.aiService});
+  const _HomeHeader({required this.aiService, required this.onChatTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1495,9 +1692,10 @@ class _HomeHeader extends StatelessWidget {
             ],
           ),
         ),
-        _StatusPill(
+        _AiChatPill(
           icon: Icons.auto_awesome_rounded,
-          label: aiService.isConfigured ? 'Local AI' : 'Local rules',
+          label: 'AI chat',
+          onTap: onChatTap,
         ),
       ],
     );
@@ -1806,6 +2004,7 @@ class _ContentShell extends StatelessWidget {
   final List<String> availableTags;
   final ValueChanged<RecommendationQuery> onQueryChanged;
   final VoidCallback onCancelSearch;
+  final VoidCallback onChatTap;
 
   const _ContentShell({
     this.isMobileSurface = false,
@@ -1824,6 +2023,7 @@ class _ContentShell extends StatelessWidget {
     required this.availableTags,
     required this.onQueryChanged,
     required this.onCancelSearch,
+    required this.onChatTap,
   });
 
   @override
@@ -1871,6 +2071,7 @@ class _ContentShell extends StatelessWidget {
                   serviceName: mediaService.displayName,
                   onSignOut: onSignOut,
                   onSwitchUser: onSwitchUser,
+                  onChatTap: onChatTap,
                 ),
                 const SizedBox(height: 14),
                 Expanded(
@@ -1975,6 +2176,7 @@ class _ShellHeader extends StatelessWidget {
   final String serviceName;
   final VoidCallback onSignOut;
   final VoidCallback onSwitchUser;
+  final VoidCallback onChatTap;
 
   const _ShellHeader({
     required this.profile,
@@ -1982,6 +2184,7 @@ class _ShellHeader extends StatelessWidget {
     required this.serviceName,
     required this.onSignOut,
     required this.onSwitchUser,
+    required this.onChatTap,
   });
 
   @override
@@ -2016,9 +2219,10 @@ class _ShellHeader extends StatelessWidget {
         final actions = Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _StatusPill(
+            _AiChatPill(
               icon: Icons.auto_awesome_rounded,
-              label: aiService.isConfigured ? 'Local AI' : 'Local rules',
+              label: 'AI chat',
+              onTap: onChatTap,
             ),
             if (profile != null) ...[
               const SizedBox(width: 4),
@@ -3747,6 +3951,301 @@ class _CoverImage extends StatelessWidget {
               errorBuilder: (context, error, stackTrace) => fallback,
             )
           : fallback,
+    );
+  }
+}
+
+class _RecommendationChatSheet extends StatefulWidget {
+  final List<AiChatMessage> initialMessages;
+  final ScrollController? scrollController;
+  final Future<AiChatResponse> Function(String text) onSend;
+  final Future<String> Function(AiChatAction action) onAction;
+
+  const _RecommendationChatSheet({
+    required this.initialMessages,
+    required this.onSend,
+    required this.onAction,
+    this.scrollController,
+  });
+
+  @override
+  State<_RecommendationChatSheet> createState() =>
+      _RecommendationChatSheetState();
+}
+
+class _RecommendationChatSheetState extends State<_RecommendationChatSheet> {
+  late final TextEditingController _controller;
+  late final ScrollController _scrollController;
+  late List<AiChatMessage> _messages;
+  List<AiChatAction> _actions = const [];
+  bool _isWaiting = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+    _scrollController = widget.scrollController ?? ScrollController();
+    _messages = [...widget.initialMessages];
+    if (_messages.isEmpty) {
+      _messages = [
+        AiChatMessage(
+          role: AiChatRole.assistant,
+          text:
+              'Ask me about the current recommendations, or tell me how to refine the list.',
+        ),
+      ];
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    if (widget.scrollController == null) _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty || _isWaiting) return;
+    setState(() {
+      _controller.clear();
+      _error = null;
+      _actions = const [];
+      _isWaiting = true;
+      _messages.add(AiChatMessage(role: AiChatRole.user, text: text));
+    });
+    _scrollSoon();
+    try {
+      final response = await widget.onSend(text);
+      if (!mounted) return;
+      setState(() {
+        _messages.add(
+          AiChatMessage(role: AiChatRole.assistant, text: response.message),
+        );
+        _actions = response.actions;
+        _isWaiting = false;
+      });
+      _scrollSoon();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString();
+        _isWaiting = false;
+      });
+    }
+  }
+
+  Future<void> _runAction(AiChatAction action) async {
+    if (_isWaiting) return;
+    setState(() {
+      _error = null;
+      _isWaiting = true;
+    });
+    try {
+      final message = await widget.onAction(action);
+      if (!mounted) return;
+      setState(() {
+        _messages.add(AiChatMessage(role: AiChatRole.assistant, text: message));
+        _actions = const [];
+        _isWaiting = false;
+      });
+      _scrollSoon();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString();
+        _isWaiting = false;
+      });
+    }
+  }
+
+  void _scrollSoon() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: _GlassCard(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.auto_awesome_rounded,
+                  color: Color(0xFFBDEECD),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'AI chat',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Close AI chat',
+                  onPressed: () => Navigator.maybePop(context),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: ListView.separated(
+                key: const ValueKey('recommendation-chat-messages'),
+                controller: _scrollController,
+                itemBuilder: (context, index) {
+                  final message = _messages[index];
+                  return _ChatBubble(message: message);
+                },
+                separatorBuilder: (context, index) => const SizedBox(height: 8),
+                itemCount: _messages.length,
+              ),
+            ),
+            if (_isWaiting) ...[
+              const SizedBox(height: 10),
+              const LinearProgressIndicator(minHeight: 2),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              Text(_error!, style: const TextStyle(color: Color(0xFFFF9AA8))),
+            ],
+            if (_actions.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final action in _actions)
+                      ActionChip(
+                        avatar: Icon(_chatActionIcon(action.type), size: 16),
+                        label: Text(action.label),
+                        onPressed: _isWaiting ? null : () => _runAction(action),
+                        backgroundColor: Colors.white.withValues(alpha: 0.07),
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.1),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('recommendation-chat-input'),
+                    controller: _controller,
+                    enabled: !_isWaiting,
+                    minLines: 1,
+                    maxLines: 4,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _send(),
+                    decoration: InputDecoration(
+                      hintText: 'Talk about these recommendations',
+                      filled: true,
+                      fillColor: Colors.black.withValues(alpha: 0.22),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  tooltip: 'Send chat message',
+                  onPressed: _isWaiting ? null : _send,
+                  icon: const Icon(Icons.send_rounded),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatBubble extends StatelessWidget {
+  final AiChatMessage message;
+
+  const _ChatBubble({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    final isUser = message.role == AiChatRole.user;
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 340),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: isUser
+              ? const Color(0xFF89D6B3).withValues(alpha: 0.2)
+              : Colors.white.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        ),
+        child: Text(
+          message.text,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.86),
+            height: 1.32,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+IconData _chatActionIcon(AiChatActionType type) {
+  return switch (type) {
+    AiChatActionType.applyQuery => Icons.tune_rounded,
+    AiChatActionType.runSearch => Icons.manage_search_rounded,
+    AiChatActionType.discoverCandidates => Icons.travel_explore_rounded,
+    AiChatActionType.explainRecommendation => Icons.psychology_alt_rounded,
+    AiChatActionType.backgroundPrompt => Icons.hourglass_top_rounded,
+  };
+}
+
+class _AiChatPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _AiChatPill({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Open AI chat',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: _StatusPill(icon: icon, label: label),
+      ),
     );
   }
 }
