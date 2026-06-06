@@ -1188,6 +1188,7 @@ void main() {
     SharedPreferences.setMockInitialValues({
       LocalAiSettingsKeys.localAiMode: localAiModeExternalCloud,
       LocalAiSettingsKeys.useLocalAi: true,
+      LocalAiSettingsKeys.aiContextWindowTokens: 131072,
     });
 
     await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
@@ -1205,6 +1206,19 @@ void main() {
     expect(find.text('Free cloud model'), findsOneWidget);
     expect(find.text('gemini-2.5-flash-lite'), findsWidgets);
     expect(find.textContaining('Cloud privacy note'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Resolved AI context window'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('1M tokens'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Google Gemini · gemini-2.5-flash-lite'),
+      -500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
 
     await tester.enterText(
       find.byKey(const ValueKey('cloud-ai-api-key')),
@@ -1223,11 +1237,16 @@ void main() {
 
     await tester.tap(find.text('Google Gemini · gemini-2.5-flash-lite'));
     await tester.pumpAndSettle();
-    await tester.tap(
-      find.text('OpenRouter · meta-llama/llama-3.2-3b-instruct:free').last,
-    );
+    await tester.tap(find.text('OpenRouter · openrouter/free').last);
     await tester.pumpAndSettle();
     expect(prefs.getString(LocalAiSettingsKeys.cloudApiKey), '');
+    await tester.scrollUntilVisible(
+      find.text('Resolved AI context window'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('200000 tokens'), findsOneWidget);
 
     await tester.enterText(
       find.byKey(const ValueKey('cloud-ai-api-key')),
@@ -1240,10 +1259,7 @@ void main() {
       prefs.getString(LocalAiSettingsKeys.cloudEndpoint),
       'https://openrouter.ai/api/v1',
     );
-    expect(
-      prefs.getString(LocalAiSettingsKeys.cloudModel),
-      'meta-llama/llama-3.2-3b-instruct:free',
-    );
+    expect(prefs.getString(LocalAiSettingsKeys.cloudModel), 'openrouter/free');
     final cloudApiKeys = cloudApiKeysFromJson(
       prefs.getString(LocalAiSettingsKeys.cloudApiKeys),
     );

@@ -34,9 +34,22 @@ const freeCloudAiModelsByProvider = {
   'OpenRouter': [
     'openrouter/free',
     'meta-llama/llama-3.2-3b-instruct:free',
-    'deepseek/deepseek-r1:free',
-    'qwen/qwen3-32b:free',
+    'openai/gpt-oss-20b:free',
+    'qwen/qwen3-coder:free',
   ],
+};
+const cloudAiModelContextWindowTokens = {
+  'gemini-2.5-flash-lite': 1048576,
+  'gemini-2.5-flash': 1048576,
+  'llama-3.1-8b-instant': 131072,
+  'llama-3.3-70b-versatile': 131072,
+  'meta-llama/llama-4-scout-17b-16e-instruct': 131072,
+  'openai/gpt-oss-20b': 131072,
+  'qwen/qwen3-32b': 131072,
+  'openrouter/free': 200000,
+  'meta-llama/llama-3.2-3b-instruct:free': 131072,
+  'openai/gpt-oss-20b:free': 131072,
+  'qwen/qwen3-coder:free': 1048576,
 };
 const defaultOnDeviceContextWindowTokens = 4096;
 const defaultLocalServerContextWindowTokens = 16384;
@@ -147,13 +160,13 @@ class LocalAiRuntimeSettings {
   int get contextItemLimit => contextItems.round().clamp(8, 48);
 
   int get contextWindowTokens {
-    final override = contextWindowOverrideTokens;
-    if (override != null) {
-      return override.clamp(
-        minimumAiContextWindowTokens,
-        maximumAiContextWindowTokens,
-      );
-    }
+    final override = resolveAiContextWindowOverrideTokens(
+      overrideTokens: contextWindowOverrideTokens,
+      mode: mode,
+      modelName: activeModelName,
+      cloudProvider: usesExternalCloud ? cloudProvider : '',
+    );
+    if (override != null) return override;
     return resolveAiContextWindowTokens(
       mode: mode,
       modelName: activeModelName,
@@ -352,6 +365,12 @@ int resolveAiContextWindowTokens({
   final normalized = '$cloudProvider $modelName'.toLowerCase();
   if (mode == localAiModeManual) return defaultManualContextWindowTokens;
 
+  if (mode == localAiModeExternalCloud) {
+    final cloudContextWindow =
+        cloudAiModelContextWindowTokens[modelName.trim()];
+    if (cloudContextWindow != null) return cloudContextWindow;
+  }
+
   if (normalized.contains('gemini')) return 1048576;
   if (normalized.contains('llama-3.1') ||
       normalized.contains('llama3.1') ||
@@ -376,6 +395,37 @@ int resolveAiContextWindowTokens({
     return defaultLocalServerContextWindowTokens;
   }
   return defaultOnDeviceContextWindowTokens;
+}
+
+int? resolveAiContextWindowOverrideTokens({
+  required int? overrideTokens,
+  required String mode,
+  required String modelName,
+  String cloudProvider = '',
+}) {
+  if (overrideTokens == null) return null;
+  if (isSelectableCloudAiModel(
+    mode: mode,
+    modelName: modelName,
+    cloudProvider: cloudProvider,
+  )) {
+    return null;
+  }
+  return overrideTokens.clamp(
+    minimumAiContextWindowTokens,
+    maximumAiContextWindowTokens,
+  );
+}
+
+bool isSelectableCloudAiModel({
+  required String mode,
+  required String modelName,
+  String cloudProvider = '',
+}) {
+  if (mode != localAiModeExternalCloud) return false;
+  final freeModels = freeCloudAiModelsByProvider[cloudProvider];
+  if (freeModels == null) return false;
+  return freeModels.contains(modelName.trim());
 }
 
 String formatAiTokenCount(int tokens) {

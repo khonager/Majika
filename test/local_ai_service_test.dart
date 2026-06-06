@@ -1167,7 +1167,85 @@ void main() {
       ),
       1048576,
     );
+    expect(
+      resolveAiContextWindowTokens(
+        mode: localAiModeExternalCloud,
+        modelName: 'openrouter/free',
+        cloudProvider: 'OpenRouter',
+      ),
+      200000,
+    );
+    expect(
+      resolveAiContextWindowTokens(
+        mode: localAiModeExternalCloud,
+        modelName: 'qwen/qwen3-coder:free',
+        cloudProvider: 'OpenRouter',
+      ),
+      1048576,
+    );
   });
+
+  test('context-window resolver covers every selectable free cloud model', () {
+    for (final entry in freeCloudAiModelsByProvider.entries) {
+      for (final model in entry.value) {
+        expect(
+          resolveAiContextWindowTokens(
+            mode: localAiModeExternalCloud,
+            modelName: model,
+            cloudProvider: entry.key,
+          ),
+          cloudAiModelContextWindowTokens[model],
+          reason: '${entry.key} $model should have an explicit context window',
+        );
+      }
+    }
+  });
+
+  test('context-window override does not mask selectable cloud models', () {
+    expect(
+      resolveAiContextWindowOverrideTokens(
+        overrideTokens: 131072,
+        mode: localAiModeExternalCloud,
+        modelName: 'gemini-2.5-flash-lite',
+        cloudProvider: 'Google Gemini',
+      ),
+      isNull,
+    );
+    expect(
+      resolveAiContextWindowOverrideTokens(
+        overrideTokens: 32768,
+        mode: localAiModeExternalCloud,
+        modelName: 'custom/free-model',
+        cloudProvider: 'Custom OpenAI-compatible',
+      ),
+      32768,
+    );
+  });
+
+  test(
+    'cloud runtime settings use selectable model context over override',
+    () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        LocalAiSettingsKeys.localAiMode,
+        localAiModeExternalCloud,
+      );
+      await prefs.setString(
+        LocalAiSettingsKeys.cloudAiProvider,
+        'Google Gemini',
+      );
+      await prefs.setString(
+        LocalAiSettingsKeys.cloudModel,
+        'gemini-2.5-flash-lite',
+      );
+      await prefs.setInt(LocalAiSettingsKeys.aiContextWindowTokens, 131072);
+
+      final settings = await LocalAiRuntimeSettings.load();
+
+      expect(settings.contextWindowOverrideTokens, 131072);
+      expect(settings.contextWindowTokens, 1048576);
+    },
+  );
 
   test('local AI top-pick prompt emphasizes request fit', () async {
     late String capturedPrompt;

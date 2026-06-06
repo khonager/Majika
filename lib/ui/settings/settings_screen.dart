@@ -283,7 +283,7 @@ const _externalCloudAiPresets = [
   _CloudAiProviderPreset(
     provider: 'OpenRouter',
     endpoint: 'https://openrouter.ai/api/v1',
-    model: 'meta-llama/llama-3.2-3b-instruct:free',
+    model: 'openrouter/free',
     tier: _AiModelTier.low,
     freeLabel: 'Free :free model variants',
     keyUrl: 'https://openrouter.ai/settings/keys',
@@ -360,17 +360,17 @@ const _freeCloudAiModelPresets = [
   ),
   _CloudAiModelPreset(
     provider: 'OpenRouter',
-    model: 'deepseek/deepseek-r1:free',
-    label: 'DeepSeek R1',
+    model: 'openai/gpt-oss-20b:free',
+    label: 'GPT-OSS 20B',
     description:
         'Specific OpenRouter reasoning model using the free variant suffix.',
   ),
   _CloudAiModelPreset(
     provider: 'OpenRouter',
-    model: 'qwen/qwen3-32b:free',
-    label: 'Qwen3 32B',
+    model: 'qwen/qwen3-coder:free',
+    label: 'Qwen3 Coder',
     description:
-        'Specific OpenRouter Qwen model using the free variant suffix.',
+        'Specific OpenRouter long-context coding model using the free variant suffix.',
   ),
 ];
 
@@ -537,13 +537,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String get _flmPullCommand => 'flm pull $_effectiveFlmModelName';
 
   int get _resolvedContextWindowTokens {
-    final override = int.tryParse(_contextWindowController.text.trim());
-    if (override != null) {
-      return override.clamp(
-        minimumAiContextWindowTokens,
-        maximumAiContextWindowTokens,
-      );
-    }
     final modelName = switch (_localAiMode) {
       localAiModeExternalCloud => _cloudModelController.text.trim(),
       localAiModeExternalServer => _effectiveServerModelName,
@@ -551,6 +544,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _downloadedModelName ?? _effectiveSelectedModel.name,
       _ => '',
     };
+    final override = resolveAiContextWindowOverrideTokens(
+      overrideTokens: int.tryParse(_contextWindowController.text.trim()),
+      mode: _localAiMode,
+      modelName: modelName,
+      cloudProvider: _localAiProvider,
+    );
+    if (override != null) return override;
     return resolveAiContextWindowTokens(
       mode: _localAiMode,
       modelName: modelName,
