@@ -1202,7 +1202,8 @@ void main() {
     expect(find.text('Cloud API key'), findsOneWidget);
     expect(find.text('Google Gemini · gemini-2.5-flash-lite'), findsOneWidget);
     expect(find.text('Cloud endpoint'), findsOneWidget);
-    expect(find.text('Cloud model'), findsOneWidget);
+    expect(find.text('Free cloud model'), findsOneWidget);
+    expect(find.text('gemini-2.5-flash-lite'), findsWidgets);
     expect(find.textContaining('Cloud privacy note'), findsOneWidget);
 
     await tester.enterText(

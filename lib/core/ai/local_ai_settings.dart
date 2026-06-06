@@ -22,6 +22,22 @@ const defaultCloudAiEndpoint =
     'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 const defaultCloudAiModel = 'gemini-2.5-flash-lite';
 const legacyGeminiCloudAiModel = 'gemini-3.1-flash-lite';
+const freeCloudAiModelsByProvider = {
+  'Google Gemini': ['gemini-2.5-flash-lite', 'gemini-2.5-flash'],
+  'Groq': [
+    'llama-3.1-8b-instant',
+    'llama-3.3-70b-versatile',
+    'meta-llama/llama-4-scout-17b-16e-instruct',
+    'openai/gpt-oss-20b',
+    'qwen/qwen3-32b',
+  ],
+  'OpenRouter': [
+    'openrouter/free',
+    'meta-llama/llama-3.2-3b-instruct:free',
+    'deepseek/deepseek-r1:free',
+    'qwen/qwen3-32b:free',
+  ],
+};
 const defaultOnDeviceContextWindowTokens = 4096;
 const defaultLocalServerContextWindowTokens = 16384;
 const defaultCloudContextWindowTokens = 131072;
@@ -200,7 +216,7 @@ class LocalAiRuntimeSettings {
     final cloudProvider =
         prefs.getString(LocalAiSettingsKeys.cloudAiProvider) ??
         defaultCloudAiProvider;
-    final cloudModel = _normalizedCloudModel(
+    final cloudModel = normalizedFreeCloudAiModel(
       provider: cloudProvider,
       model:
           prefs.getString(LocalAiSettingsKeys.cloudModel) ??
@@ -258,17 +274,22 @@ class LocalAiRuntimeSettings {
       _ => localAiModeOnDevice,
     };
   }
+}
 
-  static String _normalizedCloudModel({
-    required String provider,
-    required String model,
-  }) {
-    if (provider == defaultCloudAiProvider &&
-        model.trim() == legacyGeminiCloudAiModel) {
-      return defaultCloudAiModel;
-    }
-    return model;
+String normalizedFreeCloudAiModel({
+  required String provider,
+  required String model,
+}) {
+  var normalizedModel = model.trim();
+  if (provider == defaultCloudAiProvider &&
+      normalizedModel == legacyGeminiCloudAiModel) {
+    normalizedModel = defaultCloudAiModel;
   }
+  final freeModels = freeCloudAiModelsByProvider[provider];
+  if (freeModels == null || freeModels.isEmpty) return normalizedModel;
+  return freeModels.contains(normalizedModel)
+      ? normalizedModel
+      : freeModels.first;
 }
 
 String cloudApiKeySlot(String provider) {

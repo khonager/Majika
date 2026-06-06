@@ -1809,6 +1809,26 @@ void main() {
   );
 
   test(
+    'local AI runtime settings keeps built-in cloud models free-only',
+    () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        LocalAiSettingsKeys.localAiMode,
+        localAiModeExternalCloud,
+      );
+      await prefs.setString(LocalAiSettingsKeys.cloudAiProvider, 'OpenRouter');
+      await prefs.setString(
+        LocalAiSettingsKeys.cloudModel,
+        'anthropic/claude-sonnet-4.5',
+      );
+
+      final settings = await LocalAiRuntimeSettings.load();
+
+      expect(settings.cloudModel, 'openrouter/free');
+    },
+  );
+
+  test(
     'local AI runtime settings migrates legacy Gemini default model',
     () async {
       final prefs = await SharedPreferences.getInstance();

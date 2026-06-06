@@ -302,6 +302,78 @@ const _externalCloudAiPresets = [
   ),
 ];
 
+const _freeCloudAiModelPresets = [
+  _CloudAiModelPreset(
+    provider: 'Google Gemini',
+    model: 'gemini-2.5-flash-lite',
+    label: 'Gemini 2.5 Flash-Lite',
+    description: 'Smallest free-tier Gemini text option; best default.',
+  ),
+  _CloudAiModelPreset(
+    provider: 'Google Gemini',
+    model: 'gemini-2.5-flash',
+    label: 'Gemini 2.5 Flash',
+    description: 'Free-tier Gemini option with stronger reasoning.',
+  ),
+  _CloudAiModelPreset(
+    provider: 'Groq',
+    model: 'llama-3.1-8b-instant',
+    label: 'Llama 3.1 8B Instant',
+    description: 'Fastest reliable Groq free-plan default.',
+  ),
+  _CloudAiModelPreset(
+    provider: 'Groq',
+    model: 'llama-3.3-70b-versatile',
+    label: 'Llama 3.3 70B Versatile',
+    description: 'Larger Groq free-plan model with lower limits.',
+  ),
+  _CloudAiModelPreset(
+    provider: 'Groq',
+    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    label: 'Llama 4 Scout',
+    description:
+        'Groq free-plan text model for stronger instruction following.',
+  ),
+  _CloudAiModelPreset(
+    provider: 'Groq',
+    model: 'openai/gpt-oss-20b',
+    label: 'GPT-OSS 20B',
+    description: 'Open-weight Groq free-plan reasoning model.',
+  ),
+  _CloudAiModelPreset(
+    provider: 'Groq',
+    model: 'qwen/qwen3-32b',
+    label: 'Qwen3 32B',
+    description: 'Groq free-plan Qwen model option.',
+  ),
+  _CloudAiModelPreset(
+    provider: 'OpenRouter',
+    model: 'openrouter/free',
+    label: 'Free Models Router',
+    description: 'Automatically routes to an available free OpenRouter model.',
+  ),
+  _CloudAiModelPreset(
+    provider: 'OpenRouter',
+    model: 'meta-llama/llama-3.2-3b-instruct:free',
+    label: 'Llama 3.2 3B Instruct',
+    description: 'Specific OpenRouter model using the free variant suffix.',
+  ),
+  _CloudAiModelPreset(
+    provider: 'OpenRouter',
+    model: 'deepseek/deepseek-r1:free',
+    label: 'DeepSeek R1',
+    description:
+        'Specific OpenRouter reasoning model using the free variant suffix.',
+  ),
+  _CloudAiModelPreset(
+    provider: 'OpenRouter',
+    model: 'qwen/qwen3-32b:free',
+    label: 'Qwen3 32B',
+    description:
+        'Specific OpenRouter Qwen model using the free variant suffix.',
+  ),
+];
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -434,6 +506,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return _externalCloudAiPresets.first;
   }
 
+  List<_CloudAiModelPreset> get _freeCloudModelPresets {
+    return _freeCloudAiModelPresets
+        .where((preset) => preset.provider == _localAiProvider)
+        .toList();
+  }
+
+  bool get _usesCuratedCloudModels => _freeCloudModelPresets.isNotEmpty;
+
+  String get _effectiveFreeCloudModel {
+    final model = _cloudModelController.text.trim();
+    final freeModels = _freeCloudModelPresets;
+    if (freeModels.any((preset) => preset.model == model)) return model;
+    return freeModels.isEmpty ? model : freeModels.first.model;
+  }
+
   String get _cloudApiKeyStorageSlot => cloudApiKeySlot(_localAiProvider);
 
   String get _ollamaServeCommand => 'ollama run $_effectiveServerModelName';
@@ -510,6 +597,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ? (prefs.getString(LocalAiSettingsKeys.cloudAiProvider) ??
               defaultCloudAiProvider)
         : (legacyProvider ?? selectedModel?.providerLabel ?? _localAiProvider);
+    final savedCloudModel =
+        prefs.getString(LocalAiSettingsKeys.cloudModel) ??
+        _cloudModelController.text;
+    final cloudModel = _freeCloudModelForProvider(
+      provider: cloudProvider,
+      model: savedCloudModel,
+      fallback: savedCloudModel,
+    );
 
     setState(() {
       _immersiveReader =
@@ -561,9 +656,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _cloudEndpointController.text =
           prefs.getString(LocalAiSettingsKeys.cloudEndpoint) ??
           _cloudEndpointController.text;
-      _cloudModelController.text =
-          prefs.getString(LocalAiSettingsKeys.cloudModel) ??
-          _cloudModelController.text;
+      _cloudModelController.text = cloudModel;
       _cloudApiKeys = savedCloudApiKeys;
       _cloudApiKeyController.text = cloudApiKeyForProvider(
         savedCloudApiKeys,
@@ -587,6 +680,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
       null => localAiModeRulesOnly,
       _ => localAiModeOnDevice,
     };
+  }
+
+  String _freeCloudModelForProvider({
+    required String provider,
+    required String model,
+    required String fallback,
+  }) {
+    final freeModels = _freeCloudAiModelPresets
+        .where((preset) => preset.provider == provider)
+        .toList();
+    if (freeModels.isEmpty) return fallback;
+    if (freeModels.any((preset) => preset.model == model.trim())) {
+      return model.trim();
+    }
+    return freeModels.first.model;
   }
 
   Future<void> _saveBool(String key, bool value) async {
@@ -725,12 +833,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _useCloudProvider(_CloudAiProviderPreset preset) async {
     final savedKey = cloudApiKeyForProvider(_cloudApiKeys, preset.provider);
+    final model = _freeCloudModelForProvider(
+      provider: preset.provider,
+      model: preset.model,
+      fallback: preset.model,
+    );
     setState(() {
       _localAiMode = localAiModeExternalCloud;
       _useLocalAi = true;
       _localAiProvider = preset.provider;
       _cloudEndpointController.text = preset.endpoint;
-      _cloudModelController.text = preset.model;
+      _cloudModelController.text = model;
       _cloudApiKeyController.text = savedKey;
     });
     await _saveString(
@@ -744,8 +857,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     await _saveString(LocalAiSettingsKeys.cloudAiProvider, preset.provider);
     await _saveString(LocalAiSettingsKeys.cloudEndpoint, preset.endpoint);
-    await _saveString(LocalAiSettingsKeys.cloudModel, preset.model);
+    await _saveString(LocalAiSettingsKeys.cloudModel, model);
     await _saveString(LocalAiSettingsKeys.cloudApiKey, savedKey);
+  }
+
+  Future<void> _useCloudModel(String? model) async {
+    if (model == null || model.trim().isEmpty) return;
+    setState(() => _cloudModelController.text = model.trim());
+    await _saveString(LocalAiSettingsKeys.cloudModel, model.trim());
   }
 
   Future<void> _saveDownloadedModel(_DownloadableModel model) async {
@@ -1508,13 +1627,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onChanged: (value) =>
                         _saveString(LocalAiSettingsKeys.cloudEndpoint, value),
                   ),
-                if (_usesExternalCloud)
+                if (_usesExternalCloud && _usesCuratedCloudModels)
+                  _OptionRow(
+                    icon: Icons.smart_toy_rounded,
+                    title: 'Free cloud model',
+                    subtitle:
+                        'Only free-tier models for $_localAiProvider are listed.',
+                    value: _effectiveFreeCloudModel,
+                    options: [
+                      for (final preset in _freeCloudModelPresets) preset.model,
+                    ],
+                    onChanged: (value) {
+                      unawaited(_useCloudModel(value));
+                      if (value != null) {
+                        showInfoToast(context, '$value selected.');
+                      }
+                    },
+                  ),
+                if (_usesExternalCloud && !_usesCuratedCloudModels)
                   _TextFieldRow(
                     fieldKey: const ValueKey('cloud-ai-model'),
                     icon: Icons.smart_toy_rounded,
                     title: 'Cloud model',
                     subtitle:
-                        'For OpenRouter free usage, use a model ID ending in :free.',
+                        'Custom provider model ID. Free status depends on that provider.',
                     controller: _cloudModelController,
                     hintText: _effectiveCloudProviderPreset.model,
                     onChanged: (value) {
@@ -1785,6 +1921,20 @@ class _CloudAiProviderPreset {
     required this.tier,
     required this.freeLabel,
     required this.keyUrl,
+    required this.description,
+  });
+}
+
+class _CloudAiModelPreset {
+  final String provider;
+  final String model;
+  final String label;
+  final String description;
+
+  const _CloudAiModelPreset({
+    required this.provider,
+    required this.model,
+    required this.label,
     required this.description,
   });
 }
