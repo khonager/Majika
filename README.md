@@ -123,6 +123,33 @@ Majika publishes rolling Android builds from two GitHub release channels:
 
 Paste either release URL into Obtainium's Add App screen. Majika's GitHub Android releases are intended to be signed with one persistent release key so updates install over the previous version instead of forcing an uninstall.
 
+To make the GitHub Android workflows succeed, configure these repository secrets:
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+If you do not already have a release keystore, generate one locally:
+
+```bash
+keytool -genkeypair \
+  -v \
+  -keystore android/upload-keystore.jks \
+  -alias majika \
+  -keyalg RSA \
+  -keysize 2048 \
+  -validity 10000
+```
+
+Then base64-encode it for GitHub Actions:
+
+```bash
+base64 -w 0 android/upload-keystore.jks
+```
+
+Use the generated one-line output as `ANDROID_KEYSTORE_BASE64`, and use the same alias/password values you entered for the other three secrets. Keep this keystore safe and reuse the same one for every future Android release, or Android will treat updates as incompatible.
+
 Local AI model benchmark on Linux desktop:
 
 ```bash
