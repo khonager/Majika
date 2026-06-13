@@ -18,6 +18,7 @@ final Object manualAiRequestHandlerZoneKey = Object();
 enum _AiPromptTier { compact, balanced, rich }
 
 const _fullPromptLimit = 0x3fffffff;
+const _maxAiSelectedTags = 4;
 
 class _PromptLimits {
   final int tagLimit;
@@ -795,13 +796,17 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     final ruleInterpreted = original.withInferredSelections(availableTags);
     final formats = {...ruleInterpreted.formats, ...modelFormats};
     final mediaTypes = {...ruleInterpreted.mediaTypes, ...modelMediaTypes};
+    final limitedTags = _limitAiSelectedTags([
+      ...ruleInterpreted.aiSelectedTags,
+      ...tags,
+    ]);
 
     return original.copyWith(
-      request: searchText == null || searchText.isEmpty
-          ? original.request
+      interpretedRequest: searchText == null || searchText.isEmpty
+          ? ''
           : searchText,
       selectedTags: original.selectedTags,
-      aiSelectedTags: {...ruleInterpreted.aiSelectedTags, ...tags},
+      aiSelectedTags: limitedTags,
       formats: formats,
       mediaTypes: mediaTypes,
       includeAdult:
@@ -828,6 +833,16 @@ class FlutterGemmaLocalAiService implements LocalAiService {
 
   String _canonicalKey(String value) {
     return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  Set<String> _limitAiSelectedTags(Iterable<String> tags) {
+    final ordered = <String>[];
+    for (final tag in tags) {
+      if (tag.trim().isEmpty || ordered.contains(tag)) continue;
+      ordered.add(tag);
+      if (ordered.length >= _maxAiSelectedTags) break;
+    }
+    return ordered.toSet();
   }
 
   _AiPromptTier _promptTier(LocalAiRuntimeSettings settings) {
@@ -1114,9 +1129,11 @@ Return JSON only. No markdown. No explanation.
 Return one object with exactly these keys: tags, formats, searchText.
 The formats field is Majika's transport field for Steam play capabilities only.
 Use empty arrays when no known Steam tag or play capability clearly matches.
+Return at most $_maxAiSelectedTags tags, ordered from strongest to weakest signal.
 For adult/sexual Steam requests, use Steam tags such as Sexual Content, Nudity, Mature, NSFW, Hentai, Dating Sim, or Visual Novel when they clearly match.
 Do not return AniList media types, AniList release formats, or adult-content fields.
 Keep leftover natural-language game terms in searchText.
+Keep searchText short and close to the user's wording. Do not rewrite the whole request.
 ${_formatInstruction('Steam', allowedFormats)}
 ${_tagInstruction('Steam', tier, tagList)}
 User request: ${query.request}
@@ -1144,8 +1161,10 @@ This is not the final recommendation prompt. Preserve titles, franchises, creato
 Return JSON only. No markdown. No explanation.
 Return one object with exactly these keys: tags, formats, mediaTypes, includeAdult, searchText.
 Use empty arrays when no known AniList tag, broad format, or media type clearly matches.
+Return at most $_maxAiSelectedTags tags, ordered from strongest to weakest signal.
 Do not return Steam store tags or Steam play capabilities.
 Keep leftover natural-language anime or manga terms in searchText.
+Keep searchText short and close to the user's wording. Do not rewrite the whole request.
 AniList media type values: ${allowedMediaTypes.join(', ')}
 ${_formatInstruction('AniList', allowedFormats)}
 ${_tagInstruction('AniList', tier, tagList)}
@@ -1176,7 +1195,9 @@ This is not the final recommendation prompt. Preserve titles, franchise names, a
 Return JSON only. No markdown. No explanation.
 Return one object with exactly these keys: tags, formats, mediaTypes, includeAdult, searchText.
 Use empty arrays when no known tag, ${_formatLabel(serviceName)}, or source type clearly matches.
+Return at most $_maxAiSelectedTags tags, ordered from strongest to weakest signal.
 Keep leftover natural-language terms in searchText.
+Keep searchText short and close to the user's wording. Do not rewrite the whole request.
 Service source values: ${allowedMediaTypes.join(', ')}
 ${_formatInstruction(serviceName, allowedFormats)}
 ${_tagInstruction(serviceName, tier, tagList)}

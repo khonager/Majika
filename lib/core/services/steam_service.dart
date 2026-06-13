@@ -262,7 +262,7 @@ class SteamService implements MediaService {
       return const ['adult', 'hentai', 'dating sim', 'visual novel', 'sexy'];
     }
 
-    final text = query.request.trim();
+    final text = query.searchRequest;
     return text.isEmpty ? const [] : [text];
   }
 

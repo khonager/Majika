@@ -150,6 +150,8 @@ class _HomeScreenState extends State<HomeScreen> {
   AppProgressToast? _activeHomeProgressToast;
   final Map<String, List<AiChatMessage>> _chatMessagesBySurface = {};
 
+  static const int _visibleAiTagCount = 4;
+
   @override
   void initState() {
     super.initState();
@@ -335,6 +337,7 @@ class _HomeScreenState extends State<HomeScreen> {
             allowedMediaTypes: workspace.service.supportedMediaTypes,
             allowedFormats: workspace.service.supportedFormats,
           );
+          aiLog.addLine(_searchSummaryForLog(query));
           var baseCandidates = workspace.baseCandidates;
           var candidates = query.isActive ? <MediaItem>[] : [...baseCandidates];
           final needsAdultCandidates =
@@ -396,6 +399,11 @@ class _HomeScreenState extends State<HomeScreen> {
             recommendations,
             query,
           );
+          if (selection.recommendations.isNotEmpty) {
+            aiLog.addLine(
+              'Top pick: ${selection.recommendations.first.item.title}',
+            );
+          }
           final orderedRecommendations = selection.recommendations;
           if (selection.discoveredItem != null) {
             candidates = _dedupeCandidates([
@@ -500,6 +508,9 @@ class _HomeScreenState extends State<HomeScreen> {
               serviceName: workspace.service.displayName,
               allowedMediaTypes: workspace.service.supportedMediaTypes,
               allowedFormats: workspace.service.supportedFormats,
+            );
+            aiLog.addLine(
+              '${workspace.service.displayName}: ${_searchSummaryForLog(query)}',
             );
             chooserQuery = chooserQuery.copyWith(
               aiSelectedTags: {
@@ -678,6 +689,39 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       progressToast.dismiss();
     }
+  }
+
+  String _searchSummaryForLog(RecommendationQuery query) {
+    final tags = query.aiSelectedTags.take(_visibleAiTagCount).join(', ');
+    final formats = query.formats.map(_humanizeQueryFormat).join(', ');
+    final searchText = query.searchRequest;
+    final parts = <String>[];
+    if (searchText.isNotEmpty) {
+      parts.add('typed "${query.request.trim()}"');
+      if (query.interpretedRequest.trim().isNotEmpty &&
+          query.interpretedRequest.trim() != query.request.trim()) {
+        parts.add('searching "$searchText"');
+      }
+    }
+    if (formats.isNotEmpty) parts.add('filters $formats');
+    if (tags.isNotEmpty) parts.add('AI tags $tags');
+    return parts.isEmpty ? 'No AI filters applied.' : parts.join(' • ');
+  }
+
+  String _humanizeQueryFormat(String format) {
+    return switch (format) {
+      'SERIES' => 'series',
+      'MOVIE' => 'movie',
+      'MANGA' => 'manga',
+      'BOOK' => 'book',
+      'SINGLE_PLAYER' => 'single-player',
+      'MULTIPLAYER' => 'multiplayer',
+      'CO_OP' => 'co-op',
+      'ONLINE_CO_OP' => 'online co-op',
+      'CONTROLLER' => 'controller',
+      'STEAM_DECK' => 'Steam Deck',
+      _ => format.toLowerCase(),
+    };
   }
 
   Future<String> _handleManualAiRequest(ManualAiRequest request) async {
@@ -2707,6 +2751,9 @@ class _RecommendationSearchPanelState
     widget.onQueryChanged(
       widget.query.copyWith(
         request: nextRequest,
+        interpretedRequest: requestChanged
+            ? ''
+            : widget.query.interpretedRequest,
         aiSelectedTags: requestChanged
             ? <String>{}
             : widget.query.aiSelectedTags,
@@ -2848,7 +2895,11 @@ class _RecommendationSearchPanelState
     final aiTags = {...widget.query.aiSelectedTags}..remove(tag);
     tags.contains(tag) ? tags.remove(tag) : tags.add(tag);
     widget.onQueryChanged(
-      widget.query.copyWith(selectedTags: tags, aiSelectedTags: aiTags),
+      widget.query.copyWith(
+        selectedTags: tags,
+        aiSelectedTags: aiTags,
+        interpretedRequest: '',
+      ),
     );
   }
 
@@ -2868,7 +2919,11 @@ class _RecommendationSearchPanelState
     );
     if (selected == null) return;
     widget.onQueryChanged(
-      widget.query.copyWith(selectedTags: selected, aiSelectedTags: {}),
+      widget.query.copyWith(
+        selectedTags: selected,
+        aiSelectedTags: {},
+        interpretedRequest: '',
+      ),
     );
   }
 
@@ -2881,7 +2936,9 @@ class _RecommendationSearchPanelState
         ..clear()
         ..add(mediaType);
     }
-    widget.onQueryChanged(widget.query.copyWith(mediaTypes: mediaTypes));
+    widget.onQueryChanged(
+      widget.query.copyWith(mediaTypes: mediaTypes, interpretedRequest: ''),
+    );
   }
 
   void _toggleFormat(String format) {
@@ -2902,6 +2959,7 @@ class _RecommendationSearchPanelState
     }
     widget.onQueryChanged(
       widget.query.copyWith(
+        interpretedRequest: '',
         formats: formats,
         mediaTypes: widget.mediaService.displayName == 'AniList'
             ? RecommendationQuery.aniListMediaTypesForFormats(formats)
@@ -2958,7 +3016,7 @@ class _TagPickerSection extends StatelessWidget {
     final visibleTags = activeTags.isEmpty
         ? availableTags.take(6).toList()
         : activeTags.take(8).toList();
-    final hiddenCount = max(0, availableTags.length - visibleTags.length);
+    final hiddenCount = max(0, activeTags.length - visibleTags.length);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2969,7 +3027,7 @@ class _TagPickerSection extends StatelessWidget {
               child: Text(
                 activeTags.isEmpty
                     ? 'Tags'
-                    : 'Tags · ${selectedTags.length} pinned · ${aiSelectedTags.length} AI',
+                    : 'Tags · ${selectedTags.length} pinned · ${aiSelectedTags.length} suggested',
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.54),
                   fontSize: 11,

@@ -173,6 +173,7 @@ class RecommendationQuery {
   static const browsableTags = [...aniListBrowsableTags, ...steamBrowsableTags];
 
   final String request;
+  final String interpretedRequest;
   final Set<String> selectedTags;
   final Set<String> aiSelectedTags;
   final Set<String> mediaTypes;
@@ -182,6 +183,7 @@ class RecommendationQuery {
 
   const RecommendationQuery({
     this.request = '',
+    this.interpretedRequest = '',
     this.selectedTags = const {},
     this.aiSelectedTags = const {},
     this.mediaTypes = const {},
@@ -193,6 +195,7 @@ class RecommendationQuery {
   factory RecommendationQuery.fromJson(Map<String, dynamic> json) {
     return RecommendationQuery(
       request: json['request'] as String? ?? '',
+      interpretedRequest: json['interpretedRequest'] as String? ?? '',
       selectedTags: _jsonStringSet(json['selectedTags']),
       aiSelectedTags: _jsonStringSet(json['aiSelectedTags']),
       mediaTypes: _jsonStringSet(json['mediaTypes']),
@@ -205,6 +208,7 @@ class RecommendationQuery {
   Map<String, dynamic> toJson() {
     return {
       'request': request,
+      'interpretedRequest': interpretedRequest,
       'selectedTags': selectedTags.toList(),
       'aiSelectedTags': aiSelectedTags.toList(),
       'mediaTypes': mediaTypes.toList(),
@@ -216,6 +220,7 @@ class RecommendationQuery {
 
   bool get isActive =>
       request.trim().isNotEmpty ||
+      interpretedRequest.trim().isNotEmpty ||
       selectedTags.isNotEmpty ||
       aiSelectedTags.isNotEmpty ||
       mediaTypes.isNotEmpty ||
@@ -278,8 +283,15 @@ class RecommendationQuery {
 
   bool get infersInfamousLike => _infersInfamousLike(_normalize(request));
 
+  String get searchRequest {
+    final interpreted = interpretedRequest.trim();
+    if (interpreted.isNotEmpty) return interpreted;
+    return request.trim();
+  }
+
   RecommendationQuery copyWith({
     String? request,
+    String? interpretedRequest,
     Set<String>? selectedTags,
     Set<String>? aiSelectedTags,
     Set<String>? mediaTypes,
@@ -289,6 +301,7 @@ class RecommendationQuery {
   }) {
     return RecommendationQuery(
       request: request ?? this.request,
+      interpretedRequest: interpretedRequest ?? this.interpretedRequest,
       selectedTags: selectedTags ?? this.selectedTags,
       aiSelectedTags: aiSelectedTags ?? this.aiSelectedTags,
       mediaTypes: mediaTypes ?? this.mediaTypes,
@@ -542,7 +555,8 @@ class RecommendationQuery {
     return types;
   }
 
-  String get aniListSearchText => _searchTerms().take(5).join(' ');
+  String get aniListSearchText =>
+      _searchTerms(source: searchRequest).take(5).join(' ');
 
   bool matchesText(MediaItem item) {
     if (effectiveTags(item.tags).isNotEmpty || effectiveFormats().isNotEmpty) {
@@ -566,7 +580,7 @@ class RecommendationQuery {
     return terms.any(haystack.contains);
   }
 
-  List<String> _searchTerms() {
+  List<String> _searchTerms({String? source}) {
     const stopWords = {
       'a',
       'about',
@@ -637,7 +651,7 @@ class RecommendationQuery {
       'tv',
     };
 
-    return _normalize(request)
+    return _normalize(source ?? request)
         .split(RegExp(r'[^a-z0-9+]+'))
         .where(
           (term) =>

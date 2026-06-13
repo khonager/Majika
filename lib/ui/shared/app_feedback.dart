@@ -235,7 +235,7 @@ class _ProgressToastBody extends StatelessWidget {
                             ),
                             const SizedBox(width: 8),
                             IconButton(
-                              tooltip: 'Copy AI log',
+                              tooltip: 'Copy AI details',
                               visualDensity: VisualDensity.compact,
                               onPressed: _copyLog,
                               icon: const Icon(Icons.copy_rounded),
@@ -269,11 +269,14 @@ class _ProgressToastBody extends StatelessWidget {
                                       )
                                     : ValueListenableBuilder<String>(
                                         valueListenable: consoleLog!,
-                                        builder: (context, log, child) {
+                                        builder: (context, _, child) {
+                                          final summary = consoleLog!
+                                              .summaryValue
+                                              .trimRight();
                                           return _ProgressLogText(
-                                            value: log.trim().isEmpty
+                                            value: summary.isEmpty
                                                 ? 'Waiting for AI activity...'
-                                                : log.trimRight(),
+                                                : summary,
                                           );
                                         },
                                       ),
