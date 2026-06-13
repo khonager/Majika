@@ -204,20 +204,17 @@ class SteamService implements MediaService {
   Future<List<MediaItem>> searchRecommendationCandidates(
     RecommendationQuery query,
   ) async {
-    final items = <MediaItem>[];
-    for (final term in _storeSearchTermsForQuery(query)) {
-      final uri = Uri.parse('$_storeApi/storesearch/').replace(
-        queryParameters: {
-          'term': term,
-          'l': 'en',
-          'cc': 'us',
-          'category1': '998',
-        },
-      );
-      final decoded = await _getJson(uri);
-      final appIds = parseStoreSearchAppIds(decoded).take(8).toList();
-      items.addAll((await _fetchAppDetails(appIds)).values);
-    }
+    final terms = _storeSearchTermsForQuery(query);
+    final termResults = await Future.wait([
+      for (final term in terms) _storeSearchAppIds(term),
+    ]);
+    final appIds = <int>{
+      for (final result in termResults)
+        ...result.take(_hasCodingHackIntent(query) ? 10 : 8),
+    }.toList();
+    final items = appIds.isEmpty
+        ? <MediaItem>[]
+        : (await _fetchAppDetails(appIds)).values.toList();
     if (query.infersInfamousLike) {
       items.addAll(
         (await _fetchAppDetails(_infamousLikeCandidateAppIds)).values,
@@ -236,6 +233,21 @@ class SteamService implements MediaService {
 
     final baseline = await fetchRecommendationCandidates();
     return _dedupe([...items, ...baseline]);
+  }
+
+  Future<List<int>> _storeSearchAppIds(String term) async {
+    final trimmed = term.trim();
+    if (trimmed.isEmpty) return const [];
+    final uri = Uri.parse('$_storeApi/storesearch/').replace(
+      queryParameters: {
+        'term': trimmed,
+        'l': 'en',
+        'cc': 'us',
+        'category1': '998',
+      },
+    );
+    final decoded = await _getJson(uri);
+    return parseStoreSearchAppIds(decoded);
   }
 
   static List<String> _storeSearchTermsForQuery(RecommendationQuery query) {
@@ -268,6 +280,11 @@ class SteamService implements MediaService {
         'SHENZHEN I/O',
         'TIS-100',
         'Uplink',
+        'EXAPUNKS',
+        '7 Billion Humans',
+        'Human Resource Machine',
+        'Quadrilateral Cowboy',
+        'Autonauts',
       ];
     }
 

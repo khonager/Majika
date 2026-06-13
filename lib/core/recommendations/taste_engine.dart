@@ -214,6 +214,10 @@ class TasteEngine {
       final hasNaturalLanguageRequest = query.request.trim().isNotEmpty;
       if (hasNaturalLanguageRequest) {
         final requestTextScore = _requestTextScore(candidate, query.request);
+        final codingHackScore = _codingHackIntentScore(
+          candidate,
+          query.request,
+        );
         final requestTagEvidenceScore = _requestTagEvidenceScore(
           candidate,
           requestedTags,
@@ -222,12 +226,17 @@ class TasteEngine {
             _isAdultRequest(query, requestedTags) &&
             _hasAdultEvidence(candidate);
         score += requestTextScore * 2.4;
+        score += codingHackScore * 3.4;
         score += requestTagEvidenceScore * 2.0;
         final hasRequestEvidence =
             requestTextScore > 0 ||
+            codingHackScore > 0 ||
             requestTagEvidenceScore > 0 ||
             requestedGenreMatches.isNotEmpty ||
             hasAdultRequestEvidence;
+        if (_isCodingHackRequest(query.request) && codingHackScore <= 0) {
+          continue;
+        }
         if (_requiresRequestEvidence(query, requestedTags) &&
             !hasRequestEvidence) {
           continue;
@@ -365,6 +374,7 @@ class TasteEngine {
   }
 
   List<String> _requestTextTerms(String request) {
+    final codingHackIntent = _isCodingHackRequest(request);
     return request
         .toLowerCase()
         .split(RegExp(r'[^a-z0-9+]+'))
@@ -373,9 +383,30 @@ class TasteEngine {
               term.length > 2 &&
               !_requestTextStopWords.contains(term) &&
               !_requestStructuralTerms.contains(term) &&
+              !(codingHackIntent && _codingHackLowSignalTerms.contains(term)) &&
               !_lowSignalRequestTerms.contains(term),
         )
         .toList();
+  }
+
+  double _codingHackIntentScore(MediaItem candidate, String request) {
+    if (!_isCodingHackRequest(request)) return 0;
+    final haystack = _normalizedEvidenceText(candidate);
+    var score = 0.0;
+    for (final group in _codingHackEvidenceGroups) {
+      if (group.any((hint) => _containsWholePhrase(haystack, hint))) {
+        score += 1.0;
+      }
+    }
+
+    final normalizedTitle = candidate.title.toLowerCase();
+    for (final titleHint in _codingHackTitleHints) {
+      if (_containsWholePhrase(normalizedTitle, titleHint)) {
+        score += 1.4;
+      }
+    }
+
+    return min(score, 4.5);
   }
 
   double _requestTagEvidenceScore(
@@ -399,7 +430,9 @@ class TasteEngine {
     RecommendationQuery query,
     Set<String> requestedTags,
   ) {
-    return requestedTags.isNotEmpty || _isAdultRequest(query, requestedTags);
+    return requestedTags.isNotEmpty ||
+        _isAdultRequest(query, requestedTags) ||
+        _isCodingHackRequest(query.request);
   }
 
   bool _isAdultRequest(RecommendationQuery query, Set<String> requestedTags) {
@@ -411,6 +444,13 @@ class TasteEngine {
     final haystack = _normalizedEvidenceText(candidate);
     return _adultEvidenceTerms.any(
       (term) => _containsWholePhrase(haystack, term),
+    );
+  }
+
+  bool _isCodingHackRequest(String request) {
+    final normalized = request.toLowerCase();
+    return _codingHackRequestTerms.any(
+      (term) => _containsWholePhrase(normalized, term),
     );
   }
 
@@ -665,7 +705,81 @@ class TasteEngine {
     'special',
   };
 
-  static const Set<String> _lowSignalRequestTerms = {'entertaining', 'fun'};
+  static const Set<String> _lowSignalRequestTerms = {
+    'entertaining',
+    'fun',
+    'learn',
+  };
+
+  static const Set<String> _codingHackLowSignalTerms = {
+    'hack',
+    'hacking',
+    'learn',
+  };
+
+  static const Set<String> _codingHackRequestTerms = {
+    'code',
+    'coder',
+    'coding',
+    'cyber',
+    'cybersecurity',
+    'hack',
+    'hacker',
+    'hackers',
+    'hacking',
+    'learn to code',
+    'program',
+    'programmer',
+    'programming',
+  };
+
+  static const List<Set<String>> _codingHackEvidenceGroups = [
+    {
+      'code',
+      'coding',
+      'program',
+      'programming',
+      'programmer',
+      'developer',
+      'software',
+    },
+    {
+      'hacknet',
+      'hacker',
+      'hacking',
+      'cybersecurity',
+      'network security',
+      'terminal',
+      'command line',
+      'shell',
+      'linux',
+    },
+    {
+      'machine learning',
+      'neural network',
+      'automation',
+      'logic',
+      'circuit',
+      'engineering',
+      'assembly',
+      'algorithm',
+    },
+  ];
+
+  static const Set<String> _codingHackTitleHints = {
+    'hacknet',
+    'grey hack',
+    'uplink',
+    'while true',
+    'shenzhen',
+    'tis-100',
+    'human resource machine',
+    '7 billion humans',
+    'exapunks',
+    'quadrilateral cowboy',
+    'turing complete',
+    'opus magnum',
+  };
 
   static const Map<String, Set<String>> _requestTagEvidenceHints = {
     'Hentai': {

@@ -810,6 +810,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       {'role': 'user', 'content': prompt},
     ];
     final toolByName = {for (final tool in tools) tool.name: tool};
+    final completedToolPayloads = <String, List<String>>{};
 
     log?.addLine(
       'Sending tool-enabled request to ${isCloud ? settings.cloudProvider : 'local server'}: $model',
@@ -883,9 +884,16 @@ class FlutterGemmaLocalAiService implements LocalAiService {
             : await tool.execute(args);
         if (name.isNotEmpty) {
           log?.addLine('Tool $name completed.');
+          completedToolPayloads.putIfAbsent(name, () => []).add(result);
         }
         messages.add({'role': 'tool', 'tool_call_id': id, 'content': result});
       }
+    }
+
+    final bestEffort = _bestEffortToolResponse(prompt, completedToolPayloads);
+    if (bestEffort != null) {
+      log?.addLine('Using best-effort tool result.');
+      return bestEffort;
     }
 
     throw const FormatException(
@@ -957,6 +965,42 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       return parts.join('\n').trim();
     }
     return content.toString().trim();
+  }
+
+  String? _bestEffortToolResponse(
+    String prompt,
+    Map<String, List<String>> completedToolPayloads,
+  ) {
+    final steamPayloads =
+        completedToolPayloads['search_steam_games'] ?? const [];
+    final webPayloads = completedToolPayloads['search_web'] ?? const [];
+    final titles = <String>[];
+
+    for (final payload in [...steamPayloads, ...webPayloads]) {
+      try {
+        final decoded = jsonDecode(payload);
+        if (decoded is! Map<String, dynamic>) continue;
+        final results = decoded['results'];
+        if (results is! List) continue;
+        for (final entry in results) {
+          final title = entry is Map ? entry['title']?.toString().trim() : null;
+          if (title != null && title.isNotEmpty && !titles.contains(title)) {
+            titles.add(title);
+          }
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+
+    if (titles.isEmpty) return null;
+    if (prompt.contains('"titles"')) {
+      return jsonEncode({'titles': titles.take(5).toList()});
+    }
+    return jsonEncode({
+      'title': titles.first,
+      'reason': 'Chosen from Steam and web search results.',
+    });
   }
 
   Future<LocalAiRuntimeSettings> _runtimeSettings() {

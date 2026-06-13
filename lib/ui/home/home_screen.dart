@@ -889,6 +889,18 @@ class _HomeScreenState extends State<HomeScreen> {
       return (recommendations: recommendations, discoveredItem: null);
     }
 
+    if (_shouldKeepRankedTopPick(query, recommendations)) {
+      final top = recommendations.first;
+      return (
+        recommendations: [
+          top.copyWith(isTopPick: true),
+          for (final recommendation in recommendations.skip(1))
+            recommendation.copyWith(isTopPick: false),
+        ],
+        discoveredItem: null,
+      );
+    }
+
     final chosen = await _aiService.chooseTopRecommendation(
       profile,
       recommendations,
@@ -937,21 +949,32 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (suggestions.isEmpty) return const [];
 
-    final discovered = <MediaItem>[];
-    for (final suggestion in suggestions) {
-      if (_normalizedTitle(suggestion.serviceName) !=
-          _normalizedTitle(profile.serviceName)) {
-        continue;
-      }
-      final item = await _resolveSuggestedItem(
-        service: service,
-        profile: profile,
-        query: query,
-        suggestion: suggestion,
-      );
-      if (item != null) discovered.add(item);
-    }
-    return _dedupeCandidates(discovered);
+    final matchingSuggestions = [
+      for (final suggestion in suggestions)
+        if (_normalizedTitle(suggestion.serviceName) ==
+            _normalizedTitle(profile.serviceName))
+          suggestion,
+    ];
+    final discovered = await Future.wait([
+      for (final suggestion in matchingSuggestions)
+        _resolveSuggestedItem(
+          service: service,
+          profile: profile,
+          query: query,
+          suggestion: suggestion,
+        ),
+    ]);
+    return _dedupeCandidates(discovered.whereType<MediaItem>().toList());
+  }
+
+  bool _shouldKeepRankedTopPick(
+    RecommendationQuery query,
+    List<Recommendation> recommendations,
+  ) {
+    if (!query.isActive || recommendations.isEmpty) return false;
+    final top = recommendations.first.matchScore;
+    final next = recommendations.length > 1 ? recommendations[1].matchScore : 0;
+    return top >= 95 && (top - next) >= 8;
   }
 
   Future<MediaItem?> _resolveSuggestedItem({
