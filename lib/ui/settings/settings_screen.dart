@@ -1153,11 +1153,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   String _currentLocalAiStatus() {
+    final searchToolsStatus =
+        supportsAiSearchTools(
+          mode: _localAiMode,
+          modelName: _localAiMode == localAiModeExternalCloud
+              ? _cloudModelController.text.trim().isEmpty
+                    ? defaultCloudAiModel
+                    : _cloudModelController.text.trim()
+              : _localAiMode == localAiModeExternalServer
+              ? _localServerModelController.text.trim().isEmpty
+                    ? defaultLocalAiModel
+                    : _localServerModelController.text.trim()
+              : _downloadedModelName ?? _selectedModel.name,
+          cloudProvider: _localAiMode == localAiModeExternalCloud
+              ? _localAiProvider
+              : '',
+        )
+        ? ' Steam and web search tools are available on this AI path.'
+        : ' This AI path is text-only.';
     if (_localAiMode == localAiModeRulesOnly || !_useLocalAi) {
       return 'Deterministic rules only; no model is required.';
     }
     if (_localAiMode == localAiModeExternalServer) {
-      return 'External local server will handle AI requests with ${_localServerModelController.text.trim().isEmpty ? defaultLocalAiModel : _localServerModelController.text.trim()}.';
+      return 'External local server will handle AI requests with ${_localServerModelController.text.trim().isEmpty ? defaultLocalAiModel : _localServerModelController.text.trim()}.$searchToolsStatus';
     }
     if (_localAiMode == localAiModeExternalCloud) {
       final model = _cloudModelController.text.trim().isEmpty
@@ -1166,12 +1184,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final keyStatus = _cloudApiKeyController.text.trim().isEmpty
           ? 'Add an API key before requests can run.'
           : 'API key saved locally on this device.';
-      return '$_localAiProvider will handle AI requests with $model. $keyStatus';
+      return '$_localAiProvider will handle AI requests with $model. $keyStatus$searchToolsStatus';
     }
     if (_hasDownloadedModel) {
-      return '${_downloadedModelName ?? 'On-device model'} is active for AI requests using $_localBackend backend.';
+      return '${_downloadedModelName ?? 'On-device model'} is active for AI requests using $_localBackend backend.$searchToolsStatus';
     }
-    return 'On-device AI will activate after a public text model is installed; backend is set to $_localBackend.';
+    return 'On-device AI will activate after a public text model is installed; backend is set to $_localBackend.$searchToolsStatus';
   }
 
   @override
@@ -1863,6 +1881,8 @@ class _DownloadableModel {
   bool get supportsCurrentPlatform =>
       !kIsWeb && supportedPlatforms.contains(defaultTargetPlatform);
 
+  bool get supportsSearchTools => false;
+
   String get platformNote {
     if (supportsCurrentPlatform) return description;
     return '$description This model is not available for this platform.';
@@ -1894,6 +1914,9 @@ class _ServerModelPreset {
     _ServerRuntime.fastFlowLm => 'flm serve $name',
   };
 
+  bool get supportsSearchTools =>
+      supportsAiSearchTools(mode: localAiModeExternalServer, modelName: name);
+
   @override
   bool operator ==(Object other) {
     return other is _ServerModelPreset &&
@@ -1923,6 +1946,12 @@ class _CloudAiProviderPreset {
     required this.keyUrl,
     required this.description,
   });
+
+  bool get supportsSearchTools => supportsAiSearchTools(
+    mode: localAiModeExternalCloud,
+    modelName: model,
+    cloudProvider: provider,
+  );
 }
 
 class _CloudAiModelPreset {
@@ -2069,7 +2098,9 @@ class _CloudAiProviderCard extends StatelessWidget {
                   DropdownMenuItem(
                     value: preset,
                     child: Text(
-                      '${preset.provider} · ${preset.model}',
+                      preset.supportsSearchTools
+                          ? '${preset.provider} · ${preset.model} · search tools'
+                          : '${preset.provider} · ${preset.model}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -2084,6 +2115,24 @@ class _CloudAiProviderCard extends StatelessWidget {
           Text(
             '${selectedPreset.freeLabel} · ${selectedPreset.tier.label}',
             style: const TextStyle(color: Colors.white70),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _ModelStatusChip(
+                icon: selectedPreset.supportsSearchTools
+                    ? Icons.travel_explore_rounded
+                    : Icons.notes_rounded,
+                label: selectedPreset.supportsSearchTools
+                    ? 'Steam + web tools'
+                    : 'Text only',
+                color: selectedPreset.supportsSearchTools
+                    ? theme.colorScheme.secondary
+                    : Colors.white70,
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           Text(
@@ -2239,6 +2288,17 @@ class _ServerModelPresetCard extends StatelessWidget {
                     '${selectedPreset.sizeLabel} · ${selectedPreset.tier.label}',
                 color: Colors.white70,
               ),
+              _ModelStatusChip(
+                icon: selectedPreset.supportsSearchTools
+                    ? Icons.travel_explore_rounded
+                    : Icons.notes_rounded,
+                label: selectedPreset.supportsSearchTools
+                    ? 'Steam + web tools'
+                    : 'Text only',
+                color: selectedPreset.supportsSearchTools
+                    ? theme.colorScheme.secondary
+                    : Colors.white70,
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -2305,7 +2365,9 @@ class _ServerModelMenuItem extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            '${preset.runtime.label} · ${preset.name}',
+            preset.supportsSearchTools
+                ? '${preset.runtime.label} · ${preset.name} · search tools'
+                : '${preset.runtime.label} · ${preset.name}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(color: color),
@@ -2637,7 +2699,9 @@ class _ModelDownloadCard extends StatelessWidget {
                   DropdownMenuItem(
                     value: model,
                     child: Text(
-                      model.name,
+                      model.supportsSearchTools
+                          ? '${model.name} · search tools'
+                          : model.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -2748,6 +2812,24 @@ class _ModelDownloadCard extends StatelessWidget {
           Text(
             selectedModel.description,
             style: const TextStyle(color: Colors.white70, height: 1.35),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _ModelStatusChip(
+                icon: selectedModel.supportsSearchTools
+                    ? Icons.travel_explore_rounded
+                    : Icons.notes_rounded,
+                label: selectedModel.supportsSearchTools
+                    ? 'Steam + web tools'
+                    : 'Text only',
+                color: selectedModel.supportsSearchTools
+                    ? theme.colorScheme.secondary
+                    : Colors.white70,
+              ),
+            ],
           ),
           if (selectedModel.needsHuggingFaceToken) ...[
             const SizedBox(height: 12),

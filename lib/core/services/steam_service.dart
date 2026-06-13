@@ -258,6 +258,19 @@ class SteamService implements MediaService {
       return const ['comedy', 'funny', 'hilarious'];
     }
 
+    if (_hasCodingHackIntent(query)) {
+      return [
+        if (query.searchRequest.isNotEmpty) query.searchRequest,
+        'Hacknet',
+        'Grey Hack',
+        'while True: learn()',
+        'Turing Complete',
+        'SHENZHEN I/O',
+        'TIS-100',
+        'Uplink',
+      ];
+    }
+
     if (_hasAdultIntent(query)) {
       return const ['adult', 'hentai', 'dating sim', 'visual novel', 'sexy'];
     }
@@ -276,7 +289,23 @@ class SteamService implements MediaService {
     final text = query.request.toLowerCase();
     return _comedyIntentTerms.any((term) {
       final escaped = RegExp.escape(term);
-      return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(text);
+      final pattern =
+          r'(^|[^a-z0-9])'
+          '$escaped'
+          r'([^a-z0-9]|$)';
+      return RegExp(pattern).hasMatch(text);
+    });
+  }
+
+  static bool _hasCodingHackIntent(RecommendationQuery query) {
+    final text = query.request.toLowerCase();
+    return _codingHackIntentTerms.any((term) {
+      final escaped = RegExp.escape(term);
+      final pattern =
+          r'(^|[^a-z0-9])'
+          '$escaped'
+          r'([^a-z0-9]|$)';
+      return RegExp(pattern).hasMatch(text);
     });
   }
 
@@ -295,6 +324,24 @@ class SteamService implements MediaService {
     'satire',
     'silly',
     'slapstick',
+  };
+
+  static const _codingHackIntentTerms = {
+    'code',
+    'coder',
+    'coders',
+    'coding',
+    'cyber',
+    'cybersecurity',
+    'hack',
+    'hacker',
+    'hackers',
+    'hacking',
+    'learn to code',
+    'program',
+    'programmer',
+    'programmers',
+    'programming',
   };
 
   static bool _hasAdultIntent(RecommendationQuery query) {

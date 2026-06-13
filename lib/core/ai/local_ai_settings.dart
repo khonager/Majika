@@ -181,6 +181,12 @@ class LocalAiRuntimeSettings {
     return provider;
   }
 
+  bool get supportsSearchTools => supportsAiSearchTools(
+    mode: mode,
+    modelName: activeModelName,
+    cloudProvider: usesExternalCloud ? cloudProvider : '',
+  );
+
   PreferredBackend? get preferredBackend {
     return switch (backend) {
       localAiBackendCpu => PreferredBackend.cpu,
@@ -426,6 +432,39 @@ bool isSelectableCloudAiModel({
   final freeModels = freeCloudAiModelsByProvider[cloudProvider];
   if (freeModels == null) return false;
   return freeModels.contains(modelName.trim());
+}
+
+bool supportsAiSearchTools({
+  required String mode,
+  required String modelName,
+  String cloudProvider = '',
+}) {
+  if (mode == localAiModeExternalCloud) {
+    final normalizedProvider = cloudProvider.trim().toLowerCase();
+    if (normalizedProvider.contains('gemini') ||
+        normalizedProvider.contains('groq') ||
+        normalizedProvider.contains('openrouter')) {
+      return true;
+    }
+    return _looksLikeToolCapableModel(modelName);
+  }
+  if (mode == localAiModeExternalServer) {
+    return _looksLikeToolCapableModel(modelName);
+  }
+  return false;
+}
+
+bool _looksLikeToolCapableModel(String modelName) {
+  final normalized = modelName.trim().toLowerCase();
+  if (normalized.isEmpty) return false;
+  if (normalized.contains('embed')) return false;
+  return normalized.contains('qwen') ||
+      normalized.contains('llama') ||
+      normalized.contains('gemma') ||
+      normalized.contains('gpt') ||
+      normalized.contains('claude') ||
+      normalized.contains('deepseek') ||
+      normalized.contains('mistral');
 }
 
 String formatAiTokenCount(int tokens) {

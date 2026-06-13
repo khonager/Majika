@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:majika/core/ai/ai_console_log.dart';
+import 'package:majika/core/ai/ai_search_tools.dart';
 import 'package:http/http.dart' as http;
 import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/models/media_item.dart';
@@ -87,6 +88,31 @@ class _PackedPrompt {
     required this.limits,
     required this.estimatedTokens,
   });
+}
+
+class _ExternalAiTool {
+  final String name;
+  final String description;
+  final Map<String, Object?> parameters;
+  final Future<String> Function(Map<String, dynamic> arguments) execute;
+
+  const _ExternalAiTool({
+    required this.name,
+    required this.description,
+    required this.parameters,
+    required this.execute,
+  });
+
+  Map<String, Object?> toJson() {
+    return {
+      'type': 'function',
+      'function': {
+        'name': name,
+        'description': description,
+        'parameters': parameters,
+      },
+    };
+  }
 }
 
 typedef ManualAiRequestHandler =
@@ -352,12 +378,14 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     Object? body,
   })?
   httpPost;
+  final AiSearchToolbox searchToolbox;
 
   const FlutterGemmaLocalAiService({
     this.fallback = const DeterministicLocalAiService(),
     this.textGenerator,
     this.settingsLoader,
     this.httpPost,
+    this.searchToolbox = const AiSearchToolbox(),
   });
 
   @override
@@ -536,6 +564,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     String prompt, {
     required int maxTokens,
     required LocalAiRuntimeSettings settings,
+    List<_ExternalAiTool> externalTools = const [],
   }) async {
     final generator = textGenerator;
     final log = _currentConsoleLog;
@@ -570,6 +599,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
           prompt,
           maxTokens: maxTokens,
           settings: settings,
+          tools: externalTools,
         );
       } catch (error) {
         log?.addLine('AI request failed: $error');
@@ -656,7 +686,23 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     String prompt, {
     required int maxTokens,
     required LocalAiRuntimeSettings settings,
+    List<_ExternalAiTool> tools = const [],
   }) async {
+    if (tools.isNotEmpty && settings.supportsSearchTools) {
+      try {
+        return await _generateExternalTextWithTools(
+          prompt,
+          maxTokens: maxTokens,
+          settings: settings,
+          tools: tools,
+        );
+      } catch (error) {
+        _currentConsoleLog?.addLine(
+          'AI search tools failed, retrying text-only: $error',
+        );
+      }
+    }
+
     final post = httpPost ?? http.post;
     final isCloud = settings.usesExternalCloud;
     final log = _currentConsoleLog;
@@ -717,9 +763,8 @@ class FlutterGemmaLocalAiService implements LocalAiService {
 
     final message = firstChoice['message'];
     if (message is Map<String, dynamic>) {
-      final content = message['content'];
-      if (content != null) {
-        final text = content.toString();
+      final text = _messageTextContent(message['content']);
+      if (text.isNotEmpty) {
         log?.addSection('Response', text);
         return text;
       }
@@ -733,6 +778,185 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     }
 
     throw const FormatException('Local AI response did not include text.');
+  }
+
+  Future<String> _generateExternalTextWithTools(
+    String prompt, {
+    required int maxTokens,
+    required LocalAiRuntimeSettings settings,
+    required List<_ExternalAiTool> tools,
+  }) async {
+    final post = httpPost ?? http.post;
+    final isCloud = settings.usesExternalCloud;
+    final log = _currentConsoleLog;
+    final apiKey = settings.cloudApiKey.trim();
+    if (isCloud && apiKey.isEmpty) {
+      throw StateError('No ${settings.cloudProvider} API key is configured.');
+    }
+
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (isCloud) 'Authorization': 'Bearer $apiKey',
+      if (isCloud && settings.cloudProvider == 'OpenRouter') ...{
+        'HTTP-Referer': 'https://majika.local',
+        'X-OpenRouter-Title': 'Majika',
+      },
+    };
+    final endpoint = isCloud
+        ? settings.cloudChatCompletionsUri
+        : settings.localChatCompletionsUri;
+    final model = isCloud ? settings.cloudModel : settings.serverModel;
+    final messages = <Map<String, Object?>>[
+      {'role': 'user', 'content': prompt},
+    ];
+    final toolByName = {for (final tool in tools) tool.name: tool};
+
+    log?.addLine(
+      'Sending tool-enabled request to ${isCloud ? settings.cloudProvider : 'local server'}: $model',
+    );
+
+    for (var round = 0; round < 3; round++) {
+      final response = await post(
+        endpoint,
+        headers: headers,
+        body: jsonEncode({
+          'model': model,
+          'messages': messages,
+          'tools': [for (final tool in tools) tool.toJson()],
+          'tool_choice': 'auto',
+          'temperature': 0.1,
+          'max_tokens': maxTokens,
+          'stream': false,
+        }),
+      ).timeout(const Duration(seconds: 60));
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError(
+          '${isCloud ? settings.cloudProvider : 'Local AI server'} returned HTTP ${response.statusCode}: ${response.body}',
+        );
+      }
+      log?.addLine('Received HTTP ${response.statusCode}.');
+
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('Local AI response was not a JSON object.');
+      }
+      final message = _firstChoiceMessage(decoded);
+      final toolCalls = _toolCallsFromMessage(message);
+      if (toolCalls.isEmpty) {
+        final content = _messageTextContent(message['content']);
+        if (content.isNotEmpty) {
+          log?.addSection('Response', content);
+          return content;
+        }
+        final fallbackText = _firstChoiceText(decoded);
+        if (fallbackText.isNotEmpty) {
+          log?.addSection('Response', fallbackText);
+          return fallbackText;
+        }
+        throw const FormatException(
+          'Tool-enabled AI response did not include text.',
+        );
+      }
+
+      final names = toolCalls
+          .map((call) => call['function']?['name']?.toString().trim() ?? '')
+          .where((name) => name.isNotEmpty)
+          .join(', ');
+      if (names.isNotEmpty) {
+        log?.addLine('AI requested tool(s): $names');
+      }
+      messages.add({
+        'role': 'assistant',
+        if (message['content'] != null) 'content': message['content'],
+        'tool_calls': toolCalls,
+      });
+
+      for (final call in toolCalls) {
+        final function = call['function'];
+        final name = function?['name']?.toString().trim() ?? '';
+        final id = call['id']?.toString().trim() ?? name;
+        final tool = toolByName[name];
+        final args = _decodeToolArguments(function?['arguments']);
+        final result = tool == null
+            ? jsonEncode({'error': 'Unknown tool "$name".'})
+            : await tool.execute(args);
+        if (name.isNotEmpty) {
+          log?.addLine('Tool $name completed.');
+        }
+        messages.add({'role': 'tool', 'tool_call_id': id, 'content': result});
+      }
+    }
+
+    throw const FormatException(
+      'Tool-enabled AI response did not finish within the allowed tool rounds.',
+    );
+  }
+
+  Map<String, dynamic> _firstChoiceMessage(Map<String, dynamic> decoded) {
+    final choices = decoded['choices'];
+    if (choices is! List || choices.isEmpty) {
+      throw const FormatException('Local AI response did not include choices.');
+    }
+    final firstChoice = choices.first;
+    if (firstChoice is! Map<String, dynamic>) {
+      throw const FormatException('Local AI choice was not a JSON object.');
+    }
+    final message = firstChoice['message'];
+    if (message is! Map<String, dynamic>) {
+      throw const FormatException(
+        'Local AI response did not include a message.',
+      );
+    }
+    return message;
+  }
+
+  String _firstChoiceText(Map<String, dynamic> decoded) {
+    final choices = decoded['choices'];
+    if (choices is! List || choices.isEmpty) return '';
+    final firstChoice = choices.first;
+    if (firstChoice is! Map<String, dynamic>) return '';
+    final text = firstChoice['text'];
+    return text?.toString().trim() ?? '';
+  }
+
+  List<Map<String, dynamic>> _toolCallsFromMessage(
+    Map<String, dynamic> message,
+  ) {
+    final toolCalls = message['tool_calls'];
+    if (toolCalls is! List) return const [];
+    return [
+      for (final call in toolCalls)
+        if (call is Map<String, dynamic>) call,
+    ];
+  }
+
+  Map<String, dynamic> _decodeToolArguments(Object? raw) {
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is String && raw.trim().isNotEmpty) {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) return decoded;
+    }
+    return const {};
+  }
+
+  String _messageTextContent(Object? content) {
+    if (content == null) return '';
+    if (content is String) return content.trim();
+    if (content is List) {
+      final parts = <String>[];
+      for (final part in content) {
+        if (part is Map<String, dynamic>) {
+          final text = part['text']?.toString().trim();
+          if (text != null && text.isNotEmpty) parts.add(text);
+        } else if (part != null) {
+          final text = part.toString().trim();
+          if (text.isNotEmpty) parts.add(text);
+        }
+      }
+      return parts.join('\n').trim();
+    }
+    return content.toString().trim();
   }
 
   Future<LocalAiRuntimeSettings> _runtimeSettings() {
@@ -794,7 +1018,14 @@ class FlutterGemmaLocalAiService implements LocalAiService {
         .toSet();
     final searchText = decoded['searchText']?.toString().trim();
     final ruleInterpreted = original.withInferredSelections(availableTags);
-    final formats = {...ruleInterpreted.formats, ...modelFormats};
+    final formats = {
+      ...ruleInterpreted.formats,
+      ..._filteredModelFormats(
+        original: original,
+        allowedFormats: allowedFormats,
+        modelFormats: modelFormats,
+      ),
+    };
     final mediaTypes = {...ruleInterpreted.mediaTypes, ...modelMediaTypes};
     final limitedTags = _limitAiSelectedTags([
       ...ruleInterpreted.aiSelectedTags,
@@ -843,6 +1074,20 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       if (ordered.length >= _maxAiSelectedTags) break;
     }
     return ordered.toSet();
+  }
+
+  Set<String> _filteredModelFormats({
+    required RecommendationQuery original,
+    required Iterable<String> allowedFormats,
+    required Set<String> modelFormats,
+  }) {
+    final allowedSet = allowedFormats.toSet();
+    final isSteam = allowedSet.toSet().containsAll(
+      RecommendationQuery.steamFormats,
+    );
+    if (!isSteam) return modelFormats;
+    final requestedFormats = original.effectiveFormats();
+    return modelFormats.where(requestedFormats.contains).toSet();
   }
 
   _AiPromptTier _promptTier(LocalAiRuntimeSettings settings) {
@@ -1062,6 +1307,73 @@ Signals: ${recommendation.signals.take(itemLimit).join(', ')}
     return '$prefix: $tags\n$catalogGuidance\nYou may keep any specific title, franchise, creator, trope, or genre wording that is not in this list in searchText; Majika will use that text to fetch candidates.';
   }
 
+  String _steamToolInstruction(bool allowSearchTools) {
+    if (!allowSearchTools) return '';
+    return '''
+Search tools are available in this runtime.
+When the request is niche, skill-based, educational, profession-specific, or otherwise likely to miss broad Steam search, call search_steam_games and search_web before deciding.
+Use tool results to ground exact Steam titles, then return the required JSON only.
+''';
+  }
+
+  List<_ExternalAiTool> _steamExternalTools() {
+    return [
+      _ExternalAiTool(
+        name: 'search_steam_games',
+        description:
+            'Search Steam store games by natural-language query and return exact Steam titles with snippets and tags.',
+        parameters: const {
+          'type': 'object',
+          'properties': {
+            'query': {
+              'type': 'string',
+              'description': 'The Steam game search query.',
+            },
+            'limit': {
+              'type': 'integer',
+              'description': 'Maximum number of Steam results to return.',
+            },
+          },
+          'required': ['query'],
+        },
+        execute: (arguments) async {
+          final query = arguments['query']?.toString().trim() ?? '';
+          final limit = (arguments['limit'] as num?)?.toInt() ?? 5;
+          final results = await searchToolbox.searchSteamGames(
+            query,
+            limit: limit,
+          );
+          return jsonEncode({'results': results});
+        },
+      ),
+      _ExternalAiTool(
+        name: 'search_web',
+        description:
+            'Search the public web for grounded references such as recommendation lists, exact game names, or descriptions.',
+        parameters: const {
+          'type': 'object',
+          'properties': {
+            'query': {
+              'type': 'string',
+              'description': 'The public web search query.',
+            },
+            'limit': {
+              'type': 'integer',
+              'description': 'Maximum number of web results to return.',
+            },
+          },
+          'required': ['query'],
+        },
+        execute: (arguments) async {
+          final query = arguments['query']?.toString().trim() ?? '';
+          final limit = (arguments['limit'] as num?)?.toInt() ?? 5;
+          final results = await searchToolbox.searchWeb(query, limit: limit);
+          return jsonEncode({'results': results});
+        },
+      ),
+    ];
+  }
+
   String _searchInterpretationPrompt({
     required String serviceName,
     required _AiPromptTier tier,
@@ -1130,6 +1442,7 @@ Return one object with exactly these keys: tags, formats, searchText.
 The formats field is Majika's transport field for Steam play capabilities only.
 Use empty arrays when no known Steam tag or play capability clearly matches.
 Return at most $_maxAiSelectedTags tags, ordered from strongest to weakest signal.
+Only return play capabilities the user explicitly asked for or that are already active. Do not add Controller or Steam Deck unless the request actually says that.
 For adult/sexual Steam requests, use Steam tags such as Sexual Content, Nudity, Mature, NSFW, Hentai, Dating Sim, or Visual Novel when they clearly match.
 Do not return AniList media types, AniList release formats, or adult-content fields.
 Keep leftover natural-language game terms in searchText.
@@ -2109,6 +2422,7 @@ AniList options: ${jsonEncode(options)}
     required _PromptLimits limits,
     required RecommendationQuery query,
     required List<Map<String, Object?>> knownHints,
+    required bool allowSearchTools,
   }) {
     final ownedTitles = _ownedTitlesForPrompt(profile, limits);
     if (_isSteamService(profile.serviceName)) {
@@ -2121,6 +2435,7 @@ This is a direct recommendation, not tag selection and not option reranking. You
 The title must be an exact game title that Majika can search for on Steam. Do not invent a game and do not recommend a game the user already owns.
 Titles shown in profile evidence are already owned and are taste signals only, never valid recommendations.
 Respect required play capabilities when they are present.
+${_steamToolInstruction(allowSearchTools)}
 Return JSON only. Use exactly these keys: title, reason. Keep reason to one short sentence under 25 words.
 ${_profilePromptEvidence(profile, tier, limits)}
 Game request: ${query.request}
@@ -2242,6 +2557,7 @@ Known cross-service search-result hints, optional and non-exhaustive: ${jsonEnco
     required RecommendationQuery query,
     required List<Map<String, Object?>> knownHints,
     required int limit,
+    required bool allowSearchTools,
   }) {
     final ownedTitles = _ownedTitlesForPrompt(profile, limits);
     final isSteam = _isSteamService(profile.serviceName);
@@ -2268,6 +2584,7 @@ This is a title-discovery pass before API validation. Use your own model knowled
 Use the request as the primary decision. Use the user's profile only as a light tie-breaker.
 Return exact titles that should be searchable on ${profile.serviceName}. Do not invent titles and do not suggest titles already in the user's library.
 Respect hard $formatLabel when they are present.
+${isSteam ? _steamToolInstruction(allowSearchTools) : ''}
 Return JSON only. Prefer exactly this shape: {"titles":["..."]}. Titles only, no reasons.
 Request: ${query.request}
 User-selected tags: ${query.selectedTags.join(', ')}
@@ -2464,6 +2781,8 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     if (!query.isActive || limit <= 0) return const [];
     final settings = await _runtimeSettings();
     if (!settings.useLocalAi && textGenerator == null) return const [];
+    final allowSearchTools =
+        settings.supportsSearchTools && _isSteamService(profile.serviceName);
 
     final budget = _promptBudget(settings, responseTokens: 768);
     try {
@@ -2480,12 +2799,14 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
             limits.optionLimit,
           ),
           limit: limit,
+          allowSearchTools: allowSearchTools,
         ),
       );
       final response = await _generateText(
         packed.prompt,
         maxTokens: budget.responseTokens,
         settings: settings,
+        externalTools: allowSearchTools ? _steamExternalTools() : const [],
       );
       return _suggestionsFromResponse(
         response,
@@ -2506,6 +2827,8 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     if (!query.isActive) return null;
     final settings = await _runtimeSettings();
     if (!settings.useLocalAi && textGenerator == null) return null;
+    final allowSearchTools =
+        settings.supportsSearchTools && _isSteamService(profile.serviceName);
 
     final budget = _promptBudget(settings, responseTokens: 768);
     try {
@@ -2521,12 +2844,14 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
             knownRecommendations,
             limits.optionLimit,
           ),
+          allowSearchTools: allowSearchTools,
         ),
       );
       final response = await _generateText(
         packed.prompt,
         maxTokens: budget.responseTokens,
         settings: settings,
+        externalTools: allowSearchTools ? _steamExternalTools() : const [],
       );
       return _suggestionFromResponse(
         response,
