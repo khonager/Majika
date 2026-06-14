@@ -60,44 +60,6 @@ class SteamService implements MediaService {
     221100, // DayZ
     359550, // Rainbow Six Siege
   ];
-  static const _localCoopCandidateAppIds = [
-    728880, // Overcooked! 2
-    1426210, // It Takes Two
-    996770, // Moving Out
-    252110, // Lovers in a Dangerous Spacetime
-    1599600, // PlateUp!
-    204360, // Castle Crashers
-    1016920, // Unrailed!
-    386940, // Ultimate Chicken Horse
-    285900, // Gang Beasts
-    674940, // Stick Fight: The Game
-    268910, // Cuphead
-    477160, // Human Fall Flat
-    690640, // Trine 4
-    920210, // LEGO Star Wars: The Skywalker Saga
-  ];
-  static const _infamousLikeCandidateAppIds = [
-    10150, // Prototype
-    115320, // Prototype 2
-    870780, // Control Ultimate Edition
-    847370, // Sunset Overdrive
-    225540, // Just Cause 3
-    206420, // Saints Row IV
-  ];
-  static const _comedyCandidateAppIds = [
-    837470, // Untitled Goose Game
-    1240210, // There Is No Game: Wrong Dimension
-    2366980, // Thank Goodness You're Here!
-    1703340, // The Stanley Parable: Ultra Deluxe
-    702670, // Donut County
-    850190, // Goat Simulator 3
-    224480, // Octodad: Dadliest Catch
-    597220, // West of Loathing
-    250260, // Jazzpunk: Director's Cut
-    966320, // Later Alligator
-    504130, // Manual Samuel
-    1205450, // Turnip Boy Commits Tax Evasion
-  ];
   static const _adultCandidateAppIds = [
     339800, // HuniePop
     930210, // HuniePop 2: Double Date
@@ -209,27 +171,11 @@ class SteamService implements MediaService {
       for (final term in terms) _storeSearchAppIds(term),
     ]);
     final appIds = <int>{
-      for (final result in termResults)
-        ...result.take(_hasCodingHackIntent(query) ? 10 : 8),
+      for (final result in termResults) ...result.take(8),
     }.toList();
     final items = appIds.isEmpty
         ? <MediaItem>[]
         : (await _fetchAppDetails(appIds)).values.toList();
-    if (query.infersInfamousLike) {
-      items.addAll(
-        (await _fetchAppDetails(_infamousLikeCandidateAppIds)).values,
-      );
-    }
-    final formats = query.effectiveFormats();
-    if (formats.contains('CO_OP') || formats.contains('ONLINE_CO_OP')) {
-      items.addAll((await _fetchAppDetails(_localCoopCandidateAppIds)).values);
-    }
-    if (_hasComedyIntent(query)) {
-      items.addAll((await _fetchAppDetails(_comedyCandidateAppIds)).values);
-    }
-    if (_hasAdultIntent(query)) {
-      items.addAll((await _fetchAppDetails(_adultCandidateAppIds)).values);
-    }
 
     if (_shouldAppendBaselineCandidates(query, items)) {
       final baseline = await fetchRecommendationCandidates();
@@ -269,49 +215,33 @@ class SteamService implements MediaService {
   }
 
   static List<String> _storeSearchTermsForQuery(RecommendationQuery query) {
-    if (query.infersInfamousLike) {
-      return const [
-        'Prototype',
-        'Prototype 2',
-        'Control Ultimate Edition',
-        'Sunset Overdrive',
-        'Just Cause 3',
-        'Saints Row IV',
-      ];
+    final terms = <String>[];
+    final seen = <String>{};
+
+    void add(String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty || !seen.add(trimmed)) return;
+      terms.add(trimmed);
     }
 
-    if (query.excludeAdult && query.infersAdult) {
-      return const [];
+    final text = query.searchRequest.trim();
+    for (final term in expandedSteamStoreSearchTerms(text)) {
+      add(term);
     }
 
-    if (_hasComedyIntent(query)) {
-      return const ['comedy', 'funny', 'hilarious'];
+    for (final tag in {...query.selectedTags, ...query.aiSelectedTags}) {
+      add(tag);
+      if (text.isNotEmpty) add('$text $tag');
     }
 
-    if (_hasCodingHackIntent(query)) {
-      return [
-        if (query.searchRequest.isNotEmpty) query.searchRequest,
-        'Hacknet',
-        'Grey Hack',
-        'while True: learn()',
-        'Turing Complete',
-        'SHENZHEN I/O',
-        'TIS-100',
-        'Uplink',
-        'EXAPUNKS',
-        '7 Billion Humans',
-        'Human Resource Machine',
-        'Quadrilateral Cowboy',
-        'Autonauts',
-      ];
+    for (final format in query.effectiveFormats()) {
+      final label = _steamFormatSearchLabel(format);
+      if (label.isEmpty) continue;
+      add(label);
+      if (text.isNotEmpty) add('$text $label');
     }
 
-    if (_hasAdultIntent(query)) {
-      return const ['adult', 'hentai', 'dating sim', 'visual novel', 'sexy'];
-    }
-
-    final text = query.searchRequest;
-    return text.isEmpty ? const [] : expandedSteamStoreSearchTerms(text);
+    return terms;
   }
 
   static List<String> expandedSteamStoreSearchTerms(String rawText) {
@@ -417,120 +347,17 @@ class SteamService implements MediaService {
     'sim',
   };
 
-  static bool _hasComedyIntent(RecommendationQuery query) {
-    final tags = {
-      ...query.selectedTags,
-      ...query.aiSelectedTags,
-      ...query.inferredTags(RecommendationQuery.steamBrowsableTags),
+  static String _steamFormatSearchLabel(String format) {
+    return switch (format) {
+      'SINGLE_PLAYER' => 'single-player',
+      'MULTIPLAYER' => 'multiplayer',
+      'CO_OP' => 'co-op',
+      'ONLINE_CO_OP' => 'online co-op',
+      'CONTROLLER' => 'controller support',
+      'STEAM_DECK' => 'steam deck',
+      _ => '',
     };
-    if (tags.contains('Comedy') || tags.contains('Funny')) return true;
-    final text = query.request.toLowerCase();
-    return _comedyIntentTerms.any((term) {
-      final escaped = RegExp.escape(term);
-      final pattern =
-          r'(^|[^a-z0-9])'
-          '$escaped'
-          r'([^a-z0-9]|$)';
-      return RegExp(pattern).hasMatch(text);
-    });
   }
-
-  static bool _hasCodingHackIntent(RecommendationQuery query) {
-    final text = query.request.toLowerCase();
-    return _codingHackIntentTerms.any((term) {
-      final escaped = RegExp.escape(term);
-      final pattern =
-          r'(^|[^a-z0-9])'
-          '$escaped'
-          r'([^a-z0-9]|$)';
-      return RegExp(pattern).hasMatch(text);
-    });
-  }
-
-  static const _comedyIntentTerms = {
-    'absurd',
-    'comedy',
-    'comedic',
-    'funny',
-    'hilarious',
-    'joke',
-    'jokes',
-    'laugh',
-    'laughs',
-    'laughing',
-    'parody',
-    'satire',
-    'silly',
-    'slapstick',
-  };
-
-  static const _codingHackIntentTerms = {
-    'code',
-    'coder',
-    'coders',
-    'coding',
-    'cyber',
-    'cybersecurity',
-    'hack',
-    'hacker',
-    'hackers',
-    'hacking',
-    'learn to code',
-    'program',
-    'programmer',
-    'programmers',
-    'programming',
-  };
-
-  static bool _hasAdultIntent(RecommendationQuery query) {
-    if (query.excludeAdult) return false;
-    if (query.infersAdult) return true;
-    final tags = {
-      ...query.selectedTags,
-      ...query.aiSelectedTags,
-      ...query.inferredTags(RecommendationQuery.steamBrowsableTags),
-    };
-    if (tags.any(_adultIntentTags.contains)) return true;
-    final text = query.request.toLowerCase();
-    return _adultIntentTerms.any((term) {
-      final escaped = RegExp.escape(term);
-      return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(text);
-    });
-  }
-
-  static const _adultIntentTags = {
-    'Hentai',
-    'Ecchi',
-    'Sexual Content',
-    'Nudity',
-    'Mature',
-    'NSFW',
-  };
-
-  static const _adultIntentTerms = {
-    '18+',
-    '18 plus',
-    'adult',
-    'adult game',
-    'adult games',
-    'eroge',
-    'erotic',
-    'explicit',
-    'hentai',
-    'horny',
-    'lewd',
-    'mature game',
-    'mature games',
-    'naughty',
-    'nsfw',
-    'porn',
-    'pornography',
-    'r18',
-    'sex',
-    'sexual',
-    'sexy',
-    'smut',
-  };
 
   @override
   Future<List<String>> fetchAvailableTags() async {

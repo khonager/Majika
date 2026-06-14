@@ -559,7 +559,37 @@ AiModelTrustTier resolveAiModelTrustTier({
         : AiModelTrustTier.unsupported;
   }
 
-  if (task == 'steam_discovery' || task == 'recommendation_selection') {
+  if (task == 'steam_discovery') {
+    if (mode == localAiModeExternalCloud &&
+        _matchesAny(combined, const [
+          'google gemini gemini-2.5-flash-lite',
+          'google gemini gemini-2.5-flash',
+          'groq llama-3.3-70b-versatile',
+          'groq openai/gpt-oss-20b',
+          'groq qwen/qwen3-32b',
+        ])) {
+      return AiModelTrustTier.trusted;
+    }
+
+    if (mode == localAiModeExternalCloud &&
+        _matchesAny(combined, const [
+          'openrouter openai/gpt-oss-20b:free',
+          'openrouter meta-llama/llama-3.2-3b-instruct:free',
+          'openrouter qwen/qwen3-coder:free',
+          'openrouter openrouter/free',
+        ])) {
+      return AiModelTrustTier.constrained;
+    }
+
+    if ((mode == localAiModeExternalServer || mode == localAiModeOnDevice) &&
+        _looksLikeToolCapableModel(modelName)) {
+      return AiModelTrustTier.constrained;
+    }
+
+    return AiModelTrustTier.unsupported;
+  }
+
+  if (task == 'recommendation_selection') {
     if (mode == localAiModeExternalCloud &&
         _matchesAny(combined, const [
           'google gemini gemini-2.5-flash-lite',

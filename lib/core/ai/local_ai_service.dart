@@ -1412,8 +1412,9 @@ Signals: ${recommendation.signals.take(itemLimit).join(', ')}
     if (!allowSearchTools) return '';
     return '''
 Search tools are available in this runtime.
-When the request is niche, skill-based, educational, profession-specific, or otherwise likely to miss broad Steam search, call search_steam_games and search_web before deciding.
-Use tool results to ground exact Steam titles, then return the required JSON only.
+Use the public web as the primary discovery surface for niche or concept-driven Steam requests, then use Steam search to verify exact Steam titles before deciding.
+When the request is niche, skill-based, educational, profession-specific, world-scale, or otherwise likely to miss broad Steam search, call search_web first and search_steam_games second.
+Only return titles that you grounded through web evidence and that should be searchable on Steam.
 ''';
   }
 
@@ -2885,12 +2886,12 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     final settings = _effectiveSettingsForTask(
       baseSettings,
       task: 'steam_discovery',
-      minimumTier: AiModelTrustTier.trusted,
+      minimumTier: AiModelTrustTier.constrained,
     );
     if (!settings.useLocalAi && textGenerator == null) return const [];
     final discoveryTrust = _trustTierForTask(settings, 'steam_discovery');
     if (_isSteamService(profile.serviceName) &&
-        !_meetsTrustTier(discoveryTrust, AiModelTrustTier.trusted)) {
+        !_meetsTrustTier(discoveryTrust, AiModelTrustTier.constrained)) {
       return _groundedSteamSuggestions(query, limit: limit);
     }
     final allowSearchTools =
@@ -2941,12 +2942,12 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     final settings = _effectiveSettingsForTask(
       baseSettings,
       task: 'steam_discovery',
-      minimumTier: AiModelTrustTier.trusted,
+      minimumTier: AiModelTrustTier.constrained,
     );
     if (!settings.useLocalAi && textGenerator == null) return null;
     final discoveryTrust = _trustTierForTask(settings, 'steam_discovery');
     if (_isSteamService(profile.serviceName) &&
-        !_meetsTrustTier(discoveryTrust, AiModelTrustTier.trusted)) {
+        !_meetsTrustTier(discoveryTrust, AiModelTrustTier.constrained)) {
       final suggestions = await _groundedSteamSuggestions(query, limit: 1);
       return suggestions.isEmpty ? null : suggestions.first;
     }

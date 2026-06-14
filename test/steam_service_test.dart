@@ -166,47 +166,6 @@ void main() {
     expect(library.single.recentPlaytimeMinutes, 90);
   });
 
-  test('co-op search adds local co-op candidate pool', () async {
-    final service = SteamService(
-      client: MockClient((request) async {
-        final url = request.url.toString();
-        if (url.contains('storesearch')) {
-          return _json({'items': []});
-        }
-        if (url.contains('appdetails')) {
-          final appId = request.url.queryParameters['appids']!;
-          return _json({
-            appId: {
-              'success': true,
-              'data': {
-                'steam_appid': int.parse(appId),
-                'name': appId == '728880' ? 'Overcooked! 2' : 'Game $appId',
-                'genres': [
-                  {'description': 'Action'},
-                ],
-                'categories': [
-                  {'description': 'Shared/Split Screen Co-op'},
-                  {'description': 'Full controller support'},
-                ],
-              },
-            },
-          });
-        }
-        return http.Response('not found', 404);
-      }),
-    );
-
-    final candidates = await service.searchRecommendationCandidates(
-      const RecommendationQuery(
-        request: 'fun game to play with two players on one pc with controllers',
-        mediaTypes: {'GAME'},
-        formats: {'CO_OP', 'CONTROLLER'},
-      ),
-    );
-
-    expect(candidates.map((item) => item.title), contains('Overcooked! 2'));
-  });
-
   test(
     'niche Steam text search does not append generic baseline when results exist',
     () async {
@@ -264,7 +223,7 @@ void main() {
   );
 
   test(
-    'niche Steam text search does not append generic baseline when no direct results exist',
+    'specific Steam text search does not append generic baseline when no direct results exist',
     () async {
       final appDetailIds = <String>[];
       final service = SteamService(
@@ -300,7 +259,8 @@ void main() {
 
       final candidates = await service.searchRecommendationCandidates(
         const RecommendationQuery(
-          request: 'games that use the whole earth as a map',
+          request:
+              'obscure profession simulator with highly specific machinery',
           mediaTypes: {'GAME'},
         ),
       );
@@ -324,171 +284,6 @@ void main() {
     }, appId: 1234);
 
     expect(item, isNull);
-  });
-
-  test(
-    'Steam query expansion turns natural language machine requests into simulator search terms',
-    () {
-      final terms = SteamService.expandedSteamStoreSearchTerms(
-        'a game about operating a big crane',
-      );
-
-      expect(terms.first, 'a game about operating a big crane');
-      expect(terms, contains('operating a big crane'));
-      expect(terms, contains('crane'));
-      expect(terms, contains('crane simulator'));
-      expect(terms, contains('big crane simulator'));
-    },
-  );
-
-  test('comedy search adds curated matches beyond weak fun titles', () async {
-    final storeTerms = <String>[];
-    final appDetailIds = <String>[];
-    final service = SteamService(
-      client: MockClient((request) async {
-        final url = request.url.toString();
-        if (url.contains('storesearch')) {
-          storeTerms.add(request.url.queryParameters['term']!);
-          return _json({
-            'items': [
-              {'id': 333},
-              {'id': 444},
-            ],
-          });
-        }
-        if (url.contains('appdetails')) {
-          final appId = request.url.queryParameters['appids']!;
-          appDetailIds.add(appId);
-          return _json({
-            appId: {
-              'success': true,
-              'data': {
-                'steam_appid': int.parse(appId),
-                'name': switch (appId) {
-                  '333' => 'Fun with Ragdolls Plus',
-                  '444' => 'Funko Fusion',
-                  '837470' => 'Untitled Goose Game',
-                  '1240210' => 'There Is No Game: Wrong Dimension',
-                  _ => 'Game $appId',
-                },
-                'short_description': switch (appId) {
-                  '837470' => 'A silly slapstick sandbox about being a goose.',
-                  '1240210' => 'A meta comedy adventure full of jokes.',
-                  _ => 'A Steam game.',
-                },
-                'genres': [
-                  {'description': 'Adventure'},
-                ],
-                'categories': [
-                  {'description': 'Single-player'},
-                ],
-              },
-            },
-          });
-        }
-        return http.Response('not found', 404);
-      }),
-    );
-
-    final candidates = await service.searchRecommendationCandidates(
-      const RecommendationQuery(
-        request: 'fun game that makes you laugh a lot',
-        aiSelectedTags: {'Comedy', 'Funny'},
-        mediaTypes: {'GAME'},
-        formats: {'SINGLE_PLAYER'},
-      ),
-    );
-
-    expect(storeTerms, containsAll(['comedy', 'funny']));
-    expect(storeTerms, isNot(contains('fun game that makes you laugh a lot')));
-    expect(appDetailIds, contains('837470'));
-    expect(appDetailIds, contains('1240210'));
-    expect(
-      candidates.map((item) => item.title),
-      contains('Untitled Goose Game'),
-    );
-    expect(
-      candidates.map((item) => item.title),
-      contains('There Is No Game: Wrong Dimension'),
-    );
-  });
-
-  test('adult search adds curated matches beyond generic title search', () async {
-    final storeTerms = <String>[];
-    final appDetailIds = <String>[];
-    final service = SteamService(
-      client: MockClient((request) async {
-        final url = request.url.toString();
-        if (url.contains('storesearch')) {
-          storeTerms.add(request.url.queryParameters['term']!);
-          return _json({
-            'items': [
-              {'id': 1145360},
-              {'id': 413150},
-            ],
-          });
-        }
-        if (url.contains('appdetails')) {
-          final appId = request.url.queryParameters['appids']!;
-          appDetailIds.add(appId);
-          return _json({
-            appId: {
-              'success': true,
-              'data': {
-                'steam_appid': int.parse(appId),
-                'name': switch (appId) {
-                  '1126320' => 'Being a DIK - Season 1',
-                  '611790' => 'House Party',
-                  '339800' => 'HuniePop',
-                  '1145360' => 'Hades',
-                  '413150' => 'Stardew Valley',
-                  _ => 'Game $appId',
-                },
-                'short_description': switch (appId) {
-                  '1126320' =>
-                    'A choice-driven adult Visual Novel about sex, romance, and drama.',
-                  '611790' =>
-                    'An edgy comedy adventure with naughty adult situations.',
-                  '339800' => 'A dating sim puzzle game with steamy writing.',
-                  _ => 'A Steam game.',
-                },
-                'genres': [
-                  {'description': 'Adventure'},
-                ],
-                'categories': [
-                  {'description': 'Single-player'},
-                ],
-              },
-            },
-          });
-        }
-        return http.Response('not found', 404);
-      }),
-    );
-
-    final candidates = await service.searchRecommendationCandidates(
-      const RecommendationQuery(
-        request: 'horny and naughty sexy',
-        mediaTypes: {'GAME'},
-        formats: {'SINGLE_PLAYER'},
-      ),
-    );
-
-    expect(
-      storeTerms,
-      containsAll(['adult', 'hentai', 'dating sim', 'visual novel', 'sexy']),
-    );
-    expect(storeTerms, isNot(contains('horny and naughty sexy')));
-    expect(appDetailIds, contains('1126320'));
-    expect(appDetailIds, contains('611790'));
-    expect(
-      candidates.map((item) => item.title),
-      contains('Being a DIK - Season 1'),
-    );
-    expect(
-      candidates.firstWhere((item) => item.id == 'steam_1126320').isAdult,
-      isTrue,
-    );
   });
 
   test('parses Steam adult evidence from content descriptors', () {
@@ -517,110 +312,6 @@ void main() {
     expect(item?.tags, contains('Sexual Content'));
     expect(item?.tags, contains('Mature'));
     expect(item?.tags, contains('Visual Novel'));
-  });
-
-  test(
-    'hidden explicit content suppresses Steam adult candidate search',
-    () async {
-      final storeTerms = <String>[];
-      final appDetailIds = <String>[];
-      final service = SteamService(
-        client: MockClient((request) async {
-          final url = request.url.toString();
-          if (url.contains('storesearch')) {
-            storeTerms.add(request.url.queryParameters['term']!);
-            return _json({'items': []});
-          }
-          if (url.contains('appdetails')) {
-            final appId = request.url.queryParameters['appids']!;
-            appDetailIds.add(appId);
-            return _json({
-              appId: {
-                'success': true,
-                'data': {
-                  'steam_appid': int.parse(appId),
-                  'name': 'Game $appId',
-                  'short_description': 'A Steam game.',
-                  'genres': [
-                    {'description': 'Action'},
-                  ],
-                  'categories': [
-                    {'description': 'Single-player'},
-                  ],
-                },
-              },
-            });
-          }
-          return http.Response('not found', 404);
-        }),
-      );
-
-      await service.searchRecommendationCandidates(
-        const RecommendationQuery(
-          request: 'horny and naughty sexy',
-          excludeAdult: true,
-        ),
-      );
-
-      expect(storeTerms, isEmpty);
-      expect(appDetailIds, isNot(contains('1126320')));
-      expect(appDetailIds, isNot(contains('611790')));
-    },
-  );
-
-  test('inFAMOUS-like search expands to similar Steam candidates', () async {
-    final storeTerms = <String>[];
-    final appDetailIds = <String>[];
-    final service = SteamService(
-      client: MockClient((request) async {
-        final url = request.url.toString();
-        if (url.contains('storesearch')) {
-          storeTerms.add(request.url.queryParameters['term']!);
-          return _json({
-            'items': [
-              {'id': 10150},
-            ],
-          });
-        }
-        if (url.contains('appdetails')) {
-          final appId = request.url.queryParameters['appids']!;
-          appDetailIds.add(appId);
-          return _json({
-            appId: {
-              'success': true,
-              'data': {
-                'steam_appid': int.parse(appId),
-                'name': appId == '10150' ? 'Prototype' : 'Game $appId',
-                'short_description': 'Open-world superpower action.',
-                'genres': [
-                  {'description': 'Action'},
-                  {'description': 'Adventure'},
-                ],
-                'categories': [
-                  {'description': 'Single-player'},
-                  {'description': 'Full controller support'},
-                ],
-              },
-            },
-          });
-        }
-        return http.Response('not found', 404);
-      }),
-    );
-
-    final candidates = await service.searchRecommendationCandidates(
-      const RecommendationQuery(
-        request: 'something similar to the infamous games',
-      ),
-    );
-
-    expect(storeTerms, contains('Prototype'));
-    expect(
-      storeTerms,
-      isNot(contains('something similar to the infamous games')),
-    );
-    expect(appDetailIds, contains('10150'));
-    expect(candidates.map((item) => item.title), contains('Prototype'));
   });
 
   test('service reports missing local Steam API key', () async {

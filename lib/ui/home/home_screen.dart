@@ -1037,6 +1037,10 @@ class _HomeScreenState extends State<HomeScreen> {
         .where(service.supportedMediaTypes.contains)
         .toSet();
     return RecommendationQuery(
+      request: query.request,
+      interpretedRequest: query.interpretedRequest,
+      selectedTags: query.selectedTags,
+      aiSelectedTags: query.aiSelectedTags,
       includeAdult: query.allowsAdult,
       excludeAdult: query.excludeAdult,
       mediaTypes: applicableMediaTypes,
