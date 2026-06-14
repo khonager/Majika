@@ -337,7 +337,7 @@ class _HomeScreenState extends State<HomeScreen> {
             allowedMediaTypes: workspace.service.supportedMediaTypes,
             allowedFormats: workspace.service.supportedFormats,
           );
-          aiLog.addLine(_searchSummaryForLog(query));
+          _logQueryInterpretation(aiLog, query);
           var baseCandidates = workspace.baseCandidates;
           var candidates = query.isActive ? <MediaItem>[] : [...baseCandidates];
           final needsAdultCandidates =
@@ -349,6 +349,12 @@ class _HomeScreenState extends State<HomeScreen> {
             );
             final searchedCandidates = await workspace.service
                 .searchRecommendationCandidates(query);
+            _logCandidateResults(
+              aiLog,
+              searchedCandidates,
+              emptyMessage:
+                  'Direct store search did not find any clear matches yet.',
+            );
             candidates = _dedupeCandidates([
               ...searchedCandidates,
               ...candidates,
@@ -381,6 +387,7 @@ class _HomeScreenState extends State<HomeScreen> {
               knownRecommendations: preliminaryRecommendations,
               query: query,
             );
+            _logAiDiscoveredItems(aiLog, aiDiscovered);
             if (aiDiscovered.isNotEmpty) {
               candidates = _dedupeCandidates([...aiDiscovered, ...candidates]);
             }
@@ -392,6 +399,7 @@ class _HomeScreenState extends State<HomeScreen> {
             candidates,
             query: query,
           );
+          _logRankedRecommendations(aiLog, recommendations);
           progressToast.update('Choosing the lead recommendation...');
           final selection = await _withChosenTopRecommendation(
             workspace.service,
@@ -400,9 +408,7 @@ class _HomeScreenState extends State<HomeScreen> {
             query,
           );
           if (selection.recommendations.isNotEmpty) {
-            aiLog.addLine(
-              'Top pick: ${selection.recommendations.first.item.title}',
-            );
+            _logFinalSelection(aiLog, selection.recommendations.first);
           }
           final orderedRecommendations = selection.recommendations;
           if (selection.discoveredItem != null) {
@@ -509,7 +515,7 @@ class _HomeScreenState extends State<HomeScreen> {
               allowedMediaTypes: workspace.service.supportedMediaTypes,
               allowedFormats: workspace.service.supportedFormats,
             );
-            aiLog.addLine(
+            aiLog.addUserLine(
               '${workspace.service.displayName}: ${_searchSummaryForLog(query)}',
             );
             chooserQuery = chooserQuery.copyWith(
@@ -689,6 +695,101 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       progressToast.dismiss();
     }
+  }
+
+  void _logQueryInterpretation(AiConsoleLog log, RecommendationQuery query) {
+    final original = query.request.trim();
+    final interpreted = query.searchRequest.trim();
+    final tags = query.aiSelectedTags.take(_visibleAiTagCount).toList();
+    final formats = query.formats.map(_humanizeQueryFormat).toList();
+
+    if (original.isNotEmpty &&
+        interpreted.isNotEmpty &&
+        original != interpreted) {
+      log.addUserLine('You asked for: "$original"');
+      log.addUserLine('I searched for: "$interpreted"');
+    } else if (interpreted.isNotEmpty) {
+      log.addUserLine('I searched for: "$interpreted"');
+    } else if (original.isNotEmpty) {
+      log.addUserLine('You asked for: "$original"');
+    }
+
+    if (formats.isNotEmpty) {
+      log.addUserLine('I kept these filters: ${formats.join(', ')}');
+    }
+    if (tags.isNotEmpty) {
+      log.addUserLine('I added these tags: ${tags.join(', ')}');
+    }
+    if (formats.isEmpty && tags.isEmpty) {
+      log.addUserLine('I did not add any extra tags or filters.');
+    }
+  }
+
+  void _logCandidateResults(
+    AiConsoleLog log,
+    List<MediaItem> items, {
+    required String emptyMessage,
+  }) {
+    if (items.isEmpty) {
+      log.addUserLine(emptyMessage);
+      return;
+    }
+    log.addUserLine(
+      'Direct search found ${items.length} likely matches: ${_summarizeTitles(items)}',
+    );
+  }
+
+  void _logAiDiscoveredItems(AiConsoleLog log, List<MediaItem> items) {
+    if (items.isEmpty) {
+      log.addUserLine(
+        'AI did not add any extra titles beyond the direct search.',
+      );
+      return;
+    }
+    log.addUserLine(
+      'AI added extra possible matches: ${_summarizeTitles(items)}',
+    );
+  }
+
+  void _logRankedRecommendations(
+    AiConsoleLog log,
+    List<Recommendation> recommendations,
+  ) {
+    if (recommendations.isEmpty) {
+      log.addUserLine('Ranking did not find any strong matches yet.');
+      return;
+    }
+    final shortlist = recommendations
+        .take(3)
+        .map((recommendation) {
+          final score = recommendation.matchScore.round();
+          return '${recommendation.item.title} ($score)';
+        })
+        .join(', ');
+    log.addUserLine('Top ranked matches: $shortlist');
+  }
+
+  void _logFinalSelection(AiConsoleLog log, Recommendation recommendation) {
+    final source = recommendation.isAiPick
+        ? 'AI chose the lead match'
+        : 'Lead match';
+    log.addUserLine(
+      '$source: ${recommendation.item.title} (${recommendation.matchScore.round()})',
+    );
+    final reason = recommendation.reason.trim();
+    if (reason.isNotEmpty) {
+      log.addUserLine('Why it won: ${_condenseLogReason(reason)}');
+    }
+  }
+
+  String _summarizeTitles(List<MediaItem> items, {int limit = 5}) {
+    return items.take(limit).map((item) => item.title).join(', ');
+  }
+
+  String _condenseLogReason(String reason, {int maxLength = 180}) {
+    final normalized = reason.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (normalized.length <= maxLength) return normalized;
+    return '${normalized.substring(0, maxLength - 1).trimRight()}...';
   }
 
   String _searchSummaryForLog(RecommendationQuery query) {

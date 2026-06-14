@@ -11,13 +11,16 @@ class AiConsoleLog extends ChangeNotifier implements ValueListenable<String> {
 
   bool get isEmpty => _buffer.isEmpty;
 
+  void addUserLine(String message) {
+    _write(message, includeInRaw: true, includeInSummary: true);
+  }
+
+  void addDetail(String message) {
+    _write(message, includeInRaw: true, includeInSummary: false);
+  }
+
   void addLine(String message) {
-    final trimmed = message.trim();
-    if (trimmed.isEmpty) return;
-    final timestamp = DateTime.now().toIso8601String().split('T').last;
-    _buffer.writeln('[$timestamp] $trimmed');
-    _summaryBuffer.writeln('[$timestamp] $trimmed');
-    notifyListeners();
+    addUserLine(message);
   }
 
   void addSection(String title, String content) {
@@ -27,6 +30,24 @@ class AiConsoleLog extends ChangeNotifier implements ValueListenable<String> {
     _buffer.writeln('[$timestamp] $trimmedTitle');
     _buffer.writeln(content.trimRight());
     _buffer.writeln();
+    notifyListeners();
+  }
+
+  void _write(
+    String message, {
+    required bool includeInRaw,
+    required bool includeInSummary,
+  }) {
+    final trimmed = message.trim();
+    if (trimmed.isEmpty) return;
+    final timestamp = DateTime.now().toIso8601String().split('T').last;
+    final line = '[$timestamp] $trimmed';
+    if (includeInRaw) {
+      _buffer.writeln(line);
+    }
+    if (includeInSummary) {
+      _summaryBuffer.writeln(line);
+    }
     notifyListeners();
   }
 }

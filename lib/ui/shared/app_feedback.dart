@@ -22,7 +22,7 @@ class AppProgressToast {
   void update(String message) {
     if (_isDismissed) return;
     _message.value = message;
-    _consoleLog?.addLine(message);
+    _consoleLog?.addUserLine(message);
   }
 
   void dismiss() {
@@ -30,7 +30,7 @@ class AppProgressToast {
     if (_isExpanded.value) {
       _isComplete.value = true;
       _message.value = 'AI log complete. Swipe to dismiss.';
-      _consoleLog?.addLine('Complete. Swipe the expanded log to dismiss.');
+      _consoleLog?.addUserLine('Complete. Swipe the expanded log to dismiss.');
       return;
     }
     forceDismiss();
@@ -90,7 +90,7 @@ AppProgressToast showProgressToast(
   final textTheme = Theme.of(context).textTheme;
   late final OverlayEntry entry;
   late final AppProgressToast toast;
-  consoleLog?.addLine(message);
+  consoleLog?.addUserLine(message);
 
   entry = OverlayEntry(
     builder: (context) {
@@ -306,12 +306,7 @@ class _ProgressLogText extends StatelessWidget {
   Widget build(BuildContext context) {
     return SelectableText(
       value,
-      style: const TextStyle(
-        color: Colors.white,
-        fontFamily: 'monospace',
-        fontSize: 12,
-        height: 1.35,
-      ),
+      style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.45),
     );
   }
 }

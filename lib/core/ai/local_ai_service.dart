@@ -585,7 +585,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       if (handler == null) {
         throw StateError('Manual AI mode has no copy/paste handler.');
       }
-      log?.addLine('Manual copy/paste mode is waiting for a response.');
+      log?.addUserLine('Waiting for a manual AI response...');
       final response = await handler(
         ManualAiRequest(
           prompt: prompt,
@@ -607,14 +607,14 @@ class FlutterGemmaLocalAiService implements LocalAiService {
           tools: externalTools,
         );
       } catch (error) {
-        log?.addLine('AI request failed: $error');
+        log?.addDetail('AI request failed: $error');
         rethrow;
       }
     }
 
     if (!isConfigured) {
       if (settings.hasCloudFallback) {
-        _currentConsoleLog?.addLine(
+        _currentConsoleLog?.addUserLine(
           'No on-device model is configured. Falling back to cloud AI.',
         );
         return _generateExternalText(
@@ -638,9 +638,11 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       log?.addSection('Response', response);
       return response;
     } catch (error) {
-      log?.addLine('AI request failed: $error');
+      log?.addDetail('AI request failed: $error');
       if (settings.hasCloudFallback) {
-        log?.addLine('Retrying with cloud AI fallback.');
+        log?.addUserLine(
+          'On-device AI could not answer, so I switched to cloud AI.',
+        );
         return _generateExternalText(
           prompt,
           maxTokens: maxTokens,
@@ -652,7 +654,9 @@ class FlutterGemmaLocalAiService implements LocalAiService {
           preferredBackend == PreferredBackend.cpu) {
         rethrow;
       }
-      log?.addLine('Retrying on-device AI with CPU backend.');
+      log?.addUserLine(
+        'Retrying the on-device model with CPU compatibility mode.',
+      );
       final response = await _generateOnDeviceText(
         prompt,
         contextWindowTokens: settings.contextWindowTokens,
@@ -754,7 +758,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
           tools: tools,
         );
       } catch (error) {
-        _currentConsoleLog?.addLine(
+        _currentConsoleLog?.addDetail(
           'AI search tools failed, retrying text-only: $error',
         );
       }
@@ -779,7 +783,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
         ? settings.cloudChatCompletionsUri
         : settings.localChatCompletionsUri;
     final model = isCloud ? settings.cloudModel : settings.serverModel;
-    log?.addLine(
+    log?.addDetail(
       'Sending request to ${isCloud ? settings.cloudProvider : 'local server'}: $model',
     );
     final response = await post(
@@ -801,7 +805,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
         '${isCloud ? settings.cloudProvider : 'Local AI server'} returned HTTP ${response.statusCode}: ${response.body}',
       );
     }
-    log?.addLine('Received HTTP ${response.statusCode}.');
+    log?.addDetail('Received HTTP ${response.statusCode}.');
 
     final decoded = jsonDecode(response.body);
     if (decoded is! Map<String, dynamic>) {
@@ -869,7 +873,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     final toolByName = {for (final tool in tools) tool.name: tool};
     final completedToolPayloads = <String, List<String>>{};
 
-    log?.addLine(
+    log?.addDetail(
       'Sending tool-enabled request to ${isCloud ? settings.cloudProvider : 'local server'}: $model',
     );
 
@@ -893,7 +897,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
           '${isCloud ? settings.cloudProvider : 'Local AI server'} returned HTTP ${response.statusCode}: ${response.body}',
         );
       }
-      log?.addLine('Received HTTP ${response.statusCode}.');
+      log?.addDetail('Received HTTP ${response.statusCode}.');
 
       final decoded = jsonDecode(response.body);
       if (decoded is! Map<String, dynamic>) {
@@ -922,7 +926,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
           .where((name) => name.isNotEmpty)
           .join(', ');
       if (names.isNotEmpty) {
-        log?.addLine('AI requested tool(s): $names');
+        log?.addDetail('AI requested tool(s): $names');
       }
       messages.add({
         'role': 'assistant',
@@ -940,7 +944,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
             ? jsonEncode({'error': 'Unknown tool "$name".'})
             : await tool.execute(args);
         if (name.isNotEmpty) {
-          log?.addLine('Tool $name completed.');
+          log?.addDetail('Tool $name completed.');
           completedToolPayloads.putIfAbsent(name, () => []).add(result);
         }
         messages.add({'role': 'tool', 'tool_call_id': id, 'content': result});
@@ -949,7 +953,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
 
     final bestEffort = _bestEffortToolResponse(prompt, completedToolPayloads);
     if (bestEffort != null) {
-      log?.addLine('Using best-effort tool result.');
+      log?.addDetail('Using best-effort tool result.');
       return bestEffort;
     }
 
