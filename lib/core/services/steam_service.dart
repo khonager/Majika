@@ -243,14 +243,14 @@ class SteamService implements MediaService {
     RecommendationQuery query,
     List<MediaItem> items,
   ) {
-    if (items.isEmpty) return true;
     final searchText = query.searchRequest.trim();
     if (searchText.isEmpty) return true;
     final terms = query.aniListSearchText
         .split(' ')
         .where((term) => term.trim().isNotEmpty)
         .toList();
-    return terms.length <= 1;
+    if (terms.length >= 2) return false;
+    return items.isEmpty;
   }
 
   Future<List<int>> _storeSearchAppIds(String term) async {
@@ -682,6 +682,8 @@ class SteamService implements MediaService {
     if (wrapper is! Map || wrapper['success'] != true) return null;
     final data = wrapper['data'];
     if (data is! Map) return null;
+    final type = data['type']?.toString().trim().toLowerCase() ?? '';
+    if (type.isNotEmpty && type != 'game') return null;
     return _mediaFromAppDetails(appId, data);
   }
 
