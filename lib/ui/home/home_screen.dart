@@ -342,8 +342,30 @@ class _HomeScreenState extends State<HomeScreen> {
           var candidates = query.isActive ? <MediaItem>[] : [...baseCandidates];
           final needsAdultCandidates =
               query.allowsAdult && !workspace.adultCandidatesLoaded;
+          final preferAiDiscoveryFirst =
+              query.isActive && _prefersAiDiscoveryFirst(workspace.service);
 
-          if (query.isActive) {
+          if (preferAiDiscoveryFirst) {
+            progressToast.update(
+              'Searching the web for grounded ${workspace.service.displayName} matches...',
+            );
+            final aiDiscovered = await _discoverAiSuggestedItems(
+              service: workspace.service,
+              profile: profile,
+              knownRecommendations: const [],
+              query: query,
+            );
+            _logAiDiscoveryResults(
+              aiLog,
+              aiDiscovered,
+              usedAsPrimarySearch: true,
+            );
+            if (aiDiscovered.isNotEmpty) {
+              candidates = _dedupeCandidates([...aiDiscovered, ...candidates]);
+            }
+          }
+
+          if (query.isActive && candidates.isEmpty) {
             progressToast.update(
               'Searching ${workspace.service.displayName} candidates...',
             );
@@ -372,7 +394,7 @@ class _HomeScreenState extends State<HomeScreen> {
             candidates = _dedupeCandidates([...candidates, ...adultCandidates]);
           }
 
-          if (query.isActive) {
+          if (query.isActive && !preferAiDiscoveryFirst) {
             progressToast.update(
               'Asking AI for known ${workspace.service.displayName} matches...',
             );
@@ -387,7 +409,7 @@ class _HomeScreenState extends State<HomeScreen> {
               knownRecommendations: preliminaryRecommendations,
               query: query,
             );
-            _logAiDiscoveredItems(aiLog, aiDiscovered);
+            _logAiDiscoveryResults(aiLog, aiDiscovered);
             if (aiDiscovered.isNotEmpty) {
               candidates = _dedupeCandidates([...aiDiscovered, ...candidates]);
             }
@@ -535,8 +557,28 @@ class _HomeScreenState extends State<HomeScreen> {
                 : [...baseCandidates];
             final needsAdultCandidates =
                 query.allowsAdult && !workspace.adultCandidatesLoaded;
+            final preferAiDiscoveryFirst =
+                query.isActive && _prefersAiDiscoveryFirst(workspace.service);
 
-            if (query.isActive) {
+            if (preferAiDiscoveryFirst) {
+              progressToast.update(
+                'Searching the web for grounded ${workspace.service.displayName} matches...',
+              );
+              final aiDiscovered = await _discoverAiSuggestedItems(
+                service: workspace.service,
+                profile: profile,
+                knownRecommendations: const [],
+                query: query,
+              );
+              if (aiDiscovered.isNotEmpty) {
+                candidates = _dedupeCandidates([
+                  ...aiDiscovered,
+                  ...candidates,
+                ]);
+              }
+            }
+
+            if (query.isActive && candidates.isEmpty) {
               progressToast.update(
                 'Searching ${workspace.service.displayName} candidates...',
               );
@@ -564,7 +606,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ]);
             }
 
-            if (query.isActive) {
+            if (query.isActive && !preferAiDiscoveryFirst) {
               progressToast.update(
                 'Asking AI for known ${workspace.service.displayName} matches...',
               );
@@ -735,19 +777,27 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     log.addUserLine(
-      'Direct search found ${items.length} likely matches: ${_summarizeTitles(items)}',
+      'Steam fallback search found ${items.length} likely matches: ${_summarizeTitles(items)}',
     );
   }
 
-  void _logAiDiscoveredItems(AiConsoleLog log, List<MediaItem> items) {
+  void _logAiDiscoveryResults(
+    AiConsoleLog log,
+    List<MediaItem> items, {
+    bool usedAsPrimarySearch = false,
+  }) {
     if (items.isEmpty) {
       log.addUserLine(
-        'AI did not add any extra titles beyond the direct search.',
+        usedAsPrimarySearch
+            ? 'Web-grounded AI search did not find any Steam titles I could verify, so I fell back to Steam store search.'
+            : 'AI did not add any extra titles beyond the direct search.',
       );
       return;
     }
     log.addUserLine(
-      'AI added extra possible matches: ${_summarizeTitles(items)}',
+      usedAsPrimarySearch
+          ? 'Web-grounded AI search found Steam matches: ${_summarizeTitles(items)}'
+          : 'AI added extra possible matches: ${_summarizeTitles(items)}',
     );
   }
 
@@ -790,6 +840,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final normalized = reason.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (normalized.length <= maxLength) return normalized;
     return '${normalized.substring(0, maxLength - 1).trimRight()}...';
+  }
+
+  bool _prefersAiDiscoveryFirst(MediaService service) {
+    return service.displayName == 'Steam';
   }
 
   String _searchSummaryForLog(RecommendationQuery query) {

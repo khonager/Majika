@@ -3486,6 +3486,11 @@ Options: ${jsonEncode(options)}
         : query.request.trim();
     if (searchText.isEmpty) return const [];
     try {
+      final suggestions = await _groundedSteamSuggestionsFromWeb(
+        searchText,
+        limit: limit,
+      );
+      if (suggestions.isNotEmpty) return suggestions;
       final results = await searchToolbox.searchSteamGames(
         searchText,
         limit: limit,
@@ -3501,6 +3506,86 @@ Options: ${jsonEncode(options)}
     } catch (_) {
       return const [];
     }
+  }
+
+  Future<List<AiRecommendationSuggestion>> _groundedSteamSuggestionsFromWeb(
+    String searchText, {
+    required int limit,
+  }) async {
+    final webResults = await searchToolbox.searchWeb(
+      '$searchText site:store.steampowered.com/app',
+      limit: max(limit * 2, 4),
+    );
+    final suggestions = <AiRecommendationSuggestion>[];
+    final seenTitles = <String>{};
+
+    for (final result in webResults) {
+      final title = _steamTitleCandidateFromWebResult(result);
+      if (title.isEmpty) continue;
+      final canonical = _canonicalKey(title);
+      if (!seenTitles.add(canonical)) continue;
+      final steamMatches = await searchToolbox.searchSteamGames(
+        title,
+        limit: 3,
+      );
+      final verified = _bestVerifiedSteamResult(title, steamMatches);
+      if (verified == null) continue;
+      suggestions.add(
+        AiRecommendationSuggestion(
+          title: verified['title']?.toString().trim() ?? '',
+          serviceName: 'Steam',
+          reason: _groundedSteamWebReason(verified, result),
+        ),
+      );
+      if (suggestions.length >= limit) break;
+    }
+
+    return suggestions;
+  }
+
+  String _steamTitleCandidateFromWebResult(Map<String, Object?> result) {
+    final rawTitle = result['title']?.toString().trim() ?? '';
+    if (rawTitle.isEmpty) return '';
+    var title = rawTitle
+        .replaceFirst(RegExp(r'\s*[-|]\s*Steam.*$', caseSensitive: false), '')
+        .replaceFirst(RegExp(r'\s+on\s+Steam\s*$', caseSensitive: false), '')
+        .replaceFirst(RegExp(r'^\d+\.\s*'), '')
+        .trim();
+    if (!_looksLikeSuggestedTitle(title)) return '';
+    return title;
+  }
+
+  Map<String, Object?>? _bestVerifiedSteamResult(
+    String requestedTitle,
+    List<Map<String, Object?>> steamMatches,
+  ) {
+    final requestedKey = _canonicalKey(requestedTitle);
+    for (final match in steamMatches) {
+      final title = match['title']?.toString().trim() ?? '';
+      final titleKey = _canonicalKey(title);
+      if (titleKey.isEmpty) continue;
+      if (titleKey == requestedKey ||
+          titleKey.contains(requestedKey) ||
+          requestedKey.contains(titleKey)) {
+        return match;
+      }
+    }
+    return null;
+  }
+
+  String _groundedSteamWebReason(
+    Map<String, Object?> steamResult,
+    Map<String, Object?> webResult,
+  ) {
+    final webTitle = webResult['title']?.toString().trim() ?? '';
+    final snippet = webResult['snippet']?.toString().trim() ?? '';
+    if (snippet.isNotEmpty) {
+      return 'Grounded from web search and verified on Steam: $snippet';
+    }
+    if (webTitle.isNotEmpty) {
+      return 'Grounded from web search and verified on Steam: $webTitle';
+    }
+    return _groundedSteamReason(steamResult);
   }
 
   String _groundedSteamReason(Map<String, Object?> result) {
