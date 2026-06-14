@@ -1416,9 +1416,9 @@ Signals: ${recommendation.signals.take(itemLimit).join(', ')}
     if (!allowSearchTools) return '';
     return '''
 Search tools are available in this runtime.
-Use the public web as the primary discovery surface for niche or concept-driven Steam requests, then use Steam search to verify exact Steam titles before deciding.
-When the request is niche, skill-based, educational, profession-specific, world-scale, or otherwise likely to miss broad Steam search, call search_web first and search_steam_games second.
-Only return titles that you grounded through web evidence and that should be searchable on Steam.
+Start with your own knowledge of real games and name the most likely exact Steam-searchable titles first.
+Only if your own knowledge is not enough, use search_web to discover candidates and search_steam_games to verify exact Steam titles.
+Do not browse first when you can already name likely matches confidently.
 ''';
   }
 
@@ -2916,32 +2916,29 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
 
     final budget = _promptBudget(settings, responseTokens: 768);
     try {
-      final packed = _packPrompt(
-        budget: budget,
-        initialLimits: _promptLimits(budget.tier),
-        build: (limits) => _serviceCandidateDiscoveryPrompt(
-          profile: profile,
-          tier: budget.tier,
-          limits: limits,
-          query: query,
-          knownHints: _directPickHints(
-            knownRecommendations,
-            limits.optionLimit,
-          ),
-          limit: limit,
-          allowSearchTools: allowSearchTools,
-        ),
-      );
-      final response = await _generateText(
-        packed.prompt,
-        maxTokens: budget.responseTokens,
-        settings: settings,
-        externalTools: allowSearchTools ? _steamExternalTools() : const [],
-      );
-      return _suggestionsFromResponse(
-        response,
-        fallbackServiceName: profile.serviceName,
+      final knowledgeFirst = await _runCandidateDiscoveryPass(
+        profile: profile,
+        tier: budget.tier,
+        query: query,
+        knownRecommendations: knownRecommendations,
         limit: limit,
+        settings: settings,
+        budget: budget,
+        allowSearchTools: false,
+      );
+      if (knowledgeFirst.isNotEmpty || !allowSearchTools) {
+        return knowledgeFirst;
+      }
+
+      return await _runCandidateDiscoveryPass(
+        profile: profile,
+        tier: budget.tier,
+        query: query,
+        knownRecommendations: knownRecommendations,
+        limit: limit,
+        settings: settings,
+        budget: budget,
+        allowSearchTools: true,
       );
     } catch (_) {
       return const [];
@@ -2973,30 +2970,27 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
 
     final budget = _promptBudget(settings, responseTokens: 768);
     try {
-      final packed = _packPrompt(
-        budget: budget,
-        initialLimits: _promptLimits(budget.tier),
-        build: (limits) => _serviceDirectRecommendationPrompt(
-          profile: profile,
-          tier: budget.tier,
-          limits: limits,
-          query: query,
-          knownHints: _directPickHints(
-            knownRecommendations,
-            limits.optionLimit,
-          ),
-          allowSearchTools: allowSearchTools,
-        ),
-      );
-      final response = await _generateText(
-        packed.prompt,
-        maxTokens: budget.responseTokens,
+      final knowledgeFirst = await _runDirectRecommendationPass(
+        profile: profile,
+        tier: budget.tier,
+        query: query,
+        knownRecommendations: knownRecommendations,
         settings: settings,
-        externalTools: allowSearchTools ? _steamExternalTools() : const [],
+        budget: budget,
+        allowSearchTools: false,
       );
-      return _suggestionFromResponse(
-        response,
-        fallbackServiceName: profile.serviceName,
+      if (knowledgeFirst != null || !allowSearchTools) {
+        return knowledgeFirst;
+      }
+
+      return await _runDirectRecommendationPass(
+        profile: profile,
+        tier: budget.tier,
+        query: query,
+        knownRecommendations: knownRecommendations,
+        settings: settings,
+        budget: budget,
+        allowSearchTools: true,
       );
     } catch (_) {
       return null;
@@ -3042,6 +3036,75 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     } catch (_) {
       return null;
     }
+  }
+
+  Future<List<AiRecommendationSuggestion>> _runCandidateDiscoveryPass({
+    required TasteProfile profile,
+    required _AiPromptTier tier,
+    required RecommendationQuery query,
+    required List<Recommendation> knownRecommendations,
+    required int limit,
+    required LocalAiRuntimeSettings settings,
+    required _PromptBudget budget,
+    required bool allowSearchTools,
+  }) async {
+    final packed = _packPrompt(
+      budget: budget,
+      initialLimits: _promptLimits(budget.tier),
+      build: (limits) => _serviceCandidateDiscoveryPrompt(
+        profile: profile,
+        tier: tier,
+        limits: limits,
+        query: query,
+        knownHints: _directPickHints(knownRecommendations, limits.optionLimit),
+        limit: limit,
+        allowSearchTools: allowSearchTools,
+      ),
+    );
+    final response = await _generateText(
+      packed.prompt,
+      maxTokens: budget.responseTokens,
+      settings: settings,
+      externalTools: allowSearchTools ? _steamExternalTools() : const [],
+    );
+    return _suggestionsFromResponse(
+      response,
+      fallbackServiceName: profile.serviceName,
+      limit: limit,
+    );
+  }
+
+  Future<AiRecommendationSuggestion?> _runDirectRecommendationPass({
+    required TasteProfile profile,
+    required _AiPromptTier tier,
+    required RecommendationQuery query,
+    required List<Recommendation> knownRecommendations,
+    required LocalAiRuntimeSettings settings,
+    required _PromptBudget budget,
+    required bool allowSearchTools,
+  }) async {
+    final packed = _packPrompt(
+      budget: budget,
+      initialLimits: _promptLimits(budget.tier),
+      build: (limits) => _serviceDirectRecommendationPrompt(
+        profile: profile,
+        tier: tier,
+        limits: limits,
+        query: query,
+        knownHints: _directPickHints(knownRecommendations, limits.optionLimit),
+        allowSearchTools: allowSearchTools,
+      ),
+    );
+    final response = await _generateText(
+      packed.prompt,
+      maxTokens: budget.responseTokens,
+      settings: settings,
+      externalTools: allowSearchTools ? _steamExternalTools() : const [],
+    );
+    return _suggestionFromResponse(
+      response,
+      fallbackServiceName: profile.serviceName,
+    );
   }
 
   @override

@@ -347,7 +347,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
           if (preferAiDiscoveryFirst) {
             progressToast.update(
-              'Searching the web for grounded ${workspace.service.displayName} matches...',
+              'Asking AI for likely ${workspace.service.displayName} matches...',
             );
             final aiDiscovered = await _discoverAiSuggestedItems(
               service: workspace.service,
@@ -562,7 +562,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
             if (preferAiDiscoveryFirst) {
               progressToast.update(
-                'Searching the web for grounded ${workspace.service.displayName} matches...',
+                'Asking AI for likely ${workspace.service.displayName} matches...',
               );
               final aiDiscovered = await _discoverAiSuggestedItems(
                 service: workspace.service,
@@ -789,14 +789,14 @@ class _HomeScreenState extends State<HomeScreen> {
     if (items.isEmpty) {
       log.addUserLine(
         usedAsPrimarySearch
-            ? 'Web-grounded AI search did not find any Steam titles I could verify, so I fell back to Steam store search.'
+            ? 'AI could not produce any verified Steam matches, so I fell back to Steam store search.'
             : 'AI did not add any extra titles beyond the direct search.',
       );
       return;
     }
     log.addUserLine(
       usedAsPrimarySearch
-          ? 'Web-grounded AI search found Steam matches: ${_summarizeTitles(items)}'
+          ? 'AI found likely Steam matches: ${_summarizeTitles(items)}'
           : 'AI added extra possible matches: ${_summarizeTitles(items)}',
     );
   }
