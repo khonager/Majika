@@ -2729,6 +2729,19 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
             : reason,
       );
     }
+    if (suggestion != null) return suggestion;
+
+    final fallbackService = fallbackServiceName.trim();
+    if (fallbackService.isNotEmpty) {
+      for (final title in _titleFragmentsFromResponse(response)) {
+        if (!_looksLikeSuggestedTitle(title)) continue;
+        return AiRecommendationSuggestion(
+          title: title.trim(),
+          serviceName: fallbackService,
+          reason: 'Chosen as the strongest direct AI recommendation.',
+        );
+      }
+    }
     return suggestion;
   }
 

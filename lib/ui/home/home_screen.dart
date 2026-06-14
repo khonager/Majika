@@ -1175,11 +1175,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final validated = _tasteEngine.rankCandidates(profile, [
       resolvedItem,
-    ], query: _hardValidationQueryFor(service, query));
+    ], query: _aiDiscoveryValidationQueryFor(service, query));
     return validated.isEmpty ? null : resolvedItem;
   }
 
-  RecommendationQuery _hardValidationQueryFor(
+  RecommendationQuery _aiDiscoveryValidationQueryFor(
     MediaService service,
     RecommendationQuery query,
   ) {
@@ -1192,8 +1192,8 @@ class _HomeScreenState extends State<HomeScreen> {
         .where(service.supportedMediaTypes.contains)
         .toSet();
     return RecommendationQuery(
-      request: query.request,
-      interpretedRequest: query.interpretedRequest,
+      request: '',
+      interpretedRequest: '',
       selectedTags: query.selectedTags,
       aiSelectedTags: query.aiSelectedTags,
       includeAdult: query.allowsAdult,
@@ -1240,7 +1240,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       final validated = _tasteEngine.rankCandidates(profile, [
         item,
-      ], query: _hardValidationQueryFor(service, query));
+      ], query: _aiDiscoveryValidationQueryFor(service, query));
       if (validated.isEmpty) {
         return (recommendation: null, discoveredItem: null);
       }
