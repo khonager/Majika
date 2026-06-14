@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:majika/core/ai/ai_search_tools.dart';
 import 'package:majika/core/ai/ai_console_log.dart';
 import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/ai/local_ai_service.dart';
@@ -912,6 +913,160 @@ void main() {
     expect(interpreted.aiSelectedTags, contains('Romance'));
     expect(interpreted.formats, contains('MOVIE'));
   });
+
+  test(
+    'Steam title discovery falls back to grounded store search for unsupported local models',
+    () async {
+      final service = FlutterGemmaLocalAiService(
+        settingsLoader: () async => const LocalAiRuntimeSettings(
+          useLocalAi: true,
+          useAiForSearch: true,
+          mode: localAiModeOnDevice,
+          provider: 'tiny local test model',
+          endpoint: defaultLocalAiEndpoint,
+          serverModel: defaultLocalAiModel,
+          deviceModelName: 'Gemma 3 1B IT',
+          contextItems: 8,
+        ),
+        searchToolbox: AiSearchToolbox(
+          httpGet: (url, {headers}) async {
+            if (url.path.contains('/storesearch/')) {
+              return http.Response(
+                jsonEncode({
+                  'items': [
+                    {'id': 1001},
+                    {'id': 1002},
+                  ],
+                }),
+                200,
+              );
+            }
+            final appId = url.queryParameters['appids'];
+            if (appId == '1001') {
+              return http.Response(
+                jsonEncode({
+                  '1001': {
+                    'success': true,
+                    'data': {
+                      'steam_appid': 1001,
+                      'name': 'VE GSIM Crane Simulator',
+                      'short_description': 'Operate heavy cranes.',
+                      'genres': [
+                        {'description': 'Simulation'},
+                      ],
+                      'categories': [
+                        {'description': 'Single-player'},
+                      ],
+                    },
+                  },
+                }),
+                200,
+              );
+            }
+            return http.Response(
+              jsonEncode({
+                '1002': {
+                  'success': true,
+                  'data': {
+                    'steam_appid': 1002,
+                    'name': 'VE GSIM Tower Crane Simulator',
+                    'short_description': 'Tower crane operations.',
+                    'genres': [
+                      {'description': 'Simulation'},
+                    ],
+                    'categories': [
+                      {'description': 'Single-player'},
+                    ],
+                  },
+                },
+              }),
+              200,
+            );
+          },
+        ),
+      );
+
+      final suggestions = await service.suggestRecommendationCandidates(
+        _profile(serviceName: 'Steam'),
+        const [],
+        query: const RecommendationQuery(
+          request: 'a game about operating a big crane',
+          formats: {'SINGLE_PLAYER'},
+          mediaTypes: {'GAME'},
+        ),
+        limit: 2,
+      );
+
+      expect(suggestions.map((item) => item.title), [
+        'VE GSIM Crane Simulator',
+        'VE GSIM Tower Crane Simulator',
+      ]);
+      expect(
+        suggestions.first.reason,
+        contains('Grounded Steam match from store search'),
+      );
+    },
+  );
+
+  test(
+    'on-device AI falls back to configured cloud model when unavailable',
+    () async {
+      Object? requestBody;
+      Uri? requestUrl;
+      final service = FlutterGemmaLocalAiService(
+        settingsLoader: () async => const LocalAiRuntimeSettings(
+          useLocalAi: true,
+          useAiForSearch: true,
+          mode: localAiModeOnDevice,
+          provider: 'unsupported local model',
+          endpoint: defaultLocalAiEndpoint,
+          serverModel: defaultLocalAiModel,
+          deviceModelName: 'Unsupported Tiny Model',
+          cloudProvider: 'Google Gemini',
+          cloudEndpoint: defaultCloudAiEndpoint,
+          cloudModel: defaultCloudAiModel,
+          cloudApiKey: 'cloud-test-key',
+          contextItems: 8,
+        ),
+        httpPost: (url, {headers, body}) async {
+          requestUrl = url;
+          requestBody = jsonDecode(body.toString());
+          return http.Response(
+            jsonEncode({
+              'choices': [
+                {
+                  'message': {
+                    'role': 'assistant',
+                    'content':
+                        '{"tags":["Simulation"],"formats":["SINGLE_PLAYER"],"searchText":"operating a big crane"}',
+                  },
+                },
+              ],
+            }),
+            200,
+          );
+        },
+      );
+
+      final interpreted = await service.interpretRecommendationRequest(
+        const RecommendationQuery(
+          request: 'a game about operating a big crane',
+        ),
+        availableTags: const ['Simulation', 'Puzzle'],
+        serviceName: 'Steam',
+        allowedMediaTypes: RecommendationQuery.steamMediaTypes,
+        allowedFormats: RecommendationQuery.steamFormats,
+      );
+
+      expect(requestUrl.toString(), defaultCloudAiEndpoint);
+      expect(
+        (requestBody as Map<String, dynamic>)['model'],
+        defaultCloudAiModel,
+      );
+      expect(interpreted.aiSelectedTags, contains('Simulation'));
+      expect(interpreted.formats, contains('SINGLE_PLAYER'));
+    },
+  );
 
   test('local AI service sends bearer auth for cloud providers', () async {
     Object? requestBody;

@@ -20,30 +20,37 @@ class AiSearchToolbox {
     if (trimmed.isEmpty) return const [];
 
     final safeLimit = limit.clamp(1, 6);
-    final uri = Uri.parse('https://store.steampowered.com/api/storesearch/')
-        .replace(
-          queryParameters: {
-            'term': trimmed,
-            'l': 'en',
-            'cc': 'us',
-            'category1': '998',
-          },
+    final appIds = <int>[];
+    for (final term in SteamService.expandedSteamStoreSearchTerms(trimmed)) {
+      final uri = Uri.parse('https://store.steampowered.com/api/storesearch/')
+          .replace(
+            queryParameters: {
+              'term': term,
+              'l': 'en',
+              'cc': 'us',
+              'category1': '998',
+            },
+          );
+      final response = await _get(
+        uri,
+        headers: const {'User-Agent': 'Majika/1.0'},
+      ).timeout(const Duration(seconds: 20));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError(
+          'Steam store search returned HTTP ${response.statusCode}.',
         );
-    final response = await _get(
-      uri,
-      headers: const {'User-Agent': 'Majika/1.0'},
-    ).timeout(const Duration(seconds: 20));
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError(
-        'Steam store search returned HTTP ${response.statusCode}.',
-      );
-    }
+      }
 
-    final decoded = jsonDecode(response.body);
-    if (decoded is! Map<String, dynamic>) return const [];
-    final appIds = SteamService.parseStoreSearchAppIds(
-      decoded,
-    ).take(safeLimit * 2);
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) continue;
+      for (final appId in SteamService.parseStoreSearchAppIds(decoded)) {
+        if (!appIds.contains(appId)) {
+          appIds.add(appId);
+        }
+        if (appIds.length >= safeLimit * 2) break;
+      }
+      if (appIds.length >= safeLimit * 2) break;
+    }
 
     final items = <Map<String, Object?>>[];
     for (final appId in appIds) {

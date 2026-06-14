@@ -325,6 +325,74 @@ void main() {
     );
   });
 
+  test(
+    'Steam niche machine requests keep text evidence and reject generic tag matches',
+    () {
+      final engine = TasteEngine();
+      final profile = engine.buildProfile(
+        '76561198000000000',
+        [
+          MediaItem(
+            id: 'steam_owned',
+            title: 'Played Action Game',
+            coverUrl: '',
+            tags: const ['Action', 'Controller Support'],
+            format: 'SINGLE_PLAYER',
+            mediaType: 'GAME',
+            status: 'OWNED',
+            playtimeMinutes: 6000,
+            sourceId: 'com.majika.service.steam',
+          ),
+        ],
+        serviceId: 'com.majika.service.steam',
+        serviceName: 'Steam',
+      );
+
+      final recommendations = engine.rankCandidates(
+        profile,
+        [
+          MediaItem(
+            id: 'steam_stardew',
+            title: 'Stardew Valley',
+            coverUrl: '',
+            tags: const [
+              'RPG',
+              'Simulation',
+              'Single-player',
+              'Controller Support',
+            ],
+            description: 'Build a life on your inherited farm.',
+            rating: 9.8,
+            format: 'SINGLE_PLAYER',
+            mediaType: 'GAME',
+            popularity: 100000,
+            sourceId: 'com.majika.service.steam',
+          ),
+          MediaItem(
+            id: 'steam_crane',
+            title: 'VE GSIM Crane Simulator',
+            coverUrl: '',
+            tags: const ['Simulation', 'Single-player', 'Controller Support'],
+            description: 'Operate a big crane and handle heavy lifting jobs.',
+            rating: 7.5,
+            format: 'SINGLE_PLAYER',
+            mediaType: 'GAME',
+            sourceId: 'com.majika.service.steam',
+          ),
+        ],
+        query: const RecommendationQuery(
+          request: 'a game about operating a big crane',
+          aiSelectedTags: {'Simulation', 'Puzzle'},
+          mediaTypes: {'GAME'},
+          formats: {'SINGLE_PLAYER', 'CONTROLLER'},
+        ),
+      );
+
+      expect(recommendations, hasLength(1));
+      expect(recommendations.single.item.id, 'steam_crane');
+    },
+  );
+
   test('Steam adult searches reject generic profile matches', () {
     final engine = TasteEngine();
     final profile = engine.buildProfile(

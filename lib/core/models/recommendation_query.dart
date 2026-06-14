@@ -559,10 +559,6 @@ class RecommendationQuery {
       _searchTerms(source: searchRequest).take(5).join(' ');
 
   bool matchesText(MediaItem item) {
-    if (effectiveTags(item.tags).isNotEmpty || effectiveFormats().isNotEmpty) {
-      return true;
-    }
-
     final terms = _searchTerms();
     if (terms.isEmpty) return true;
 

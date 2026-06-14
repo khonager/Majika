@@ -231,8 +231,26 @@ class SteamService implements MediaService {
       items.addAll((await _fetchAppDetails(_adultCandidateAppIds)).values);
     }
 
-    final baseline = await fetchRecommendationCandidates();
-    return _dedupe([...items, ...baseline]);
+    if (_shouldAppendBaselineCandidates(query, items)) {
+      final baseline = await fetchRecommendationCandidates();
+      return _dedupe([...items, ...baseline]);
+    }
+
+    return _dedupe(items);
+  }
+
+  static bool _shouldAppendBaselineCandidates(
+    RecommendationQuery query,
+    List<MediaItem> items,
+  ) {
+    if (items.isEmpty) return true;
+    final searchText = query.searchRequest.trim();
+    if (searchText.isEmpty) return true;
+    final terms = query.aniListSearchText
+        .split(' ')
+        .where((term) => term.trim().isNotEmpty)
+        .toList();
+    return terms.length <= 1;
   }
 
   Future<List<int>> _storeSearchAppIds(String term) async {
@@ -293,8 +311,111 @@ class SteamService implements MediaService {
     }
 
     final text = query.searchRequest;
-    return text.isEmpty ? const [] : [text];
+    return text.isEmpty ? const [] : expandedSteamStoreSearchTerms(text);
   }
+
+  static List<String> expandedSteamStoreSearchTerms(String rawText) {
+    final trimmed = rawText.trim();
+    if (trimmed.isEmpty) return const [];
+
+    final variants = <String>[];
+
+    void add(String value) {
+      final normalized = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+      if (normalized.isEmpty) return;
+      if (variants.contains(normalized)) return;
+      variants.add(normalized);
+    }
+
+    add(trimmed);
+
+    var simplified = trimmed.toLowerCase();
+    for (final prefix in const [
+      'a game about ',
+      'game about ',
+      'a game where you ',
+      'game where you ',
+      'a game with ',
+      'game with ',
+      'a game ',
+      'game ',
+    ]) {
+      if (simplified.startsWith(prefix)) {
+        add(trimmed.substring(prefix.length));
+        simplified = trimmed.substring(prefix.length).toLowerCase();
+        break;
+      }
+    }
+
+    final keywords = simplified
+        .split(RegExp(r'[^a-z0-9]+'))
+        .where(
+          (term) =>
+              term.isNotEmpty &&
+              !_steamSearchStopWords.contains(term) &&
+              !_steamSearchGenericTerms.contains(term),
+        )
+        .toList();
+
+    if (keywords.isNotEmpty) {
+      add(keywords.join(' '));
+    }
+    if (keywords.length >= 2) {
+      add(keywords.sublist(keywords.length - 2).join(' '));
+    }
+    if (keywords.length >= 3) {
+      add(keywords.sublist(keywords.length - 3).join(' '));
+    }
+
+    final lastKeyword = keywords.isNotEmpty ? keywords.last : '';
+    final lastTwoKeywords = keywords.length >= 2
+        ? keywords.sublist(keywords.length - 2).join(' ')
+        : lastKeyword;
+    if (lastTwoKeywords.isNotEmpty) {
+      add('$lastTwoKeywords simulator');
+    }
+    if (lastKeyword.isNotEmpty &&
+        !_steamSimulatorSuffixBlockedTerms.contains(lastKeyword)) {
+      add('$lastKeyword simulator');
+    }
+
+    return variants;
+  }
+
+  static const _steamSearchStopWords = {
+    'a',
+    'about',
+    'an',
+    'and',
+    'big',
+    'for',
+    'i',
+    'in',
+    'like',
+    'me',
+    'of',
+    'on',
+    'that',
+    'the',
+    'to',
+    'where',
+    'with',
+    'you',
+  };
+
+  static const _steamSearchGenericTerms = {
+    'game',
+    'games',
+    'operating',
+    'play',
+    'playing',
+  };
+
+  static const _steamSimulatorSuffixBlockedTerms = {
+    'simulator',
+    'simulation',
+    'sim',
+  };
 
   static bool _hasComedyIntent(RecommendationQuery query) {
     final tags = {

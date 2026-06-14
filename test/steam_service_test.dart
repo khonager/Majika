@@ -207,6 +207,77 @@ void main() {
     expect(candidates.map((item) => item.title), contains('Overcooked! 2'));
   });
 
+  test(
+    'niche Steam text search does not append generic baseline when results exist',
+    () async {
+      final appDetailIds = <String>[];
+      final service = SteamService(
+        client: MockClient((request) async {
+          final url = request.url.toString();
+          if (url.contains('storesearch')) {
+            return _json({
+              'items': [
+                {'id': 1001},
+              ],
+            });
+          }
+          if (url.contains('appdetails')) {
+            final appId = request.url.queryParameters['appids']!;
+            appDetailIds.add(appId);
+            return _json({
+              appId: {
+                'success': true,
+                'data': {
+                  'steam_appid': int.parse(appId),
+                  'name': appId == '1001'
+                      ? 'VE GSIM Crane Simulator'
+                      : 'Game $appId',
+                  'short_description': appId == '1001'
+                      ? 'Operate a big crane and complete heavy lifting jobs.'
+                      : 'A Steam game.',
+                  'genres': [
+                    {'description': 'Simulation'},
+                  ],
+                  'categories': [
+                    {'description': 'Single-player'},
+                    {'description': 'Full controller support'},
+                  ],
+                },
+              },
+            });
+          }
+          return http.Response('not found', 404);
+        }),
+      );
+
+      final candidates = await service.searchRecommendationCandidates(
+        const RecommendationQuery(
+          request: 'a game about operating a big crane',
+          mediaTypes: {'GAME'},
+          formats: {'SINGLE_PLAYER', 'CONTROLLER'},
+        ),
+      );
+
+      expect(candidates.map((item) => item.title), ['VE GSIM Crane Simulator']);
+      expect(appDetailIds, isNot(contains('413150')));
+    },
+  );
+
+  test(
+    'Steam query expansion turns natural language machine requests into simulator search terms',
+    () {
+      final terms = SteamService.expandedSteamStoreSearchTerms(
+        'a game about operating a big crane',
+      );
+
+      expect(terms.first, 'a game about operating a big crane');
+      expect(terms, contains('operating a big crane'));
+      expect(terms, contains('crane'));
+      expect(terms, contains('crane simulator'));
+      expect(terms, contains('big crane simulator'));
+    },
+  );
+
   test('comedy search adds curated matches beyond weak fun titles', () async {
     final storeTerms = <String>[];
     final appDetailIds = <String>[];

@@ -433,7 +433,12 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     Iterable<String> allowedMediaTypes = RecommendationQuery.aniListMediaTypes,
     Iterable<String> allowedFormats = RecommendationQuery.aniListFormats,
   }) async {
-    final settings = await _runtimeSettings();
+    final baseSettings = await _runtimeSettings();
+    final settings = _effectiveSettingsForTask(
+      baseSettings,
+      task: 'search_interpretation',
+      minimumTier: AiModelTrustTier.constrained,
+    );
     final supportsExplicitContent = _isAniListService(serviceName);
     final explicitAllowedBySettings =
         settings.allowExplicitContent && supportsExplicitContent;
@@ -608,6 +613,17 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     }
 
     if (!isConfigured) {
+      if (settings.hasCloudFallback) {
+        _currentConsoleLog?.addLine(
+          'No on-device model is configured. Falling back to cloud AI.',
+        );
+        return _generateExternalText(
+          prompt,
+          maxTokens: maxTokens,
+          settings: settings.asCloudFallback(),
+          tools: externalTools,
+        );
+      }
       throw StateError('No local AI model is configured.');
     }
 
@@ -623,6 +639,15 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       return response;
     } catch (error) {
       log?.addLine('AI request failed: $error');
+      if (settings.hasCloudFallback) {
+        log?.addLine('Retrying with cloud AI fallback.');
+        return _generateExternalText(
+          prompt,
+          maxTokens: maxTokens,
+          settings: settings.asCloudFallback(),
+          tools: externalTools,
+        );
+      }
       if (preferredBackend == null ||
           preferredBackend == PreferredBackend.cpu) {
         rethrow;
@@ -637,6 +662,38 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       log?.addSection('Response', response);
       return response;
     }
+  }
+
+  LocalAiRuntimeSettings _effectiveSettingsForTask(
+    LocalAiRuntimeSettings settings, {
+    required String task,
+    required AiModelTrustTier minimumTier,
+  }) {
+    if (textGenerator != null) return settings;
+    final currentTier = _trustTierForTask(settings, task);
+    if (_meetsTrustTier(currentTier, minimumTier)) {
+      return settings;
+    }
+    if (!settings.hasCloudFallback) return settings;
+    final cloudFallback = settings.asCloudFallback();
+    final cloudTier = _trustTierForTask(cloudFallback, task);
+    return _meetsTrustTier(cloudTier, minimumTier) ? cloudFallback : settings;
+  }
+
+  AiModelTrustTier _trustTierForTask(
+    LocalAiRuntimeSettings settings,
+    String task,
+  ) {
+    return switch (task) {
+      'search_interpretation' => settings.searchInterpretationTrustTier,
+      'steam_discovery' => settings.steamDiscoveryTrustTier,
+      'recommendation_selection' => settings.recommendationSelectionTrustTier,
+      _ => AiModelTrustTier.unsupported,
+    };
+  }
+
+  bool _meetsTrustTier(AiModelTrustTier actual, AiModelTrustTier minimum) {
+    return actual.index >= minimum.index;
   }
 
   Future<String> _generateOnDeviceText(
@@ -1491,6 +1548,7 @@ For adult/sexual Steam requests, use Steam tags such as Sexual Content, Nudity, 
 Do not return AniList media types, AniList release formats, or adult-content fields.
 Keep leftover natural-language game terms in searchText.
 Keep searchText short and close to the user's wording. Do not rewrite the whole request.
+For niche Steam requests about a specific job, machine, object, profession, or activity, prefer searchText over broad tags. Leave tags empty unless an exact Steam tag adds real precision.
 ${_formatInstruction('Steam', allowedFormats)}
 ${_tagInstruction('Steam', tier, tagList)}
 User request: ${query.request}
@@ -2823,8 +2881,18 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     int limit = 5,
   }) async {
     if (!query.isActive || limit <= 0) return const [];
-    final settings = await _runtimeSettings();
+    final baseSettings = await _runtimeSettings();
+    final settings = _effectiveSettingsForTask(
+      baseSettings,
+      task: 'steam_discovery',
+      minimumTier: AiModelTrustTier.trusted,
+    );
     if (!settings.useLocalAi && textGenerator == null) return const [];
+    final discoveryTrust = _trustTierForTask(settings, 'steam_discovery');
+    if (_isSteamService(profile.serviceName) &&
+        !_meetsTrustTier(discoveryTrust, AiModelTrustTier.trusted)) {
+      return _groundedSteamSuggestions(query, limit: limit);
+    }
     final allowSearchTools =
         settings.supportsSearchTools && _isSteamService(profile.serviceName);
 
@@ -2869,8 +2937,19 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     required RecommendationQuery query,
   }) async {
     if (!query.isActive) return null;
-    final settings = await _runtimeSettings();
+    final baseSettings = await _runtimeSettings();
+    final settings = _effectiveSettingsForTask(
+      baseSettings,
+      task: 'steam_discovery',
+      minimumTier: AiModelTrustTier.trusted,
+    );
     if (!settings.useLocalAi && textGenerator == null) return null;
+    final discoveryTrust = _trustTierForTask(settings, 'steam_discovery');
+    if (_isSteamService(profile.serviceName) &&
+        !_meetsTrustTier(discoveryTrust, AiModelTrustTier.trusted)) {
+      final suggestions = await _groundedSteamSuggestions(query, limit: 1);
+      return suggestions.isEmpty ? null : suggestions.first;
+    }
     final allowSearchTools =
         settings.supportsSearchTools && _isSteamService(profile.serviceName);
 
@@ -2993,7 +3072,12 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     required RecommendationQuery query,
   }) async {
     if (recommendations.isEmpty) return null;
-    final settings = await _runtimeSettings();
+    final baseSettings = await _runtimeSettings();
+    final settings = _effectiveSettingsForTask(
+      baseSettings,
+      task: 'recommendation_selection',
+      minimumTier: AiModelTrustTier.trusted,
+    );
     final requestedFormats = query.effectiveFormats();
     final requireLocalCoOp = query.infersLocalCoOp;
     final selectableRecommendations = _formatEligibleRecommendations(
@@ -3002,6 +3086,16 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
       requireLocalCoOp: requireLocalCoOp,
     );
     if (!settings.useLocalAi && textGenerator == null) {
+      return fallback.chooseTopRecommendation(
+        profile,
+        selectableRecommendations,
+        query: query,
+      );
+    }
+    if (!_meetsTrustTier(
+      _trustTierForTask(settings, 'recommendation_selection'),
+      AiModelTrustTier.trusted,
+    )) {
       return fallback.chooseTopRecommendation(
         profile,
         selectableRecommendations,
@@ -3109,7 +3203,12 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     required RecommendationQuery query,
   }) async {
     if (recommendations.isEmpty) return null;
-    final settings = await _runtimeSettings();
+    final baseSettings = await _runtimeSettings();
+    final settings = _effectiveSettingsForTask(
+      baseSettings,
+      task: 'recommendation_selection',
+      minimumTier: AiModelTrustTier.trusted,
+    );
     final requestedFormats = query.effectiveFormats();
     final requireLocalCoOp = query.infersLocalCoOp;
     final selectableRecommendations = _formatEligibleRecommendations(
@@ -3118,6 +3217,16 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
       requireLocalCoOp: requireLocalCoOp,
     );
     if (!settings.useLocalAi && textGenerator == null) {
+      return fallback.chooseHomeRecommendation(
+        profiles,
+        selectableRecommendations,
+        query: query,
+      );
+    }
+    if (!_meetsTrustTier(
+      _trustTierForTask(settings, 'recommendation_selection'),
+      AiModelTrustTier.trusted,
+    )) {
       return fallback.chooseHomeRecommendation(
         profiles,
         selectableRecommendations,
@@ -3359,5 +3468,45 @@ Options: ${jsonEncode(options)}
       'STEAM_DECK' => {'steamdeck', 'steamdeckverified'},
       _ => {format.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '')},
     };
+  }
+
+  Future<List<AiRecommendationSuggestion>> _groundedSteamSuggestions(
+    RecommendationQuery query, {
+    required int limit,
+  }) async {
+    final searchText = query.interpretedRequest.trim().isNotEmpty
+        ? query.interpretedRequest.trim()
+        : query.searchRequest.trim().isNotEmpty
+        ? query.searchRequest.trim()
+        : query.request.trim();
+    if (searchText.isEmpty) return const [];
+    try {
+      final results = await searchToolbox.searchSteamGames(
+        searchText,
+        limit: limit,
+      );
+      return [
+        for (final result in results.take(limit))
+          AiRecommendationSuggestion(
+            title: result['title']?.toString().trim() ?? '',
+            serviceName: 'Steam',
+            reason: _groundedSteamReason(result),
+          ),
+      ].where((suggestion) => suggestion.title.isNotEmpty).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  String _groundedSteamReason(Map<String, Object?> result) {
+    final tags = _stringList(result['tags']);
+    if (tags.isNotEmpty) {
+      return 'Grounded Steam match from store search: ${tags.take(2).join(' and ')}.';
+    }
+    final subtitle = result['subtitle']?.toString().trim() ?? '';
+    if (subtitle.isNotEmpty) {
+      return 'Grounded Steam match from store search: $subtitle.';
+    }
+    return 'Grounded Steam match from store search.';
   }
 }

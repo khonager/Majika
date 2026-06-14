@@ -58,6 +58,8 @@ const defaultManualContextWindowTokens = 1048576;
 const minimumAiContextWindowTokens = 2048;
 const maximumAiContextWindowTokens = 1048576;
 
+enum AiModelTrustTier { unsupported, constrained, trusted }
+
 class LocalAiSettingsKeys {
   static const immersiveReader = 'settings.immersiveReader';
   static const downloadOnWifiOnly = 'settings.downloadOnWifiOnly';
@@ -186,6 +188,51 @@ class LocalAiRuntimeSettings {
     modelName: activeModelName,
     cloudProvider: usesExternalCloud ? cloudProvider : '',
   );
+
+  AiModelTrustTier get searchInterpretationTrustTier => resolveAiModelTrustTier(
+    mode: mode,
+    modelName: activeModelName,
+    cloudProvider: usesExternalCloud ? cloudProvider : '',
+    task: 'search_interpretation',
+  );
+
+  AiModelTrustTier get steamDiscoveryTrustTier => resolveAiModelTrustTier(
+    mode: mode,
+    modelName: activeModelName,
+    cloudProvider: usesExternalCloud ? cloudProvider : '',
+    task: 'steam_discovery',
+  );
+
+  AiModelTrustTier get recommendationSelectionTrustTier =>
+      resolveAiModelTrustTier(
+        mode: mode,
+        modelName: activeModelName,
+        cloudProvider: usesExternalCloud ? cloudProvider : '',
+        task: 'recommendation_selection',
+      );
+
+  bool get hasCloudFallback =>
+      cloudApiKey.trim().isNotEmpty && cloudEndpoint.trim().isNotEmpty;
+
+  LocalAiRuntimeSettings asCloudFallback() {
+    return LocalAiRuntimeSettings(
+      useLocalAi: useLocalAi,
+      useAiForSearch: useAiForSearch,
+      mode: localAiModeExternalCloud,
+      provider: provider,
+      endpoint: endpoint,
+      serverModel: serverModel,
+      cloudProvider: cloudProvider,
+      cloudEndpoint: cloudEndpoint,
+      cloudModel: cloudModel,
+      cloudApiKey: cloudApiKey,
+      deviceModelName: deviceModelName,
+      backend: backend,
+      contextItems: contextItems,
+      contextWindowOverrideTokens: contextWindowOverrideTokens,
+      allowExplicitContent: allowExplicitContent,
+    );
+  }
 
   PreferredBackend? get preferredBackend {
     return switch (backend) {
@@ -465,6 +512,86 @@ bool _looksLikeToolCapableModel(String modelName) {
       normalized.contains('claude') ||
       normalized.contains('deepseek') ||
       normalized.contains('mistral');
+}
+
+AiModelTrustTier resolveAiModelTrustTier({
+  required String mode,
+  required String modelName,
+  String cloudProvider = '',
+  required String task,
+}) {
+  final normalizedModel = modelName.trim().toLowerCase();
+  final normalizedProvider = cloudProvider.trim().toLowerCase();
+  final combined = '$normalizedProvider $normalizedModel'.trim();
+
+  if (normalizedModel.isEmpty) {
+    return AiModelTrustTier.unsupported;
+  }
+
+  if (task == 'search_interpretation') {
+    if (mode == localAiModeExternalCloud) {
+      if (_matchesAny(combined, const [
+        'google gemini gemini-2.5-flash-lite',
+        'google gemini gemini-2.5-flash',
+        'groq llama-3.3-70b-versatile',
+        'groq openai/gpt-oss-20b',
+        'groq qwen/qwen3-32b',
+      ])) {
+        return AiModelTrustTier.trusted;
+      }
+      if (_looksLikeToolCapableModel(modelName)) {
+        return AiModelTrustTier.constrained;
+      }
+      return AiModelTrustTier.unsupported;
+    }
+
+    if (_matchesAny(combined, const [
+      'qwen3:4b-instruct',
+      'qwen3:8b',
+      'gemma3:4b',
+      'gemma 3 1b it',
+      'gemma 3n',
+    ])) {
+      return AiModelTrustTier.constrained;
+    }
+    return _looksLikeToolCapableModel(modelName)
+        ? AiModelTrustTier.constrained
+        : AiModelTrustTier.unsupported;
+  }
+
+  if (task == 'steam_discovery' || task == 'recommendation_selection') {
+    if (mode == localAiModeExternalCloud &&
+        _matchesAny(combined, const [
+          'google gemini gemini-2.5-flash-lite',
+          'google gemini gemini-2.5-flash',
+          'groq llama-3.3-70b-versatile',
+          'groq openai/gpt-oss-20b',
+          'groq qwen/qwen3-32b',
+        ])) {
+      return AiModelTrustTier.trusted;
+    }
+
+    if (mode == localAiModeExternalCloud &&
+        _matchesAny(combined, const [
+          'openrouter openai/gpt-oss-20b:free',
+          'openrouter meta-llama/llama-3.2-3b-instruct:free',
+          'openrouter qwen/qwen3-coder:free',
+          'openrouter openrouter/free',
+        ])) {
+      return AiModelTrustTier.constrained;
+    }
+
+    return AiModelTrustTier.unsupported;
+  }
+
+  return AiModelTrustTier.unsupported;
+}
+
+bool _matchesAny(String value, List<String> needles) {
+  for (final needle in needles) {
+    if (value.contains(needle)) return true;
+  }
+  return false;
 }
 
 String formatAiTokenCount(int tokens) {
