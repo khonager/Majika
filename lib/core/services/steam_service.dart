@@ -788,6 +788,10 @@ class SteamService implements MediaService {
       if (normalized.contains('online co-op')) mapped.add('Online Co-op');
       if (normalized.contains('controller')) mapped.add('Controller Support');
       if (normalized.contains('deck')) mapped.add('Steam Deck');
+      if (RegExp(r'(^|[^a-z0-9])vr([^a-z0-9]|$)').hasMatch(normalized) ||
+          normalized.contains('virtual reality')) {
+        mapped.add('VR');
+      }
       mapped.add(value.replaceAll(RegExp(r'\s+'), ' ').trim());
     }
     return [

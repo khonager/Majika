@@ -335,6 +335,14 @@ class TasteEngine {
     Set<String> specificRequestedTags,
   ) {
     if (candidate.tags.any(specificRequestedTags.contains)) return true;
+    final haystack = _normalizedEvidenceText(candidate);
+    for (final tag in specificRequestedTags) {
+      final hints = _requestTagEvidenceHints[tag];
+      if (hints != null &&
+          hints.any((hint) => _containsWholePhrase(haystack, hint))) {
+        return true;
+      }
+    }
     if (candidate.isAdult &&
         specificRequestedTags.any(_adultRequestTags.contains)) {
       return true;
@@ -896,6 +904,14 @@ class TasteEngine {
       'silly',
       'slapstick',
       'witty',
+    },
+    'VR': {
+      'vr',
+      'vr only',
+      'vr supported',
+      'virtual reality',
+      'tracked motion controllers',
+      'steamvr',
     },
   };
 

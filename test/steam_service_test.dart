@@ -382,6 +382,31 @@ void main() {
     expect(item?.tags, contains('Visual Novel'));
   });
 
+  test('parses Steam VR categories into the VR tag', () {
+    final item = SteamService.parseAppDetails({
+      '5555': {
+        'success': true,
+        'data': {
+          'steam_appid': 5555,
+          'type': 'game',
+          'name': 'Adventure Climb VR',
+          'short_description': 'A focused virtual reality climbing game.',
+          'genres': [
+            {'description': 'Simulation'},
+          ],
+          'categories': [
+            {'description': 'Single-player'},
+            {'description': 'VR Only'},
+            {'description': 'Tracked Motion Controllers'},
+          ],
+        },
+      },
+    }, appId: 5555);
+
+    expect(item?.tags, contains('VR'));
+    expect(item?.tags, contains('VR Only'));
+  });
+
   test('service reports missing local Steam API key', () async {
     final service = SteamService(apiKeyProvider: () async => '');
 

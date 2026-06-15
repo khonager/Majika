@@ -936,6 +936,46 @@ void main() {
     expect(recommendations.single.item.title, 'Mischief Village');
   });
 
+  test('Steam VR requests accept VR category evidence', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile('tester', [
+      MediaItem(
+        id: 'steam_seen',
+        title: 'Seen Controller Game',
+        coverUrl: '',
+        tags: const ['Action', 'Controller Support'],
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        status: 'OWNED',
+        sourceId: 'com.majika.service.steam',
+      ),
+    ], serviceName: 'Steam');
+
+    final recommendations = engine.rankCandidates(
+      profile,
+      [
+        MediaItem(
+          id: 'steam_climb',
+          title: 'Adventure Climb VR',
+          coverUrl: '',
+          tags: const ['VR Only', 'Single-player', 'Simulation'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+          description:
+              'A virtual reality climbing game built around ascending cliffs.',
+        ),
+      ],
+      query: const RecommendationQuery(
+        request: 'a vr game where all you do is climb',
+        aiSelectedTags: {'VR'},
+      ),
+    );
+
+    expect(recommendations, hasLength(1));
+    expect(recommendations.single.item.title, 'Adventure Climb VR');
+  });
+
   test('low-signal fun words do not boost title-only matches', () {
     final engine = TasteEngine();
     final profile = engine.buildProfile('tester', [
