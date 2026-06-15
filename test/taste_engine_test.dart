@@ -546,6 +546,56 @@ void main() {
     expect(recommendations.single.item.title, 'Prototype');
   });
 
+  test('superpowered open-world requests reject broad open-world-only matches', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile(
+      '76561198000000000',
+      const [],
+      serviceId: 'com.majika.service.steam',
+      serviceName: 'Steam',
+    );
+
+    final recommendations = engine.rankCandidates(
+      profile,
+      [
+        MediaItem(
+          id: 'steam_generic_open_world',
+          title: 'Open World Survival Craft',
+          coverUrl: '',
+          tags: const ['Open World', 'Survival', 'Crafting'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          description:
+              'Explore a large open world, gather materials, and survive.',
+          sourceId: 'com.majika.service.steam',
+        ),
+        MediaItem(
+          id: 'steam_power_city',
+          title: 'Neon City Powers',
+          coverUrl: '',
+          tags: const ['Action', 'Adventure', 'Open World'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          description:
+              'Use superhuman powers, parkour, dashing, and city traversal in an open world.',
+          sourceId: 'com.majika.service.steam',
+        ),
+      ],
+      query: const RecommendationQuery(
+        request:
+            'something similar to infamous second son. superpowers and open world',
+        aiSelectedTags: {'Open World'},
+      ),
+    );
+
+    expect(recommendations, hasLength(1));
+    expect(recommendations.single.item.title, 'Neon City Powers');
+    expect(
+      recommendations.single.signals,
+      contains('wanted superpowered open world'),
+    );
+  });
+
   test(
     'ratings and AniList favorites affect match scores without flat 99s',
     () {
@@ -1008,7 +1058,7 @@ void main() {
         ),
         MediaItem(
           id: 'steam_climbey',
-          title: 'Climbey',
+          title: 'Hand Locomotion Climber',
           coverUrl: '',
           tags: const ['VR Only', 'Co-op', 'Online Co-op', 'Simulation'],
           format: 'ONLINE_CO_OP',
@@ -1020,7 +1070,7 @@ void main() {
         ),
         MediaItem(
           id: 'steam_gorilla',
-          title: 'Gorilla Tag',
+          title: 'Hand Climb Tag',
           coverUrl: '',
           tags: const ['VR Only', 'Multiplayer', 'Action'],
           format: 'MULTIPLAYER',
@@ -1036,7 +1086,10 @@ void main() {
       ),
     );
 
-    expect(recommendations.map((rec) => rec.item.title), contains('Climbey'));
+    expect(
+      recommendations.map((rec) => rec.item.title),
+      contains('Hand Locomotion Climber'),
+    );
     expect(recommendations.first.item.title, isNot('VR LightingClimbing'));
     expect(recommendations.first.signals, contains('wanted VR climbing'));
   });
@@ -1072,7 +1125,7 @@ void main() {
         ),
         MediaItem(
           id: 'steam_before',
-          title: 'Before Your Eyes',
+          title: 'Blink Story Adventure',
           coverUrl: '',
           tags: const ['Adventure', 'Indie', 'Single-player'],
           format: 'SINGLE_PLAYER',
@@ -1084,7 +1137,7 @@ void main() {
         ),
         MediaItem(
           id: 'steam_clapping',
-          title: 'One Hand Clapping',
+          title: 'Vocal Puzzle Platformer',
           coverUrl: '',
           tags: const ['Adventure', 'Puzzle', 'Single-player'],
           format: 'SINGLE_PLAYER',
@@ -1101,11 +1154,11 @@ void main() {
       ),
     );
 
-    expect(recommendations.first.item.title, 'Before Your Eyes');
+    expect(recommendations.first.item.title, 'Blink Story Adventure');
     expect(recommendations.first.signals, contains('wanted unusual controls'));
     expect(
       recommendations.map((rec) => rec.item.title),
-      contains('One Hand Clapping'),
+      contains('Vocal Puzzle Platformer'),
     );
     expect(
       recommendations.map((rec) => rec.item.title),

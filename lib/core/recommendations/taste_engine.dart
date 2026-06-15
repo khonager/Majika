@@ -226,6 +226,10 @@ class TasteEngine {
           candidate,
           query.request,
         );
+        final superpoweredOpenWorldScore = _superpoweredOpenWorldIntentScore(
+          candidate,
+          query.request,
+        );
         final requestTagEvidenceScore = _requestTagEvidenceScore(
           candidate,
           requestedTags,
@@ -237,16 +241,22 @@ class TasteEngine {
         score += codingHackScore * 3.4;
         score += vrClimbingIntentScore * 4.0;
         score += unusualInputControlScore * 3.6;
+        score += superpoweredOpenWorldScore * 4.0;
         score += requestTagEvidenceScore * 2.0;
         final hasRequestEvidence =
             requestTextScore > 0 ||
             codingHackScore > 0 ||
             vrClimbingIntentScore > 0 ||
             unusualInputControlScore > 0 ||
+            superpoweredOpenWorldScore > 0 ||
             requestTagEvidenceScore > 0 ||
             requestedGenreMatches.isNotEmpty ||
             hasAdultRequestEvidence;
         if (_isCodingHackRequest(query.request) && codingHackScore <= 0) {
+          continue;
+        }
+        if (_isSuperpoweredOpenWorldRequest(query.request) &&
+            superpoweredOpenWorldScore <= 0) {
           continue;
         }
         if (_requiresRequestEvidence(query, requestedTags) &&
@@ -258,6 +268,9 @@ class TasteEngine {
         }
         if (unusualInputControlScore > 0) {
           signals.add('wanted unusual controls');
+        }
+        if (superpoweredOpenWorldScore > 0) {
+          signals.add('wanted superpowered open world');
         }
       }
 
@@ -440,19 +453,12 @@ class TasteEngine {
     if (!_hasVrEvidence(candidate)) return 0;
 
     final haystack = _normalizedEvidenceText(candidate);
-    final normalizedTitle = candidate.title.toLowerCase();
     var score = 0.0;
 
     if (_vrClimbingEvidenceTerms.any(
       (term) => _containsWholePhrase(haystack, term),
     )) {
       score += 1.2;
-    }
-    for (final titleHint in _vrClimbingTitleHints) {
-      if (_containsWholePhrase(normalizedTitle, titleHint)) {
-        score += 2.4;
-        break;
-      }
     }
     if (_containsWholePhrase(haystack, 'vr') &&
         _containsWholePhrase(haystack, 'climb')) {
@@ -468,7 +474,6 @@ class TasteEngine {
     if (!faceRequest && !voiceRequest) return 0;
 
     final haystack = _normalizedEvidenceText(candidate);
-    final normalizedTitle = candidate.title.toLowerCase();
     var score = 0.0;
 
     if (faceRequest &&
@@ -477,24 +482,43 @@ class TasteEngine {
         )) {
       score += 1.5;
     }
-    if (faceRequest &&
-        _containsWholePhrase(normalizedTitle, 'before your eyes')) {
-      score += 2.6;
-    }
     if (voiceRequest &&
         _voiceControlEvidenceTerms.any(
           (term) => _containsWholePhrase(haystack, term),
         )) {
       score += 1.4;
     }
-    if (voiceRequest &&
-        _voiceControlTitleHints.any(
-          (term) => _containsWholePhrase(normalizedTitle, term),
-        )) {
-      score += 2.0;
-    }
 
     return min(score, 4.2);
+  }
+
+  double _superpoweredOpenWorldIntentScore(
+    MediaItem candidate,
+    String request,
+  ) {
+    if (!_isSuperpoweredOpenWorldRequest(request)) return 0;
+
+    final haystack = _normalizedEvidenceText(candidate);
+    var score = 0.0;
+
+    if (_superpoweredOpenWorldEvidenceTerms.any(
+      (term) => _containsWholePhrase(haystack, term),
+    )) {
+      score += 1.4;
+    }
+    if (_superpoweredTraversalEvidenceTerms.any(
+      (term) => _containsWholePhrase(haystack, term),
+    )) {
+      score += 1.1;
+    }
+    if (_containsWholePhrase(haystack, 'open world') &&
+        _superpoweredOpenWorldEvidenceTerms.any(
+          (term) => _containsWholePhrase(haystack, term),
+        )) {
+      score += 0.8;
+    }
+
+    return min(score, 4.5);
   }
 
   double _requestTagEvidenceScore(
@@ -570,6 +594,20 @@ class TasteEngine {
 
   bool _isUnusualInputControlRequest(String request) {
     return _isFaceControlRequest(request) || _isVoiceControlRequest(request);
+  }
+
+  bool _isSuperpoweredOpenWorldRequest(String request) {
+    final normalized = request.toLowerCase();
+    final mentionsReference = _superpoweredReferenceTerms.any(
+      (term) => _containsWholePhrase(normalized, term),
+    );
+    final mentionsPowers = _superpoweredRequestTerms.any(
+      (term) => _containsWholePhrase(normalized, term),
+    );
+    final mentionsOpenWorld =
+        _containsWholePhrase(normalized, 'open world') ||
+        _containsWholePhrase(normalized, 'sandbox');
+    return mentionsReference || (mentionsPowers && mentionsOpenWorld);
   }
 
   bool _hasVrEvidence(MediaItem candidate) {
@@ -933,21 +971,6 @@ class TasteEngine {
     'vertical',
   };
 
-  static const Set<String> _vrClimbingTitleHints = {
-    'adventure climb vr',
-    'bean stalker',
-    'climbey',
-    'everest vr',
-    'gorilla tag',
-    'indoor rock climbing vr',
-    'stride',
-    'the peak climb vr',
-    'to the top',
-    'vr rock climbing',
-    'windlands',
-    'windlands 2',
-  };
-
   static const Set<String> _faceControlRequestTerms = {
     'blink',
     'blinks',
@@ -995,11 +1018,58 @@ class TasteEngine {
     'voice commands',
   };
 
-  static const Set<String> _voiceControlTitleHints = {
-    'in verbis virtus',
-    'one hand clapping',
-    'stifled',
-    'there came an echo',
+  static const Set<String> _superpoweredReferenceTerms = {
+    'infamous',
+    'infamous second son',
+    'prototype',
+    'spider man',
+    'spiderman',
+    'sunset overdrive',
+  };
+
+  static const Set<String> _superpoweredRequestTerms = {
+    'abilities',
+    'ability',
+    'power',
+    'powers',
+    'superhero',
+    'superheroes',
+    'superhuman',
+    'superpower',
+    'superpowers',
+    'supernatural',
+  };
+
+  static const Set<String> _superpoweredOpenWorldEvidenceTerms = {
+    'abilities',
+    'ability',
+    'mutant',
+    'power',
+    'powers',
+    'super hero',
+    'superhero',
+    'superheroes',
+    'superhuman',
+    'supernatural',
+    'web slinging',
+    'web-slinging',
+  };
+
+  static const Set<String> _superpoweredTraversalEvidenceTerms = {
+    'air dash',
+    'dash',
+    'free running',
+    'grind',
+    'grinding',
+    'parkour',
+    'swing',
+    'swinging',
+    'traversal',
+    'wall run',
+    'wall-run',
+    'web slinging',
+    'web-slinging',
+    'wingsuit',
   };
 
   static const Map<String, Set<String>> _requestTagEvidenceHints = {

@@ -276,6 +276,7 @@ class SteamService implements MediaService {
         .toSet();
     _addUnusualInputControlSearchTerms(add, rawKeywordSet);
     _addVrClimbingSearchTerms(add, rawKeywordSet);
+    _addSuperpoweredOpenWorldSearchTerms(add, rawKeywordSet);
 
     var simplified = trimmed.toLowerCase();
     for (final prefix in const [
@@ -386,18 +387,16 @@ class SteamService implements MediaService {
         keywords.contains('singing');
 
     if (mentionsFaceControl) {
-      add('Before Your Eyes');
       add('eye tracking');
       add('blink control');
       add('webcam control');
+      add('face controlled game');
     }
     if (mentionsVoiceControl) {
-      add('One Hand Clapping');
-      add('There Came an Echo');
-      add('In Verbis Virtus');
-      add('Stifled');
       add('voice control');
       add('microphone control');
+      add('speech controlled game');
+      add('singing game');
     }
   }
 
@@ -424,21 +423,43 @@ class SteamService implements MediaService {
         keywords.contains('grappling');
     if (!mentionsVr || !mentionsClimbing) return;
 
-    add('Climbey');
-    add('TO THE TOP');
-    add('Gorilla Tag');
-    add('Windlands');
-    add('Windlands 2');
-    add('EVEREST VR');
-    add('Adventure Climb VR');
-    add('The Peak Climb VR');
-    add('Indoor Rock Climbing VR');
-    add('VR Rock Climbing');
-    add('Bean Stalker');
-    add('Cave Digger');
-    add('STRIDE');
     add('VR climbing');
     add('VR rock climbing');
+    add('VR parkour');
+    add('VR grappling');
+    add('VR hand locomotion');
+  }
+
+  static void _addSuperpoweredOpenWorldSearchTerms(
+    void Function(String value) add,
+    Set<String> keywords,
+  ) {
+    final mentionsOpenWorld =
+        keywords.contains('open') ||
+        keywords.contains('world') ||
+        keywords.contains('sandbox') ||
+        keywords.contains('city');
+    final mentionsPowers =
+        keywords.contains('infamous') ||
+        keywords.contains('superpower') ||
+        keywords.contains('superpowers') ||
+        keywords.contains('superhero') ||
+        keywords.contains('superheroes') ||
+        keywords.contains('powers') ||
+        keywords.contains('power') ||
+        keywords.contains('prototype') ||
+        keywords.contains('spider') ||
+        keywords.contains('spiderman') ||
+        keywords.contains('sunset') ||
+        keywords.contains('overdrive');
+    if (!mentionsOpenWorld && !mentionsPowers) return;
+
+    add('superhero open world');
+    add('superpowers open world');
+    add('open world parkour');
+    add('open world traversal');
+    add('superpowered action game');
+    add('superhero parkour');
   }
 
   static const _steamSearchStopWords = {

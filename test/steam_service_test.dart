@@ -286,24 +286,36 @@ void main() {
       'a game that you can control with just your voice or your face',
     );
 
-    expect(terms, contains('Before Your Eyes'));
-    expect(terms, contains('One Hand Clapping'));
-    expect(terms, contains('There Came an Echo'));
-    expect(terms, contains('In Verbis Virtus'));
+    expect(terms, contains('blink control'));
+    expect(terms, contains('webcam control'));
+    expect(terms, contains('voice control'));
+    expect(terms, contains('microphone control'));
   });
 
-  test('Steam search term expansion includes strong VR climbing titles', () {
+  test('Steam search term expansion includes strong VR climbing concepts', () {
     final terms = SteamService.expandedSteamStoreSearchTerms(
       'a vr game about climbing',
     );
 
-    expect(terms, contains('Climbey'));
-    expect(terms, contains('TO THE TOP'));
-    expect(terms, contains('Gorilla Tag'));
-    expect(terms, contains('Windlands'));
-    expect(terms, contains('EVEREST VR'));
+    expect(terms, contains('VR climbing'));
     expect(terms, contains('VR rock climbing'));
+    expect(terms, contains('VR parkour'));
+    expect(terms, contains('VR grappling'));
   });
+
+  test(
+    'Steam search term expansion includes superpowered open-world concepts',
+    () {
+      final terms = SteamService.expandedSteamStoreSearchTerms(
+        'something similar to infamous seconds son. superpowers and open world',
+      );
+
+      expect(terms, contains('superhero open world'));
+      expect(terms, contains('superpowers open world'));
+      expect(terms, contains('open world parkour'));
+      expect(terms, contains('open world traversal'));
+    },
+  );
 
   test(
     'specific Steam text search does not poison niche queries with controller support terms',

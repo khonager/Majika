@@ -1497,23 +1497,43 @@ Do not browse first when you can already name likely matches confidently.
         terms.contains('mountains') ||
         terms.contains('grapple') ||
         terms.contains('grappling');
+    final mentionsOpenWorld =
+        terms.contains('open') ||
+        terms.contains('world') ||
+        terms.contains('sandbox') ||
+        terms.contains('city');
+    final mentionsSuperpowered =
+        terms.contains('infamous') ||
+        terms.contains('superpower') ||
+        terms.contains('superpowers') ||
+        terms.contains('superhero') ||
+        terms.contains('superheroes') ||
+        terms.contains('powers') ||
+        terms.contains('power') ||
+        terms.contains('prototype') ||
+        terms.contains('spider') ||
+        terms.contains('spiderman') ||
+        terms.contains('sunset') ||
+        terms.contains('overdrive');
 
     if (mentionsFaceControl) {
       hints.add(
-        'For face/webcam/eye/blink control requests, consider exact Steam-searchable titles such as Before Your Eyes.',
+        'For face/webcam/eye/blink control requests, infer related mechanics such as webcam input, eye tracking, gaze, and real-life blinking.',
       );
     }
     if (mentionsVoiceControl) {
       hints.add(
-        'For voice/microphone/singing control requests, consider exact Steam-searchable titles such as One Hand Clapping, There Came an Echo, In Verbis Virtus, and Stifled.',
+        'For voice/microphone/singing control requests, infer related mechanics such as speech commands, microphone input, vocal puzzles, and singing.',
       );
     }
     if (mentionsVr && mentionsClimbing) {
       hints.add(
-        'For VR climbing requests, consider exact Steam-searchable titles such as Climbey, TO THE TOP, Gorilla Tag, Windlands, Windlands 2, EVEREST VR, Adventure Climb VR, Indoor Rock Climbing VR, and VR Rock Climbing.',
+        'For VR climbing requests, infer related mechanics such as hand-based locomotion, rock climbing, vertical traversal, grappling, parkour, and mountaineering.',
       );
+    }
+    if (mentionsOpenWorld && mentionsSuperpowered) {
       hints.add(
-        'Do not use The Climb 2 as a Steam result unless Steam search verifies it; it may be unavailable on Steam.',
+        'For superpowered open-world requests, infer related mechanics such as superhero abilities, high-mobility traversal, parkour, swinging, dashing, city traversal, and chaotic action.',
       );
     }
     if (hints.isEmpty) return '';
@@ -2639,6 +2659,7 @@ ${_promptScopeInstruction(tier)}
 ${_servicePromptContext('Steam')}
 Personally recommend exactly one real Steam PC game from your own knowledge for this user.
 This is a direct recommendation, not tag selection and not option reranking. You may choose a game outside the known search-result hints. Use the request as the primary decision, then use the user's game taste as secondary guidance.
+If the request names reference games, infer their core gameplay verbs, fantasy, structure, traversal, and combat mechanics. Do not recommend a game that only shares a broad tag or setting.
 The title must be an exact game title that Majika can search for on Steam. Do not invent a game and do not recommend a game the user already owns.
 Titles shown in profile evidence are already owned and are taste signals only, never valid recommendations.
 Respect required play capabilities when they are present.
@@ -2789,6 +2810,8 @@ Prompt mode: ${tier.name}.
 ${_servicePromptContext(profile.serviceName)}
 Suggest up to $limit $subject that strongly match this request.
 This is a title-discovery pass before API validation. Use your own model knowledge to name likely matches beyond simple tag search.
+If the request says "similar to" or names reference games, infer the core gameplay verbs, fantasy, structure, camera/perspective, traversal, and combat mechanics. Suggest titles that share those mechanics, not titles that only share a broad tag or setting.
+Prefer a useful mix of obvious popular matches and lesser-known matches when both fit.
 Use the request as the primary decision. Use the user's profile only as a light tie-breaker.
 Return exact titles that should be searchable on ${profile.serviceName}. Do not invent titles and do not suggest titles already in the user's library.
 Respect hard $formatLabel when they are present.
