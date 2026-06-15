@@ -270,6 +270,74 @@ void main() {
     },
   );
 
+  test('Steam search term expansion helps office-job fantasy requests', () {
+    final terms = SteamService.expandedSteamStoreSearchTerms(
+      'i want to pretend to be a boring office worker who gets to solve tasks',
+    );
+
+    expect(terms, contains('office worker'));
+    expect(terms, contains('office job'));
+    expect(terms, contains('office worker simulator'));
+    expect(terms, contains('solve tasks'));
+  });
+
+  test(
+    'specific Steam text search does not poison niche queries with controller support terms',
+    () async {
+      final searchTerms = <String>[];
+      final service = SteamService(
+        client: MockClient((request) async {
+          final url = request.url.toString();
+          if (url.contains('storesearch')) {
+            searchTerms.add(request.url.queryParameters['term'] ?? '');
+            return _json({
+              'items': [
+                {'id': 1001},
+              ],
+            });
+          }
+          if (url.contains('appdetails')) {
+            final appId = request.url.queryParameters['appids']!;
+            return _json({
+              appId: {
+                'success': true,
+                'data': {
+                  'steam_appid': int.parse(appId),
+                  'name': 'Office Task Game',
+                  'type': 'game',
+                  'short_description': 'You do office work and solve tasks.',
+                  'genres': [
+                    {'description': 'Simulation'},
+                  ],
+                  'categories': [
+                    {'description': 'Single-player'},
+                  ],
+                },
+              },
+            });
+          }
+          return http.Response('not found', 404);
+        }),
+      );
+
+      final candidates = await service.searchRecommendationCandidates(
+        const RecommendationQuery(
+          request:
+              'i want to pretend to be a boring office worker who gets to solve tasks',
+          mediaTypes: {'GAME'},
+          formats: {'CONTROLLER'},
+        ),
+      );
+
+      expect(candidates, isNotEmpty);
+      expect(
+        searchTerms.where((term) => term.contains('controller support')),
+        isEmpty,
+      );
+      expect(searchTerms, contains('office worker'));
+    },
+  );
+
   test('Steam app details ignore DLC and map pack store entries', () {
     final item = SteamService.parseAppDetails({
       '1234': {

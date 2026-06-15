@@ -439,16 +439,20 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       task: 'search_interpretation',
       minimumTier: AiModelTrustTier.constrained,
     );
+    final sanitizedQuery = _sanitizeSearchInterpretationQuery(
+      query,
+      allowedFormats: allowedFormats,
+    );
     final supportsExplicitContent = _isAniListService(serviceName);
     final explicitAllowedBySettings =
         settings.allowExplicitContent && supportsExplicitContent;
-    final effectiveQuery = query.copyWith(
+    final effectiveQuery = sanitizedQuery.copyWith(
       includeAdult: false,
       excludeAdult:
-          query.excludeAdult ||
+          sanitizedQuery.excludeAdult ||
           (supportsExplicitContent && !explicitAllowedBySettings),
     );
-    if (!query.isActive ||
+    if (!sanitizedQuery.isActive ||
         (!settings.useLocalAi && textGenerator == null) ||
         !settings.useAiForSearch) {
       return fallback.interpretRecommendationRequest(
@@ -1195,6 +1199,36 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     return modelFormats.where(requestedFormats.contains).toSet();
   }
 
+  RecommendationQuery _sanitizeSearchInterpretationQuery(
+    RecommendationQuery query, {
+    required Iterable<String> allowedFormats,
+  }) {
+    if (!_isSteamFormatSet(allowedFormats) ||
+        query.interpretedRequest.trim().isEmpty ||
+        query.formats.isEmpty) {
+      return query;
+    }
+
+    final explicitTextFormats = query
+        .inferredFormats()
+        .where(RecommendationQuery.steamFormats.contains)
+        .map(RecommendationQuery.canonicalFormat)
+        .toSet();
+    final sanitizedFormats = {
+      for (final format in query.formats)
+        if (explicitTextFormats.contains(
+          RecommendationQuery.canonicalFormat(format),
+        ))
+          RecommendationQuery.canonicalFormat(format),
+    };
+    return query.copyWith(formats: sanitizedFormats);
+  }
+
+  bool _isSteamFormatSet(Iterable<String> allowedFormats) {
+    final allowedSet = allowedFormats.toSet();
+    return allowedSet.containsAll(RecommendationQuery.steamFormats);
+  }
+
   _AiPromptTier _promptTier(LocalAiRuntimeSettings settings) {
     final context = settings.contextWindowTokens;
     if (context <= 8192) return _AiPromptTier.compact;
@@ -1548,7 +1582,7 @@ Return one object with exactly these keys: tags, formats, searchText.
 The formats field is Majika's transport field for Steam play capabilities only.
 Use empty arrays when no known Steam tag or play capability clearly matches.
 Return at most $_maxAiSelectedTags tags, ordered from strongest to weakest signal.
-Only return play capabilities the user explicitly asked for or that are already active. Do not add Controller or Steam Deck unless the request actually says that.
+Only return play capabilities the user explicitly asked for in this request. Do not carry over earlier search filters. Do not add Controller or Steam Deck unless the request actually says that.
 For adult/sexual Steam requests, use Steam tags such as Sexual Content, Nudity, Mature, NSFW, Hentai, Dating Sim, or Visual Novel when they clearly match.
 Do not return AniList media types, AniList release formats, or adult-content fields.
 Keep leftover natural-language game terms in searchText.

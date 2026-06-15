@@ -225,6 +225,12 @@ class SteamService implements MediaService {
     }
 
     final text = query.searchRequest.trim();
+    final hasSpecificText =
+        query.aniListSearchText
+            .split(' ')
+            .where((term) => term.trim().isNotEmpty)
+            .length >=
+        2;
     for (final term in expandedSteamStoreSearchTerms(text)) {
       add(term);
     }
@@ -235,6 +241,10 @@ class SteamService implements MediaService {
     }
 
     for (final format in query.effectiveFormats()) {
+      if (hasSpecificText &&
+          (format == 'CONTROLLER' || format == 'STEAM_DECK')) {
+        continue;
+      }
       final label = _steamFormatSearchLabel(format);
       if (label.isEmpty) continue;
       add(label);
@@ -261,6 +271,20 @@ class SteamService implements MediaService {
 
     var simplified = trimmed.toLowerCase();
     for (final prefix in const [
+      'i want to pretend to be ',
+      'i want to be ',
+      'i want to ',
+      'want to pretend to be ',
+      'want to be ',
+      'want to ',
+      'i am looking for ',
+      'i m looking for ',
+      'im looking for ',
+      'looking for ',
+      'pretend to be ',
+      'pretend i am ',
+      'pretend i m ',
+      'pretend im ',
       'a game about ',
       'game about ',
       'a game where you ',
@@ -290,6 +314,12 @@ class SteamService implements MediaService {
     if (keywords.isNotEmpty) {
       add(keywords.join(' '));
     }
+    for (var i = 0; i <= keywords.length - 2; i++) {
+      add(keywords.sublist(i, i + 2).join(' '));
+    }
+    for (var i = 0; i <= keywords.length - 3; i++) {
+      add(keywords.sublist(i, i + 3).join(' '));
+    }
     if (keywords.length >= 2) {
       add(keywords.sublist(keywords.length - 2).join(' '));
     }
@@ -308,6 +338,19 @@ class SteamService implements MediaService {
         !_steamSimulatorSuffixBlockedTerms.contains(lastKeyword)) {
       add('$lastKeyword simulator');
     }
+    final keywordSet = keywords.toSet();
+    if (keywordSet.contains('office')) {
+      add('office worker');
+      add('office job');
+      add('office work');
+      if (keywordSet.contains('worker') || keywordSet.contains('job')) {
+        add('office worker simulator');
+        add('office job simulator');
+      }
+      if (keywordSet.contains('task') || keywordSet.contains('tasks')) {
+        add('office tasks');
+      }
+    }
 
     return variants;
   }
@@ -319,15 +362,24 @@ class SteamService implements MediaService {
     'and',
     'big',
     'for',
+    'get',
+    'gets',
     'i',
+    'just',
+    'kind',
     'in',
     'like',
+    'looking',
     'me',
     'of',
     'on',
+    'pretend',
+    'really',
+    'sort',
     'that',
     'the',
     'to',
+    'want',
     'where',
     'with',
     'you',

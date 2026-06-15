@@ -604,9 +604,92 @@ void main() {
       ),
     );
     expect(controllerChip.selected, isTrue);
-    expect(find.text('Couch Co-op Controller Game'), findsOneWidget);
     expect(find.text('Funny PC Game'), findsNothing);
   });
+
+  testWidgets('new Steam text search clears stale mode filters', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(mediaService: _FakeSteamMediaService())),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build game profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    final searchField = find.widgetWithText(
+      TextField,
+      'Search a genre, mode, game, or vibe',
+    );
+
+    await tester.enterText(
+      searchField,
+      'fun game to play with two players on one pc with controllers',
+    );
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      searchField,
+      'i want to pretend to be a boring office worker who gets to solve tasks',
+    );
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    final controllerChip = tester.widget<FilterChip>(
+      find.descendant(
+        of: find.byKey(const ValueKey('filter-format-controller')),
+        matching: find.byType(FilterChip),
+      ),
+    );
+    expect(controllerChip.selected, isFalse);
+    expect(find.text('Couch Co-op Controller Game'), findsNothing);
+  });
+
+  testWidgets(
+    'same Steam request does not keep AI-inferred controller mode sticky',
+    (WidgetTester tester) async {
+      final aiService = _StickyControllerSteamAiService();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: HomeScreen(
+            mediaService: _FakeSteamMediaService(),
+            aiService: aiService,
+          ),
+        ),
+      );
+
+      await tester.enterText(find.byType(TextField).first, 'tester');
+      await tester.tap(find.text('Build game profile'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      final searchField = find.widgetWithText(
+        TextField,
+        'Search a genre, mode, game, or vibe',
+      );
+      const request =
+          'i want to pretend to be a boring office worker who gets to solve tasks';
+
+      await tester.enterText(searchField, request);
+      await tester.tap(find.byTooltip('Search recommendations'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      await tester.enterText(searchField, request);
+      await tester.tap(find.byTooltip('Search recommendations'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(aiService.seenFormats.length, 2);
+      expect(aiService.seenFormats.first, isEmpty);
+      expect(aiService.seenFormats.last, isEmpty);
+    },
+  );
 
   testWidgets('cancelled recommendation search ignores late results', (
     WidgetTester tester,
@@ -1861,6 +1944,26 @@ class _DirectHomeSuggestionAiService extends DeterministicLocalAiService {
       title: 'AI Outside Steam Pick',
       serviceName: 'Steam',
       reason: 'Direct cross-service personal pick.',
+    );
+  }
+}
+
+class _StickyControllerSteamAiService extends DeterministicLocalAiService {
+  final List<Set<String>> seenFormats = [];
+
+  @override
+  Future<RecommendationQuery> interpretRecommendationRequest(
+    RecommendationQuery query, {
+    required Iterable<String> availableTags,
+    String serviceName = 'AniList',
+    Iterable<String> allowedMediaTypes = RecommendationQuery.allMediaTypes,
+    Iterable<String> allowedFormats = RecommendationQuery.allFormats,
+  }) async {
+    seenFormats.add({...query.formats});
+    return query.copyWith(
+      interpretedRequest: 'boring office worker tasks',
+      mediaTypes: const {'GAME'},
+      formats: const {'CONTROLLER'},
     );
   }
 }

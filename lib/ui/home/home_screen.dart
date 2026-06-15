@@ -26,6 +26,31 @@ import 'package:url_launcher/url_launcher.dart';
 
 enum _ActiveSurface { home, service }
 
+RecommendationQuery _storedQueryAfterInterpretation(
+  RecommendationQuery query,
+  MediaService service,
+) {
+  if (service.displayName != 'Steam' ||
+      query.interpretedRequest.trim().isEmpty ||
+      query.formats.isEmpty) {
+    return query;
+  }
+
+  final explicitTextFormats = query
+      .inferredFormats()
+      .where(RecommendationQuery.steamFormats.contains)
+      .map(RecommendationQuery.canonicalFormat)
+      .toSet();
+  final stickyFormats = {
+    for (final format in query.formats)
+      if (explicitTextFormats.contains(
+        RecommendationQuery.canonicalFormat(format),
+      ))
+        RecommendationQuery.canonicalFormat(format),
+  };
+  return query.copyWith(formats: stickyFormats);
+}
+
 class _ServiceWorkspace {
   final MediaService service;
   TasteProfile? profile;
@@ -445,7 +470,10 @@ class _HomeScreenState extends State<HomeScreen> {
             return;
           }
           setState(() {
-            workspace.query = query;
+            workspace.query = _storedQueryAfterInterpretation(
+              query,
+              workspace.service,
+            );
             workspace.baseCandidates = baseCandidates;
             workspace.candidates = candidates;
             workspace.recommendations = orderedRecommendations;
@@ -757,7 +785,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (formats.isNotEmpty) {
-      log.addUserLine('I kept these filters: ${formats.join(', ')}');
+      log.addUserLine('Active filters: ${formats.join(', ')}');
     }
     if (tags.isNotEmpty) {
       log.addUserLine('I added these tags: ${tags.join(', ')}');
@@ -2930,6 +2958,8 @@ class _RecommendationSearchPanelState
   void _submitRequest() {
     final nextRequest = _searchController.text.trim();
     final requestChanged = nextRequest != widget.query.request.trim();
+    final clearStaleSteamFormats =
+        requestChanged && widget.mediaService.displayName == 'Steam';
     widget.onQueryChanged(
       widget.query.copyWith(
         request: nextRequest,
@@ -2939,6 +2969,7 @@ class _RecommendationSearchPanelState
         aiSelectedTags: requestChanged
             ? <String>{}
             : widget.query.aiSelectedTags,
+        formats: clearStaleSteamFormats ? <String>{} : widget.query.formats,
       ),
     );
   }

@@ -293,6 +293,43 @@ void main() {
     },
   );
 
+  test(
+    'Steam search interpretation drops stale active controller filters from a repeated request',
+    () async {
+      late String capturedPrompt;
+      final service = FlutterGemmaLocalAiService(
+        textGenerator: (prompt, maxTokens) async {
+          capturedPrompt = prompt;
+          return '{"tags":[],"formats":["CONTROLLER"],"searchText":"boring office worker tasks"}';
+        },
+      );
+
+      final interpreted = await service.interpretRecommendationRequest(
+        const RecommendationQuery(
+          request:
+              'i want to pretend to be a boring office worker who gets to solve tasks',
+          interpretedRequest: 'boring office worker, solve tasks, controller',
+          formats: {'CONTROLLER'},
+        ),
+        availableTags: RecommendationQuery.steamBrowsableTags,
+        serviceName: 'Steam',
+        allowedMediaTypes: RecommendationQuery.steamMediaTypes,
+        allowedFormats: RecommendationQuery.steamFormats,
+      );
+
+      expect(
+        capturedPrompt,
+        isNot(
+          contains(
+            'User-selected play capability filters already active: CONTROLLER',
+          ),
+        ),
+      );
+      expect(interpreted.formats, isEmpty);
+      expect(interpreted.searchRequest, 'boring office worker tasks');
+    },
+  );
+
   test('flutter gemma service keeps rule-inferred Steam constraints', () async {
     final service = FlutterGemmaLocalAiService(
       textGenerator: (prompt, maxTokens) async {
