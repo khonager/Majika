@@ -441,6 +441,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     );
     final sanitizedQuery = _sanitizeSearchInterpretationQuery(
       query,
+      allowedMediaTypes: allowedMediaTypes,
       allowedFormats: allowedFormats,
     );
     final supportsExplicitContent = _isAniListService(serviceName);
@@ -1191,27 +1192,33 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     required Set<String> modelFormats,
   }) {
     final allowedSet = allowedFormats.toSet();
-    final isSteam = allowedSet.toSet().containsAll(
-      RecommendationQuery.steamFormats,
-    );
-    if (!isSteam) return modelFormats;
     final requestedFormats = original.effectiveFormats();
+    final isSteam = allowedSet.containsAll(RecommendationQuery.steamFormats);
+    if (isSteam) {
+      return {
+        for (final format in modelFormats)
+          if ((format == 'CONTROLLER' || format == 'STEAM_DECK')
+              ? requestedFormats.contains(format)
+              : true)
+            format,
+      };
+    }
     return modelFormats.where(requestedFormats.contains).toSet();
   }
 
   RecommendationQuery _sanitizeSearchInterpretationQuery(
     RecommendationQuery query, {
+    required Iterable<String> allowedMediaTypes,
     required Iterable<String> allowedFormats,
   }) {
-    if (!_isSteamFormatSet(allowedFormats) ||
-        query.interpretedRequest.trim().isEmpty ||
-        query.formats.isEmpty) {
+    if (query.interpretedRequest.trim().isEmpty) {
       return query;
     }
 
+    final allowedSet = allowedFormats.toSet();
     final explicitTextFormats = query
         .inferredFormats()
-        .where(RecommendationQuery.steamFormats.contains)
+        .where(allowedSet.contains)
         .map(RecommendationQuery.canonicalFormat)
         .toSet();
     final sanitizedFormats = {
@@ -1221,12 +1228,30 @@ class FlutterGemmaLocalAiService implements LocalAiService {
         ))
           RecommendationQuery.canonicalFormat(format),
     };
-    return query.copyWith(formats: sanitizedFormats);
-  }
-
-  bool _isSteamFormatSet(Iterable<String> allowedFormats) {
-    final allowedSet = allowedFormats.toSet();
-    return allowedSet.containsAll(RecommendationQuery.steamFormats);
+    final allowedMediaTypeSet = allowedMediaTypes.toSet();
+    final isAniListMediaTypeSet = allowedMediaTypeSet.containsAll(
+      RecommendationQuery.aniListMediaTypes,
+    );
+    final explicitTextMediaTypes = query
+        .inferredMediaTypes()
+        .where(allowedMediaTypeSet.contains)
+        .toSet();
+    final mediaTypesFromFormats = isAniListMediaTypeSet
+        ? RecommendationQuery.aniListMediaTypesForFormats(sanitizedFormats)
+        : <String>{};
+    final sanitizedMediaTypes =
+        query.mediaTypes.isEmpty || !isAniListMediaTypeSet
+        ? query.mediaTypes
+        : {
+            for (final mediaType in query.mediaTypes)
+              if (explicitTextMediaTypes.contains(mediaType) ||
+                  mediaTypesFromFormats.contains(mediaType))
+                mediaType,
+          };
+    return query.copyWith(
+      formats: sanitizedFormats,
+      mediaTypes: sanitizedMediaTypes,
+    );
   }
 
   _AiPromptTier _promptTier(LocalAiRuntimeSettings settings) {
@@ -2659,7 +2684,7 @@ ${_promptScopeInstruction(tier)}
 ${_servicePromptContext('Steam')}
 Personally recommend exactly one real Steam PC game from your own knowledge for this user.
 This is a direct recommendation, not tag selection and not option reranking. You may choose a game outside the known search-result hints. Use the request as the primary decision, then use the user's game taste as secondary guidance.
-If the request names reference games, infer their core gameplay verbs, fantasy, structure, traversal, and combat mechanics. Do not recommend a game that only shares a broad tag or setting.
+If the request names reference titles, infer their core appeal, tone, character fantasy, structure, and tropes. Do not recommend a title that only shares a broad tag or setting.
 The title must be an exact game title that Majika can search for on Steam. Do not invent a game and do not recommend a game the user already owns.
 Titles shown in profile evidence are already owned and are taste signals only, never valid recommendations.
 Respect required play capabilities when they are present.
@@ -2682,6 +2707,7 @@ ${_promptScopeInstruction(tier)}
 ${_servicePromptContext('AniList')}
 Personally recommend exactly one real anime or manga title from your own knowledge for this user.
 This is a direct recommendation, not tag selection and not option reranking. You may choose a title outside the known search-result hints. Use the request, the user's anime/manga taste, and your knowledge of titles as the decision.
+If the request names reference anime or manga, infer their core appeal, tone, character fantasy, structure, and tropes. Do not recommend a title that only shares a broad tag or setting.
 The title must be an exact canonical title that Majika can search for on AniList. Do not invent a title and do not recommend a title already in the user's library.
 Titles shown in profile evidence are already in the user's library and are taste signals only, never valid recommendations.
 Respect requested media types and release formats when they are present.
@@ -2810,7 +2836,7 @@ Prompt mode: ${tier.name}.
 ${_servicePromptContext(profile.serviceName)}
 Suggest up to $limit $subject that strongly match this request.
 This is a title-discovery pass before API validation. Use your own model knowledge to name likely matches beyond simple tag search.
-If the request says "similar to" or names reference games, infer the core gameplay verbs, fantasy, structure, camera/perspective, traversal, and combat mechanics. Suggest titles that share those mechanics, not titles that only share a broad tag or setting.
+If the request says "similar to" or names reference titles, infer the core appeal, tone, structure, character fantasy, and important tropes. Suggest titles that share those specifics, not titles that only share a broad tag or setting.
 Prefer a useful mix of obvious popular matches and lesser-known matches when both fit.
 Use the request as the primary decision. Use the user's profile only as a light tie-breaker.
 Return exact titles that should be searchable on ${profile.serviceName}. Do not invent titles and do not suggest titles already in the user's library.
@@ -3032,8 +3058,10 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     );
     if (!settings.useLocalAi && textGenerator == null) return const [];
     final discoveryTrust = _trustTierForTask(settings, 'steam_discovery');
-    if (_isSteamService(profile.serviceName) &&
-        !_meetsTrustTier(discoveryTrust, AiModelTrustTier.constrained)) {
+    if (textGenerator == null &&
+        _isSteamService(profile.serviceName) &&
+        (!_meetsTrustTier(discoveryTrust, AiModelTrustTier.constrained) ||
+            _shouldUseGroundedSteamDiscovery(settings))) {
       return _groundedSteamSuggestions(query, limit: limit);
     }
     final allowSearchTools =
@@ -3085,8 +3113,10 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     );
     if (!settings.useLocalAi && textGenerator == null) return null;
     final discoveryTrust = _trustTierForTask(settings, 'steam_discovery');
-    if (_isSteamService(profile.serviceName) &&
-        !_meetsTrustTier(discoveryTrust, AiModelTrustTier.constrained)) {
+    if (textGenerator == null &&
+        _isSteamService(profile.serviceName) &&
+        (!_meetsTrustTier(discoveryTrust, AiModelTrustTier.constrained) ||
+            _shouldUseGroundedSteamDiscovery(settings))) {
       final suggestions = await _groundedSteamSuggestions(query, limit: 1);
       return suggestions.isEmpty ? null : suggestions.first;
     }
@@ -3120,6 +3150,12 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     } catch (_) {
       return null;
     }
+  }
+
+  bool _shouldUseGroundedSteamDiscovery(LocalAiRuntimeSettings settings) {
+    return settings.usesOnDeviceModel &&
+        !isConfigured &&
+        !settings.hasCloudFallback;
   }
 
   @override
@@ -3298,10 +3334,11 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
         query: query,
       );
     }
-    if (!_meetsTrustTier(
-      _trustTierForTask(settings, 'recommendation_selection'),
-      AiModelTrustTier.trusted,
-    )) {
+    if (textGenerator == null &&
+        !_meetsTrustTier(
+          _trustTierForTask(settings, 'recommendation_selection'),
+          AiModelTrustTier.trusted,
+        )) {
       return fallback.chooseTopRecommendation(
         profile,
         selectableRecommendations,
@@ -3429,10 +3466,11 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
         query: query,
       );
     }
-    if (!_meetsTrustTier(
-      _trustTierForTask(settings, 'recommendation_selection'),
-      AiModelTrustTier.trusted,
-    )) {
+    if (textGenerator == null &&
+        !_meetsTrustTier(
+          _trustTierForTask(settings, 'recommendation_selection'),
+          AiModelTrustTier.trusted,
+        )) {
       return fallback.chooseHomeRecommendation(
         profiles,
         selectableRecommendations,

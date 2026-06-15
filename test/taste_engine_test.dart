@@ -596,6 +596,66 @@ void main() {
     );
   });
 
+  test('mundane job power requests require both work and power evidence', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile(
+      'tester',
+      const [],
+      serviceId: 'com.majika.service.anilist',
+      serviceName: 'AniList',
+    );
+
+    final recommendations = engine.rankCandidates(
+      profile,
+      [
+        MediaItem(
+          id: 'anilist_social',
+          title: 'Awkward School Genius',
+          coverUrl: '',
+          tags: const ['Comedy', 'School', 'Slice of Life'],
+          format: 'MANGA',
+          mediaType: 'MANGA',
+          description:
+              'A school comedy about an awkward student becoming popular.',
+          sourceId: 'com.majika.service.anilist',
+        ),
+        MediaItem(
+          id: 'anilist_work_power',
+          title: 'Secretly Strong Salaryman',
+          coverUrl: '',
+          tags: const ['Comedy', 'Super Power', 'Work'],
+          format: 'TV',
+          mediaType: 'ANIME',
+          description:
+              'A salaryman works an ordinary office job while hiding overpowered supernatural abilities.',
+          sourceId: 'com.majika.service.anilist',
+        ),
+        MediaItem(
+          id: 'anilist_power_only',
+          title: 'Strongest Battle Hero',
+          coverUrl: '',
+          tags: const ['Action', 'Super Power'],
+          format: 'TV',
+          mediaType: 'ANIME',
+          description: 'An overpowered hero fights monsters.',
+          sourceId: 'com.majika.service.anilist',
+        ),
+      ],
+      query: const RecommendationQuery(
+        request:
+            'something about a normel 9-5 job but the main character is actually super powerfull',
+        aiSelectedTags: {'Comedy', 'Super Power', 'Work'},
+      ),
+    );
+
+    expect(recommendations, hasLength(1));
+    expect(recommendations.single.item.title, 'Secretly Strong Salaryman');
+    expect(
+      recommendations.single.signals,
+      contains('wanted mundane job hidden power'),
+    );
+  });
+
   test(
     'ratings and AniList favorites affect match scores without flat 99s',
     () {
@@ -765,140 +825,145 @@ void main() {
     );
   });
 
-  test(
-    'request interpretation infers tags and formats from natural language',
-    () {
-      final timeTravelMovie = const RecommendationQuery(
-        request: 'romance movie about time travel',
-      ).withInferredSelections(RecommendationQuery.browsableTags);
+  test('request interpretation infers tags and formats from natural language', () {
+    final timeTravelMovie = const RecommendationQuery(
+      request: 'romance movie about time travel',
+    ).withInferredSelections(RecommendationQuery.browsableTags);
 
-      expect(timeTravelMovie.selectedTags, isEmpty);
-      expect(timeTravelMovie.aiSelectedTags, contains('Romance'));
-      expect(timeTravelMovie.aiSelectedTags, contains('Time Manipulation'));
-      expect(timeTravelMovie.formats, contains('MOVIE'));
-      expect(timeTravelMovie.mediaTypes, contains('ANIME'));
+    expect(timeTravelMovie.selectedTags, isEmpty);
+    expect(timeTravelMovie.aiSelectedTags, contains('Romance'));
+    expect(timeTravelMovie.aiSelectedTags, contains('Time Manipulation'));
+    expect(timeTravelMovie.formats, contains('MOVIE'));
+    expect(timeTravelMovie.mediaTypes, contains('ANIME'));
 
-      final legacySeries = const RecommendationQuery(
-        formats: {'TV', 'OVA', 'ONA', 'SPECIAL'},
-      );
-      expect(legacySeries.effectiveFormats(), {'SERIES'});
-      expect(legacySeries.effectiveMediaTypes(), {'ANIME'});
+    final legacySeries = const RecommendationQuery(
+      formats: {'TV', 'OVA', 'ONA', 'SPECIAL'},
+    );
+    expect(legacySeries.effectiveFormats(), {'SERIES'});
+    expect(legacySeries.effectiveMediaTypes(), {'ANIME'});
 
-      final book = const RecommendationQuery(
-        request: 'recommend a fantasy book',
-      ).withInferredSelections(RecommendationQuery.browsableTags);
-      expect(book.formats, contains('BOOK'));
-      expect(book.mediaTypes, contains('MANGA'));
+    final book = const RecommendationQuery(
+      request: 'recommend a fantasy book',
+    ).withInferredSelections(RecommendationQuery.browsableTags);
+    expect(book.formats, contains('BOOK'));
+    expect(book.mediaTypes, contains('MANGA'));
 
-      const mangaFormatWins = RecommendationQuery(
-        mediaTypes: {'ANIME'},
-        formats: {'MANGA'},
-      );
-      expect(mangaFormatWins.effectiveMediaTypes(), {'MANGA'});
+    const mangaFormatWins = RecommendationQuery(
+      mediaTypes: {'ANIME'},
+      formats: {'MANGA'},
+    );
+    expect(mangaFormatWins.effectiveMediaTypes(), {'MANGA'});
 
-      final aniListRequest = const RecommendationQuery(
-        request: 'anime recommendation for beginners',
-      ).withInferredSelections(RecommendationQuery.aniListBrowsableTags);
-      expect(aniListRequest.aiSelectedTags, isNot(contains('Anime')));
+    final aniListRequest = const RecommendationQuery(
+      request: 'anime recommendation for beginners',
+    ).withInferredSelections(RecommendationQuery.aniListBrowsableTags);
+    expect(aniListRequest.aiSelectedTags, isNot(contains('Anime')));
 
-      final adultRequest = const RecommendationQuery(
-        request: 'an erotic adult anime',
-      ).withInferredSelections(const ['Romance', 'Hentai']);
-      expect(adultRequest.includeAdult, isTrue);
-      expect(adultRequest.aiSelectedTags, contains('Hentai'));
+    final adultRequest = const RecommendationQuery(
+      request: 'an erotic adult anime',
+    ).withInferredSelections(const ['Romance', 'Hentai']);
+    expect(adultRequest.includeAdult, isTrue);
+    expect(adultRequest.aiSelectedTags, contains('Hentai'));
 
-      final hiddenAdultRequest = const RecommendationQuery(
-        request: 'an erotic adult anime',
-        excludeAdult: true,
-      ).withInferredSelections(const ['Romance', 'Hentai']);
-      expect(hiddenAdultRequest.includeAdult, isFalse);
-      expect(hiddenAdultRequest.allowsAdult, isFalse);
+    final hiddenAdultRequest = const RecommendationQuery(
+      request: 'an erotic adult anime',
+      excludeAdult: true,
+    ).withInferredSelections(const ['Romance', 'Hentai']);
+    expect(hiddenAdultRequest.includeAdult, isFalse);
+    expect(hiddenAdultRequest.allowsAdult, isFalse);
 
-      final broadBeginnerRequest = const RecommendationQuery(
-        request: 'something good for a person who never watched anime ever',
-      );
-      expect(
-        broadBeginnerRequest.matchesText(
-          MediaItem(
-            id: 'anilist_beginner',
-            title: 'Approachable Pick',
-            coverUrl: '',
-            tags: ['Comedy'],
-            format: 'TV',
-          ),
+    final broadBeginnerRequest = const RecommendationQuery(
+      request: 'something good for a person who never watched anime ever',
+    );
+    expect(
+      broadBeginnerRequest.matchesText(
+        MediaItem(
+          id: 'anilist_beginner',
+          title: 'Approachable Pick',
+          coverUrl: '',
+          tags: ['Comedy'],
+          format: 'TV',
         ),
-        isTrue,
-      );
+      ),
+      isTrue,
+    );
 
-      final obsessedCharacter = const RecommendationQuery(
-        request: 'obsessed character thriller',
-      ).withInferredSelections(RecommendationQuery.browsableTags);
+    final obsessedCharacter = const RecommendationQuery(
+      request: 'obsessed character thriller',
+    ).withInferredSelections(RecommendationQuery.browsableTags);
 
-      expect(obsessedCharacter.aiSelectedTags, contains('Yandere'));
-      expect(obsessedCharacter.aiSelectedTags, contains('Thriller'));
+    expect(obsessedCharacter.aiSelectedTags, contains('Yandere'));
+    expect(obsessedCharacter.aiSelectedTags, contains('Thriller'));
 
-      final magicSchool = const RecommendationQuery(
-        request: 'like harry potter',
-      ).withInferredSelections(const ['Fantasy', 'Magic', 'School']);
+    final magicSchool = const RecommendationQuery(
+      request: 'like harry potter',
+    ).withInferredSelections(const ['Fantasy', 'Magic', 'School']);
 
-      expect(magicSchool.aiSelectedTags, contains('Fantasy'));
-      expect(magicSchool.aiSelectedTags, contains('Magic'));
-      expect(magicSchool.aiSelectedTags, contains('School'));
+    expect(magicSchool.aiSelectedTags, contains('Fantasy'));
+    expect(magicSchool.aiSelectedTags, contains('Magic'));
+    expect(magicSchool.aiSelectedTags, contains('School'));
 
-      final familyAnime = const RecommendationQuery(
-        request:
-            'family anime that is good to watch with kids and parents. something fun like spy family',
-      ).withInferredSelections(const ['Comedy', 'Family Life', 'Go', 'Kids']);
+    final familyAnime = const RecommendationQuery(
+      request:
+          'family anime that is good to watch with kids and parents. something fun like spy family',
+    ).withInferredSelections(const ['Comedy', 'Family Life', 'Go', 'Kids']);
 
-      expect(familyAnime.aiSelectedTags, contains('Comedy'));
-      expect(familyAnime.aiSelectedTags, contains('Family Life'));
-      expect(familyAnime.aiSelectedTags, isNot(contains('Go')));
-      expect(familyAnime.aiSelectedTags, isNot(contains('Kids')));
+    expect(familyAnime.aiSelectedTags, contains('Comedy'));
+    expect(familyAnime.aiSelectedTags, contains('Family Life'));
+    expect(familyAnime.aiSelectedTags, isNot(contains('Go')));
+    expect(familyAnime.aiSelectedTags, isNot(contains('Kids')));
 
-      final specificRelationship =
-          const RecommendationQuery(
-            request: 'a romance between two males in school anime',
-          ).withInferredSelections(const [
-            'Romance',
-            "Boys' Love",
-            'LGBTQ+ Themes',
-            'School',
-          ]);
+    final mundanePowerJob = const RecommendationQuery(
+      request:
+          'something about a normel 9-5 job but the main character is actually super powerfull',
+    ).withInferredSelections(const ['Comedy', 'Super Power', 'Work']);
 
-      expect(specificRelationship.aiSelectedTags, contains('Romance'));
-      expect(specificRelationship.aiSelectedTags, contains("Boys' Love"));
-      expect(specificRelationship.aiSelectedTags, contains('School'));
-      expect(
-        specificRelationship.specificRequestedTags(const [
+    expect(mundanePowerJob.aiSelectedTags, contains('Super Power'));
+    expect(mundanePowerJob.aiSelectedTags, contains('Work'));
+
+    final specificRelationship =
+        const RecommendationQuery(
+          request: 'a romance between two males in school anime',
+        ).withInferredSelections(const [
           'Romance',
           "Boys' Love",
           'LGBTQ+ Themes',
           'School',
-        ]),
-        contains("Boys' Love"),
-      );
-      expect(
-        specificRelationship.specificRequestedTags(const [
-          'Romance',
-          "Boys' Love",
-          'LGBTQ+ Themes',
-          'School',
-        ]),
-        isNot(contains('School')),
-      );
+        ]);
 
-      final couchCoopGame = const RecommendationQuery(
-        request: 'two players on one pc with controller',
-        formats: {'CO_OP'},
-      ).withInferredSelections(RecommendationQuery.browsableTags);
+    expect(specificRelationship.aiSelectedTags, contains('Romance'));
+    expect(specificRelationship.aiSelectedTags, contains("Boys' Love"));
+    expect(specificRelationship.aiSelectedTags, contains('School'));
+    expect(
+      specificRelationship.specificRequestedTags(const [
+        'Romance',
+        "Boys' Love",
+        'LGBTQ+ Themes',
+        'School',
+      ]),
+      contains("Boys' Love"),
+    );
+    expect(
+      specificRelationship.specificRequestedTags(const [
+        'Romance',
+        "Boys' Love",
+        'LGBTQ+ Themes',
+        'School',
+      ]),
+      isNot(contains('School')),
+    );
 
-      expect(couchCoopGame.formats, contains('CO_OP'));
-      expect(couchCoopGame.formats, contains('CONTROLLER'));
-      expect(couchCoopGame.infersLocalCoOp, isTrue);
-      expect(couchCoopGame.effectiveFormats(), contains('CO_OP'));
-      expect(couchCoopGame.mediaTypes, contains('GAME'));
-    },
-  );
+    final couchCoopGame = const RecommendationQuery(
+      request: 'two players on one pc with controller',
+      formats: {'CO_OP'},
+    ).withInferredSelections(RecommendationQuery.browsableTags);
+
+    expect(couchCoopGame.formats, contains('CO_OP'));
+    expect(couchCoopGame.formats, contains('CONTROLLER'));
+    expect(couchCoopGame.infersLocalCoOp, isTrue);
+    expect(couchCoopGame.effectiveFormats(), contains('CO_OP'));
+    expect(couchCoopGame.mediaTypes, contains('GAME'));
+  });
 
   test('specific inferred tags filter broad-only matches', () {
     final engine = TasteEngine();

@@ -152,6 +152,35 @@ void main() {
     expect(capturedPrompt, isNot(contains('Steam play capability values')));
   });
 
+  test('AniList interpretation drops stale release format filters', () async {
+    late String capturedPrompt;
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        capturedPrompt = prompt;
+        return '{"tags":["Work","Super Power"],"formats":["MANGA"],"mediaTypes":["ANIME","MANGA"],"includeAdult":false,"searchText":"normal job secretly powerful"}';
+      },
+    );
+
+    final interpreted = await service.interpretRecommendationRequest(
+      const RecommendationQuery(
+        request:
+            'something about a normal 9-5 job but the main character is actually super powerful',
+        interpretedRequest: 'old manga search',
+        formats: {'MANGA'},
+        mediaTypes: {'MANGA'},
+      ),
+      availableTags: const ['Comedy', 'Super Power', 'Work'],
+      serviceName: 'AniList',
+      allowedMediaTypes: RecommendationQuery.aniListMediaTypes,
+      allowedFormats: RecommendationQuery.aniListFormats,
+    );
+
+    expect(capturedPrompt, isNot(contains('filters already active: MANGA')));
+    expect(interpreted.formats, isEmpty);
+    expect(interpreted.aiSelectedTags, contains('Super Power'));
+    expect(interpreted.aiSelectedTags, contains('Work'));
+  });
+
   test('flutter gemma service accepts broader official Steam tags', () async {
     late String capturedPrompt;
     final service = FlutterGemmaLocalAiService(

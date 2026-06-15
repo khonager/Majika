@@ -3214,8 +3214,21 @@ class _RecommendationSearchPanelState
   void _submitRequest() {
     final nextRequest = _searchController.text.trim();
     final requestChanged = nextRequest != widget.query.request.trim();
-    final clearStaleSteamFormats =
-        requestChanged && widget.mediaService.displayName == 'Steam';
+    final inferredForNextRequest = RecommendationQuery(
+      request: nextRequest,
+    ).withInferredSelections(widget.availableTags);
+    final clearStaleServiceFormats = requestChanged;
+    final nextFormats = clearStaleServiceFormats
+        ? {
+            for (final format in inferredForNextRequest.formats)
+              if (widget.mediaService.supportedFormats.contains(format))
+                RecommendationQuery.canonicalFormat(format),
+          }
+        : widget.query.formats;
+    final nextMediaTypes =
+        requestChanged && widget.mediaService.displayName == 'AniList'
+        ? inferredForNextRequest.mediaTypes
+        : widget.query.mediaTypes;
     widget.onQueryChanged(
       widget.query.copyWith(
         request: nextRequest,
@@ -3225,7 +3238,8 @@ class _RecommendationSearchPanelState
         aiSelectedTags: requestChanged
             ? <String>{}
             : widget.query.aiSelectedTags,
-        formats: clearStaleSteamFormats ? <String>{} : widget.query.formats,
+        formats: nextFormats,
+        mediaTypes: nextMediaTypes,
       ),
     );
   }

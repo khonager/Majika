@@ -230,6 +230,10 @@ class TasteEngine {
           candidate,
           query.request,
         );
+        final mundanePowerScore = _mundanePowerIntentScore(
+          candidate,
+          query.request,
+        );
         final requestTagEvidenceScore = _requestTagEvidenceScore(
           candidate,
           requestedTags,
@@ -242,6 +246,7 @@ class TasteEngine {
         score += vrClimbingIntentScore * 4.0;
         score += unusualInputControlScore * 3.6;
         score += superpoweredOpenWorldScore * 4.0;
+        score += mundanePowerScore * 4.0;
         score += requestTagEvidenceScore * 2.0;
         final hasRequestEvidence =
             requestTextScore > 0 ||
@@ -249,6 +254,7 @@ class TasteEngine {
             vrClimbingIntentScore > 0 ||
             unusualInputControlScore > 0 ||
             superpoweredOpenWorldScore > 0 ||
+            mundanePowerScore > 0 ||
             requestTagEvidenceScore > 0 ||
             requestedGenreMatches.isNotEmpty ||
             hasAdultRequestEvidence;
@@ -257,6 +263,9 @@ class TasteEngine {
         }
         if (_isSuperpoweredOpenWorldRequest(query.request) &&
             superpoweredOpenWorldScore <= 0) {
+          continue;
+        }
+        if (_isMundanePowerRequest(query.request) && mundanePowerScore <= 0) {
           continue;
         }
         if (_requiresRequestEvidence(query, requestedTags) &&
@@ -271,6 +280,9 @@ class TasteEngine {
         }
         if (superpoweredOpenWorldScore > 0) {
           signals.add('wanted superpowered open world');
+        }
+        if (mundanePowerScore > 0) {
+          signals.add('wanted mundane job hidden power');
         }
       }
 
@@ -521,6 +533,33 @@ class TasteEngine {
     return min(score, 4.5);
   }
 
+  double _mundanePowerIntentScore(MediaItem candidate, String request) {
+    if (!_isMundanePowerRequest(request)) return 0;
+
+    final haystack = _normalizedEvidenceText(candidate);
+    final hasMundaneWorkEvidence = _mundaneWorkEvidenceTerms.any(
+      (term) => _containsWholePhrase(haystack, term),
+    );
+    final hasPowerEvidence = _mundanePowerEvidenceTerms.any(
+      (term) => _containsWholePhrase(haystack, term),
+    );
+    if (!hasMundaneWorkEvidence || !hasPowerEvidence) return 0;
+
+    var score = 2.6;
+    if (_hiddenPowerEvidenceTerms.any(
+      (term) => _containsWholePhrase(haystack, term),
+    )) {
+      score += 1.0;
+    }
+    if (_comedicMundanePowerEvidenceTerms.any(
+      (term) => _containsWholePhrase(haystack, term),
+    )) {
+      score += 0.6;
+    }
+
+    return min(score, 4.2);
+  }
+
   double _requestTagEvidenceScore(
     MediaItem candidate,
     Set<String> requestedTags,
@@ -608,6 +647,17 @@ class TasteEngine {
         _containsWholePhrase(normalized, 'open world') ||
         _containsWholePhrase(normalized, 'sandbox');
     return mentionsReference || (mentionsPowers && mentionsOpenWorld);
+  }
+
+  bool _isMundanePowerRequest(String request) {
+    final normalized = request.toLowerCase();
+    final mentionsWork = _mundaneWorkRequestTerms.any(
+      (term) => _containsWholePhrase(normalized, term),
+    );
+    final mentionsPower = _mundanePowerRequestTerms.any(
+      (term) => _containsWholePhrase(normalized, term),
+    );
+    return mentionsWork && mentionsPower;
   }
 
   bool _hasVrEvidence(MediaItem candidate) {
@@ -1070,6 +1120,90 @@ class TasteEngine {
     'web slinging',
     'web-slinging',
     'wingsuit',
+  };
+
+  static const Set<String> _mundaneWorkRequestTerms = {
+    '9 5',
+    '9-5',
+    'company',
+    'employee',
+    'job',
+    'office',
+    'part time',
+    'part-time',
+    'salaryman',
+    'work',
+    'worker',
+    'workplace',
+  };
+
+  static const Set<String> _mundanePowerRequestTerms = {
+    'actually powerful',
+    'hidden power',
+    'op',
+    'overpowered',
+    'powerful',
+    'powerfull',
+    'secretly powerful',
+    'super powerful',
+    'superpower',
+    'superpowers',
+  };
+
+  static const Set<String> _mundaneWorkEvidenceTerms = {
+    '9 5',
+    '9-5',
+    'business',
+    'company',
+    'convenience store',
+    'corporate',
+    'coworker',
+    'employee',
+    'fast food',
+    'job',
+    'office',
+    'part time',
+    'part-time',
+    'restaurant',
+    'salaryman',
+    'work',
+    'worker',
+    'workplace',
+  };
+
+  static const Set<String> _mundanePowerEvidenceTerms = {
+    'demon',
+    'demon lord',
+    'hidden power',
+    'magic',
+    'op',
+    'overpowered',
+    'powerful',
+    'secret identity',
+    'secretly powerful',
+    'strongest',
+    'super power',
+    'superpower',
+    'supernatural',
+  };
+
+  static const Set<String> _hiddenPowerEvidenceTerms = {
+    'double life',
+    'hidden identity',
+    'hidden power',
+    'ordinary life',
+    'secret identity',
+    'secretly',
+    'undercover',
+  };
+
+  static const Set<String> _comedicMundanePowerEvidenceTerms = {
+    'comedy',
+    'comedic',
+    'deadpan',
+    'parody',
+    'slice of life',
+    'workplace comedy',
   };
 
   static const Map<String, Set<String>> _requestTagEvidenceHints = {
