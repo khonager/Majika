@@ -218,6 +218,14 @@ class TasteEngine {
           candidate,
           query.request,
         );
+        final vrClimbingIntentScore = _vrClimbingIntentScore(
+          candidate,
+          query.request,
+        );
+        final unusualInputControlScore = _unusualInputControlIntentScore(
+          candidate,
+          query.request,
+        );
         final requestTagEvidenceScore = _requestTagEvidenceScore(
           candidate,
           requestedTags,
@@ -227,10 +235,14 @@ class TasteEngine {
             _hasAdultEvidence(candidate);
         score += requestTextScore * 2.4;
         score += codingHackScore * 3.4;
+        score += vrClimbingIntentScore * 4.0;
+        score += unusualInputControlScore * 3.6;
         score += requestTagEvidenceScore * 2.0;
         final hasRequestEvidence =
             requestTextScore > 0 ||
             codingHackScore > 0 ||
+            vrClimbingIntentScore > 0 ||
+            unusualInputControlScore > 0 ||
             requestTagEvidenceScore > 0 ||
             requestedGenreMatches.isNotEmpty ||
             hasAdultRequestEvidence;
@@ -240,6 +252,12 @@ class TasteEngine {
         if (_requiresRequestEvidence(query, requestedTags) &&
             !hasRequestEvidence) {
           continue;
+        }
+        if (vrClimbingIntentScore > 0) {
+          signals.add('wanted VR climbing');
+        }
+        if (unusualInputControlScore > 0) {
+          signals.add('wanted unusual controls');
         }
       }
 
@@ -417,6 +435,68 @@ class TasteEngine {
     return min(score, 4.5);
   }
 
+  double _vrClimbingIntentScore(MediaItem candidate, String request) {
+    if (!_isVrClimbingRequest(request)) return 0;
+    if (!_hasVrEvidence(candidate)) return 0;
+
+    final haystack = _normalizedEvidenceText(candidate);
+    final normalizedTitle = candidate.title.toLowerCase();
+    var score = 0.0;
+
+    if (_vrClimbingEvidenceTerms.any(
+      (term) => _containsWholePhrase(haystack, term),
+    )) {
+      score += 1.2;
+    }
+    for (final titleHint in _vrClimbingTitleHints) {
+      if (_containsWholePhrase(normalizedTitle, titleHint)) {
+        score += 2.4;
+        break;
+      }
+    }
+    if (_containsWholePhrase(haystack, 'vr') &&
+        _containsWholePhrase(haystack, 'climb')) {
+      score += 0.6;
+    }
+
+    return min(score, 4.2);
+  }
+
+  double _unusualInputControlIntentScore(MediaItem candidate, String request) {
+    final faceRequest = _isFaceControlRequest(request);
+    final voiceRequest = _isVoiceControlRequest(request);
+    if (!faceRequest && !voiceRequest) return 0;
+
+    final haystack = _normalizedEvidenceText(candidate);
+    final normalizedTitle = candidate.title.toLowerCase();
+    var score = 0.0;
+
+    if (faceRequest &&
+        _faceControlEvidenceTerms.any(
+          (term) => _containsWholePhrase(haystack, term),
+        )) {
+      score += 1.5;
+    }
+    if (faceRequest &&
+        _containsWholePhrase(normalizedTitle, 'before your eyes')) {
+      score += 2.6;
+    }
+    if (voiceRequest &&
+        _voiceControlEvidenceTerms.any(
+          (term) => _containsWholePhrase(haystack, term),
+        )) {
+      score += 1.4;
+    }
+    if (voiceRequest &&
+        _voiceControlTitleHints.any(
+          (term) => _containsWholePhrase(normalizedTitle, term),
+        )) {
+      score += 2.0;
+    }
+
+    return min(score, 4.2);
+  }
+
   double _requestTagEvidenceScore(
     MediaItem candidate,
     Set<String> requestedTags,
@@ -440,7 +520,8 @@ class TasteEngine {
   ) {
     return requestedTags.isNotEmpty ||
         _isAdultRequest(query, requestedTags) ||
-        _isCodingHackRequest(query.request);
+        _isCodingHackRequest(query.request) ||
+        _isUnusualInputControlRequest(query.request);
   }
 
   bool _isAdultRequest(RecommendationQuery query, Set<String> requestedTags) {
@@ -459,6 +540,43 @@ class TasteEngine {
     final normalized = request.toLowerCase();
     return _codingHackRequestTerms.any(
       (term) => _containsWholePhrase(normalized, term),
+    );
+  }
+
+  bool _isVrClimbingRequest(String request) {
+    final normalized = request.toLowerCase();
+    final mentionsVr =
+        _containsWholePhrase(normalized, 'vr') ||
+        _containsWholePhrase(normalized, 'virtual reality');
+    final mentionsClimbing = _vrClimbingRequestTerms.any(
+      (term) => _containsWholePhrase(normalized, term),
+    );
+    return mentionsVr && mentionsClimbing;
+  }
+
+  bool _isFaceControlRequest(String request) {
+    final normalized = request.toLowerCase();
+    return _faceControlRequestTerms.any(
+      (term) => _containsWholePhrase(normalized, term),
+    );
+  }
+
+  bool _isVoiceControlRequest(String request) {
+    final normalized = request.toLowerCase();
+    return _voiceControlRequestTerms.any(
+      (term) => _containsWholePhrase(normalized, term),
+    );
+  }
+
+  bool _isUnusualInputControlRequest(String request) {
+    return _isFaceControlRequest(request) || _isVoiceControlRequest(request);
+  }
+
+  bool _hasVrEvidence(MediaItem candidate) {
+    if (candidate.tags.contains('VR')) return true;
+    final haystack = _normalizedEvidenceText(candidate);
+    return _requestTagEvidenceHints['VR']!.any(
+      (hint) => _containsWholePhrase(haystack, hint),
     );
   }
 
@@ -789,6 +907,101 @@ class TasteEngine {
     'opus magnum',
   };
 
+  static const Set<String> _vrClimbingRequestTerms = {
+    'ascend',
+    'ascent',
+    'climb',
+    'climber',
+    'climbing',
+    'grapple',
+    'grappling',
+    'mountain',
+    'mountains',
+  };
+
+  static const Set<String> _vrClimbingEvidenceTerms = {
+    'ascend',
+    'ascending',
+    'ascent',
+    'climb',
+    'climbing',
+    'grapple',
+    'grappling',
+    'grappling hook',
+    'mount everest',
+    'parkour',
+    'vertical',
+  };
+
+  static const Set<String> _vrClimbingTitleHints = {
+    'adventure climb vr',
+    'bean stalker',
+    'climbey',
+    'everest vr',
+    'gorilla tag',
+    'indoor rock climbing vr',
+    'stride',
+    'the peak climb vr',
+    'to the top',
+    'vr rock climbing',
+    'windlands',
+    'windlands 2',
+  };
+
+  static const Set<String> _faceControlRequestTerms = {
+    'blink',
+    'blinks',
+    'blinking',
+    'camera',
+    'eye',
+    'eyes',
+    'face',
+    'facial',
+    'gaze',
+    'webcam',
+  };
+
+  static const Set<String> _faceControlEvidenceTerms = {
+    'blink',
+    'blinks',
+    'blinking',
+    'camera',
+    'eye',
+    'eyes',
+    'face',
+    'facial',
+    'gaze',
+    'webcam',
+  };
+
+  static const Set<String> _voiceControlRequestTerms = {
+    'mic',
+    'microphone',
+    'sing',
+    'singing',
+    'speech',
+    'voice',
+  };
+
+  static const Set<String> _voiceControlEvidenceTerms = {
+    'mic',
+    'microphone',
+    'sing',
+    'singing',
+    'speech',
+    'voice',
+    'voice control',
+    'voice controlled',
+    'voice commands',
+  };
+
+  static const Set<String> _voiceControlTitleHints = {
+    'in verbis virtus',
+    'one hand clapping',
+    'stifled',
+    'there came an echo',
+  };
+
   static const Map<String, Set<String>> _requestTagEvidenceHints = {
     'Hentai': {
       '18+',
@@ -909,6 +1122,7 @@ class TasteEngine {
       'vr',
       'vr only',
       'vr supported',
+      'tracked controller support',
       'virtual reality',
       'tracked motion controllers',
       'steamvr',

@@ -573,7 +573,11 @@ class RecommendationQuery {
       ].join(' '),
     );
 
-    return terms.any(haystack.contains);
+    return terms.any((term) {
+      if (haystack.contains(term)) return true;
+      final aliases = _searchTermAliases[term];
+      return aliases != null && aliases.any(haystack.contains);
+    });
   }
 
   List<String> _searchTerms({String? source}) {
@@ -657,6 +661,85 @@ class RecommendationQuery {
         )
         .toList();
   }
+
+  static const Map<String, List<String>> _searchTermAliases = {
+    'ascend': ['climb', 'climbing', 'ascent', 'grapple', 'grappling'],
+    'ascent': ['climb', 'climbing', 'ascend', 'grapple', 'grappling'],
+    'climb': [
+      'climbing',
+      'climber',
+      'ascend',
+      'ascent',
+      'grapple',
+      'grappling',
+      'vertical',
+    ],
+    'climber': ['climb', 'climbing', 'ascend', 'ascent'],
+    'climbing': [
+      'climb',
+      'climber',
+      'ascend',
+      'ascent',
+      'grapple',
+      'grappling',
+      'vertical',
+    ],
+    'fun': [
+      'absurd',
+      'comedy',
+      'comedic',
+      'funny',
+      'hilarious',
+      'joke',
+      'jokes',
+      'laugh',
+      'slapstick',
+    ],
+    'harry': [
+      'magic',
+      'magical',
+      'school',
+      'spell',
+      'spells',
+      'witch',
+      'wizard',
+      'wizardry',
+    ],
+    'horny': ['adult', 'erotic', 'sex', 'sexual', 'steamy'],
+    'infamous': [
+      'action',
+      'open world',
+      'prototype',
+      'superhero',
+      'supernatural',
+    ],
+    'laugh': [
+      'absurd',
+      'comedy',
+      'comedic',
+      'funny',
+      'hilarious',
+      'humor',
+      'joke',
+      'jokes',
+      'slapstick',
+    ],
+    'naughty': ['adult', 'erotic', 'sex', 'sexual', 'steamy'],
+    'potter': [
+      'magic',
+      'magical',
+      'school',
+      'spell',
+      'spells',
+      'witch',
+      'wizard',
+      'wizardry',
+    ],
+    'sexy': ['adult', 'erotic', 'sex', 'sexual', 'steamy'],
+    'face': ['webcam', 'camera', 'eye', 'eyes', 'blink', 'blinking', 'gaze'],
+    'facial': ['webcam', 'camera', 'eye', 'eyes', 'blink', 'blinking', 'gaze'],
+    'voice': ['speech', 'microphone', 'mic', 'sing', 'singing'],
+  };
 
   static bool _containsAny(String text, Iterable<String> values) {
     return values.any((value) => _containsWholePhrase(text, _normalize(value)));

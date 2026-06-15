@@ -281,6 +281,30 @@ void main() {
     expect(terms, contains('solve tasks'));
   });
 
+  test('Steam search term expansion helps unusual input-control requests', () {
+    final terms = SteamService.expandedSteamStoreSearchTerms(
+      'a game that you can control with just your voice or your face',
+    );
+
+    expect(terms, contains('Before Your Eyes'));
+    expect(terms, contains('One Hand Clapping'));
+    expect(terms, contains('There Came an Echo'));
+    expect(terms, contains('In Verbis Virtus'));
+  });
+
+  test('Steam search term expansion includes strong VR climbing titles', () {
+    final terms = SteamService.expandedSteamStoreSearchTerms(
+      'a vr game about climbing',
+    );
+
+    expect(terms, contains('Climbey'));
+    expect(terms, contains('TO THE TOP'));
+    expect(terms, contains('Gorilla Tag'));
+    expect(terms, contains('Windlands'));
+    expect(terms, contains('EVEREST VR'));
+    expect(terms, contains('VR rock climbing'));
+  });
+
   test(
     'specific Steam text search does not poison niche queries with controller support terms',
     () async {

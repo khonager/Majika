@@ -269,6 +269,14 @@ class SteamService implements MediaService {
 
     add(trimmed);
 
+    final rawKeywordSet = trimmed
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9]+'))
+        .where((term) => term.isNotEmpty)
+        .toSet();
+    _addUnusualInputControlSearchTerms(add, rawKeywordSet);
+    _addVrClimbingSearchTerms(add, rawKeywordSet);
+
     var simplified = trimmed.toLowerCase();
     for (final prefix in const [
       'i want to pretend to be ',
@@ -353,6 +361,84 @@ class SteamService implements MediaService {
     }
 
     return variants;
+  }
+
+  static void _addUnusualInputControlSearchTerms(
+    void Function(String value) add,
+    Set<String> keywords,
+  ) {
+    final mentionsFaceControl =
+        keywords.contains('face') ||
+        keywords.contains('facial') ||
+        keywords.contains('webcam') ||
+        keywords.contains('camera') ||
+        keywords.contains('eye') ||
+        keywords.contains('eyes') ||
+        keywords.contains('blink') ||
+        keywords.contains('blinks') ||
+        keywords.contains('gaze');
+    final mentionsVoiceControl =
+        keywords.contains('voice') ||
+        keywords.contains('speech') ||
+        keywords.contains('microphone') ||
+        keywords.contains('mic') ||
+        keywords.contains('sing') ||
+        keywords.contains('singing');
+
+    if (mentionsFaceControl) {
+      add('Before Your Eyes');
+      add('eye tracking');
+      add('blink control');
+      add('webcam control');
+    }
+    if (mentionsVoiceControl) {
+      add('One Hand Clapping');
+      add('There Came an Echo');
+      add('In Verbis Virtus');
+      add('Stifled');
+      add('voice control');
+      add('microphone control');
+    }
+  }
+
+  static void _addVrClimbingSearchTerms(
+    void Function(String value) add,
+    Set<String> keywords,
+  ) {
+    final mentionsVr =
+        keywords.contains('vr') ||
+        keywords.contains('virtual') ||
+        keywords.contains('reality') ||
+        keywords.contains('steamvr');
+    final mentionsClimbing =
+        keywords.contains('climb') ||
+        keywords.contains('climbs') ||
+        keywords.contains('climber') ||
+        keywords.contains('climbers') ||
+        keywords.contains('climbing') ||
+        keywords.contains('ascend') ||
+        keywords.contains('ascent') ||
+        keywords.contains('mountain') ||
+        keywords.contains('mountains') ||
+        keywords.contains('grapple') ||
+        keywords.contains('grappling');
+    if (!mentionsVr || !mentionsClimbing) return;
+
+    add('Climbey');
+    add('TO THE TOP');
+    add('Gorilla Tag');
+    add('Windlands');
+    add('Windlands 2');
+    add('EVEREST VR');
+    add('Adventure Climb VR');
+    add('The Peak Climb VR');
+    add('Indoor Rock Climbing VR');
+    add('VR Rock Climbing');
+    add('Bean Stalker');
+    add('Cave Digger');
+    add('STRIDE');
+    add('VR climbing');
+    add('VR rock climbing');
   }
 
   static const _steamSearchStopWords = {

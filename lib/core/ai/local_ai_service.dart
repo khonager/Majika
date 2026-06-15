@@ -1456,6 +1456,70 @@ Do not browse first when you can already name likely matches confidently.
 ''';
   }
 
+  String _steamSearchVocabularyHint(String request) {
+    final terms = request
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9]+'))
+        .where((term) => term.isNotEmpty)
+        .toSet();
+    final hints = <String>[];
+    final mentionsFaceControl =
+        terms.contains('face') ||
+        terms.contains('facial') ||
+        terms.contains('webcam') ||
+        terms.contains('camera') ||
+        terms.contains('eye') ||
+        terms.contains('eyes') ||
+        terms.contains('blink') ||
+        terms.contains('blinks') ||
+        terms.contains('gaze');
+    final mentionsVoiceControl =
+        terms.contains('voice') ||
+        terms.contains('speech') ||
+        terms.contains('microphone') ||
+        terms.contains('mic') ||
+        terms.contains('sing') ||
+        terms.contains('singing');
+    final mentionsVr =
+        terms.contains('vr') ||
+        terms.contains('virtual') ||
+        terms.contains('reality') ||
+        terms.contains('steamvr');
+    final mentionsClimbing =
+        terms.contains('climb') ||
+        terms.contains('climbs') ||
+        terms.contains('climber') ||
+        terms.contains('climbers') ||
+        terms.contains('climbing') ||
+        terms.contains('ascend') ||
+        terms.contains('ascent') ||
+        terms.contains('mountain') ||
+        terms.contains('mountains') ||
+        terms.contains('grapple') ||
+        terms.contains('grappling');
+
+    if (mentionsFaceControl) {
+      hints.add(
+        'For face/webcam/eye/blink control requests, consider exact Steam-searchable titles such as Before Your Eyes.',
+      );
+    }
+    if (mentionsVoiceControl) {
+      hints.add(
+        'For voice/microphone/singing control requests, consider exact Steam-searchable titles such as One Hand Clapping, There Came an Echo, In Verbis Virtus, and Stifled.',
+      );
+    }
+    if (mentionsVr && mentionsClimbing) {
+      hints.add(
+        'For VR climbing requests, consider exact Steam-searchable titles such as Climbey, TO THE TOP, Gorilla Tag, Windlands, Windlands 2, EVEREST VR, Adventure Climb VR, Indoor Rock Climbing VR, and VR Rock Climbing.',
+      );
+      hints.add(
+        'Do not use The Climb 2 as a Steam result unless Steam search verifies it; it may be unavailable on Steam.',
+      );
+    }
+    if (hints.isEmpty) return '';
+    return hints.join('\n');
+  }
+
   List<_ExternalAiTool> _steamExternalTools() {
     return [
       _ExternalAiTool(
@@ -1588,6 +1652,7 @@ Do not return AniList media types, AniList release formats, or adult-content fie
 Keep leftover natural-language game terms in searchText.
 Keep searchText short and close to the user's wording. Do not rewrite the whole request.
 For niche Steam requests about a specific job, machine, object, profession, or activity, prefer searchText over broad tags. Leave tags empty unless an exact Steam tag adds real precision.
+${_steamSearchVocabularyHint(query.request)}
 ${_formatInstruction('Steam', allowedFormats)}
 ${_tagInstruction('Steam', tier, tagList)}
 User request: ${query.request}
@@ -2340,6 +2405,7 @@ Do not pick a broadly popular or profile-shaped game when another option better 
 Write the reason around why the chosen game fits the request; mention personal taste only when it adds useful context.
 Only the listed Steam game options are eligible for this request.
 If missingPlayCapabilities is empty, that game satisfies every required Steam play capability.
+${_steamSearchVocabularyHint(query.request)}
 Return JSON only. Use exactly these keys: id, reason. The id must match one option id. Keep reason to one short sentence under 25 words.
 ${_profilePromptEvidence(profile, tier, limits)}
 Game request: ${query.request}
@@ -2576,6 +2642,7 @@ This is a direct recommendation, not tag selection and not option reranking. You
 The title must be an exact game title that Majika can search for on Steam. Do not invent a game and do not recommend a game the user already owns.
 Titles shown in profile evidence are already owned and are taste signals only, never valid recommendations.
 Respect required play capabilities when they are present.
+${_steamSearchVocabularyHint(query.request)}
 ${_steamToolInstruction(allowSearchTools)}
 Return JSON only. Use exactly these keys: title, reason. Keep reason to one short sentence under 25 words.
 ${_profilePromptEvidence(profile, tier, limits)}
@@ -2725,6 +2792,7 @@ This is a title-discovery pass before API validation. Use your own model knowled
 Use the request as the primary decision. Use the user's profile only as a light tie-breaker.
 Return exact titles that should be searchable on ${profile.serviceName}. Do not invent titles and do not suggest titles already in the user's library.
 Respect hard $formatLabel when they are present.
+${isSteam ? _steamSearchVocabularyHint(query.request) : ''}
 ${isSteam ? _steamToolInstruction(allowSearchTools) : ''}
 Return JSON only. Prefer exactly this shape: {"titles":["..."]}. Titles only, no reasons.
 Request: ${query.request}

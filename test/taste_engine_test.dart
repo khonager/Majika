@@ -976,6 +976,143 @@ void main() {
     expect(recommendations.single.item.title, 'Adventure Climb VR');
   });
 
+  test('Steam VR climbing requests prioritize verified climbing favorites', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile('tester', [
+      MediaItem(
+        id: 'steam_seen',
+        title: 'Seen Controller Game',
+        coverUrl: '',
+        tags: const ['Action', 'Controller Support'],
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        status: 'OWNED',
+        sourceId: 'com.majika.service.steam',
+      ),
+    ], serviceName: 'Steam');
+
+    final recommendations = engine.rankCandidates(
+      profile,
+      [
+        MediaItem(
+          id: 'steam_lighting',
+          title: 'VR LightingClimbing',
+          coverUrl: '',
+          tags: const ['VR Only', 'Single-player', 'Simulation'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+          description:
+              'A small virtual reality lighting scene with climbing in the title.',
+          popularity: 50,
+        ),
+        MediaItem(
+          id: 'steam_climbey',
+          title: 'Climbey',
+          coverUrl: '',
+          tags: const ['VR Only', 'Co-op', 'Online Co-op', 'Simulation'],
+          format: 'ONLINE_CO_OP',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+          description:
+              'A VR-only climbing game where you climb to the finish as fast as possible.',
+          popularity: 25000,
+        ),
+        MediaItem(
+          id: 'steam_gorilla',
+          title: 'Gorilla Tag',
+          coverUrl: '',
+          tags: const ['VR Only', 'Multiplayer', 'Action'],
+          format: 'MULTIPLAYER',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+          description: 'Run, jump, and climb using only your hands.',
+          popularity: 90000,
+        ),
+      ],
+      query: const RecommendationQuery(
+        request: 'a vr game about climbing',
+        aiSelectedTags: {'VR'},
+      ),
+    );
+
+    expect(recommendations.map((rec) => rec.item.title), contains('Climbey'));
+    expect(recommendations.first.item.title, isNot('VR LightingClimbing'));
+    expect(recommendations.first.signals, contains('wanted VR climbing'));
+  });
+
+  test('Steam unusual-control requests prioritize blink and voice evidence', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile('tester', [
+      MediaItem(
+        id: 'steam_seen',
+        title: 'Seen Narrative Game',
+        coverUrl: '',
+        tags: const ['Adventure', 'Single-player'],
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        status: 'OWNED',
+        sourceId: 'com.majika.service.steam',
+      ),
+    ], serviceName: 'Steam');
+
+    final recommendations = engine.rankCandidates(
+      profile,
+      [
+        MediaItem(
+          id: 'steam_tacoma',
+          title: 'Tacoma',
+          coverUrl: '',
+          tags: const ['Adventure', 'Single-player'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+          description: 'A narrative adventure about an AI space station.',
+          popularity: 50000,
+        ),
+        MediaItem(
+          id: 'steam_before',
+          title: 'Before Your Eyes',
+          coverUrl: '',
+          tags: const ['Adventure', 'Indie', 'Single-player'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+          description:
+              'Control the story with your real-life blinks as your life flashes before your eyes.',
+          popularity: 40000,
+        ),
+        MediaItem(
+          id: 'steam_clapping',
+          title: 'One Hand Clapping',
+          coverUrl: '',
+          tags: const ['Adventure', 'Puzzle', 'Single-player'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: 'com.majika.service.steam',
+          description:
+              'A vocal puzzle platformer where you use your microphone and singing voice.',
+          popularity: 15000,
+        ),
+      ],
+      query: const RecommendationQuery(
+        request:
+            'a game that you can control with just your voice or your face',
+      ),
+    );
+
+    expect(recommendations.first.item.title, 'Before Your Eyes');
+    expect(recommendations.first.signals, contains('wanted unusual controls'));
+    expect(
+      recommendations.map((rec) => rec.item.title),
+      contains('One Hand Clapping'),
+    );
+    expect(
+      recommendations.map((rec) => rec.item.title),
+      isNot(contains('Tacoma')),
+    );
+  });
+
   test('low-signal fun words do not boost title-only matches', () {
     final engine = TasteEngine();
     final profile = engine.buildProfile('tester', [
