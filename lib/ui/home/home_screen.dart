@@ -365,6 +365,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _logQueryInterpretation(aiLog, query);
           var baseCandidates = workspace.baseCandidates;
           var candidates = query.isActive ? <MediaItem>[] : [...baseCandidates];
+          var requestSeedCandidates = <MediaItem>[];
           final needsAdultCandidates =
               query.allowsAdult && !workspace.adultCandidatesLoaded;
           final preferAiDiscoveryFirst =
@@ -386,7 +387,19 @@ class _HomeScreenState extends State<HomeScreen> {
               usedAsPrimarySearch: true,
             );
             if (aiDiscovered.isNotEmpty) {
+              requestSeedCandidates = _dedupeCandidates([
+                ...requestSeedCandidates,
+                ...aiDiscovered,
+              ]);
               candidates = _dedupeCandidates([...aiDiscovered, ...candidates]);
+              _publishRecommendationSearchStage(
+                workspace: workspace,
+                profile: profile,
+                query: query,
+                candidates: candidates,
+                requestSeedCandidates: requestSeedCandidates,
+                searchRunId: searchRunId,
+              );
             }
           }
 
@@ -413,6 +426,16 @@ class _HomeScreenState extends State<HomeScreen> {
               ...searchedCandidates,
               ...candidates,
             ]);
+            if (candidates.isNotEmpty) {
+              _publishRecommendationSearchStage(
+                workspace: workspace,
+                profile: profile,
+                query: query,
+                candidates: candidates,
+                requestSeedCandidates: requestSeedCandidates,
+                searchRunId: searchRunId,
+              );
+            }
           }
 
           if (needsAdultCandidates) {
@@ -424,6 +447,16 @@ class _HomeScreenState extends State<HomeScreen> {
               ...adultCandidates,
             ]);
             candidates = _dedupeCandidates([...candidates, ...adultCandidates]);
+            if (candidates.isNotEmpty) {
+              _publishRecommendationSearchStage(
+                workspace: workspace,
+                profile: profile,
+                query: query,
+                candidates: candidates,
+                requestSeedCandidates: requestSeedCandidates,
+                searchRunId: searchRunId,
+              );
+            }
           }
 
           if (query.isActive && !preferAiDiscoveryFirst) {
@@ -443,15 +476,29 @@ class _HomeScreenState extends State<HomeScreen> {
             );
             _logAiDiscoveryResults(aiLog, aiDiscovered);
             if (aiDiscovered.isNotEmpty) {
+              requestSeedCandidates = _dedupeCandidates([
+                ...requestSeedCandidates,
+                ...aiDiscovered,
+              ]);
               candidates = _dedupeCandidates([...aiDiscovered, ...candidates]);
+              _publishRecommendationSearchStage(
+                workspace: workspace,
+                profile: profile,
+                query: query,
+                candidates: candidates,
+                requestSeedCandidates: requestSeedCandidates,
+                searchRunId: searchRunId,
+              );
             }
           }
 
           progressToast.update('Ranking matches against your profile...');
-          final recommendations = _tasteEngine.rankCandidates(
+          final recommendations = _rankCandidatesForDisplay(
+            workspace.service,
             profile,
             candidates,
             query: query,
+            requestSeedCandidates: requestSeedCandidates,
           );
           _logRankedRecommendations(aiLog, recommendations);
           progressToast.update('Choosing the lead recommendation...');
@@ -867,6 +914,35 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _publishRecommendationSearchStage({
+    required _ServiceWorkspace workspace,
+    required TasteProfile profile,
+    required RecommendationQuery query,
+    required List<MediaItem> candidates,
+    required List<MediaItem> requestSeedCandidates,
+    required int searchRunId,
+  }) {
+    if (!mounted || workspace.activeRecommendationSearchRunId != searchRunId) {
+      return;
+    }
+    final recommendations = _rankCandidatesForDisplay(
+      workspace.service,
+      profile,
+      candidates,
+      query: query,
+      requestSeedCandidates: requestSeedCandidates,
+    );
+    setState(() {
+      workspace.query = _storedQueryAfterInterpretation(
+        query,
+        workspace.service,
+      );
+      workspace.candidates = candidates;
+      workspace.recommendations = recommendations;
+      workspace.isRefreshingRecommendations = true;
+    });
+  }
+
   String _summarizeTitles(List<MediaItem> items, {int limit = 5}) {
     return items.take(limit).map((item) => item.title).join(', ');
   }
@@ -1111,6 +1187,96 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  List<Recommendation> _rankCandidatesForDisplay(
+    MediaService service,
+    TasteProfile profile,
+    List<MediaItem> candidates, {
+    required RecommendationQuery query,
+    Iterable<MediaItem> requestSeedCandidates = const [],
+  }) {
+    final ranked = _tasteEngine.rankCandidates(
+      profile,
+      candidates,
+      query: query,
+    );
+    final requestSeedRanked = _trustedRequestRecommendations(
+      service,
+      profile,
+      query,
+      requestSeedCandidates,
+    );
+    if (requestSeedRanked.isEmpty) return ranked;
+    if (ranked.isEmpty) return requestSeedRanked;
+    return _mergeRankedRecommendations([...ranked, ...requestSeedRanked]);
+  }
+
+  List<Recommendation> _trustedRequestRecommendations(
+    MediaService service,
+    TasteProfile profile,
+    RecommendationQuery query,
+    Iterable<MediaItem> candidates,
+  ) {
+    final seedCandidates = _dedupeCandidates(candidates.toList());
+    if (seedCandidates.isEmpty) return const [];
+    final relaxed = _tasteEngine.rankCandidates(
+      profile,
+      seedCandidates,
+      query: _aiDiscoveryValidationQueryFor(service, query),
+    );
+    final byId = {
+      for (final recommendation in relaxed)
+        recommendation.item.id: recommendation,
+    };
+    final trusted = <Recommendation>[];
+    for (final (index, item) in seedCandidates.indexed) {
+      final recommendation = byId[item.id];
+      if (recommendation == null) continue;
+      final requestFitScore = max(58.0, 88.0 - index * 4.0);
+      trusted.add(
+        recommendation.copyWith(
+          matchScore: max(recommendation.matchScore, requestFitScore),
+          reason:
+              'Found as a likely title match for "${query.request.trim()}"; ranked with your ${profile.serviceName} profile.',
+          signals: _uniqueStrings(['request match', ...recommendation.signals]),
+          isTopPick: false,
+        ),
+      );
+    }
+    return trusted;
+  }
+
+  List<Recommendation> _mergeRankedRecommendations(
+    Iterable<Recommendation> recommendations,
+  ) {
+    final byId = <String, Recommendation>{};
+    for (final recommendation in recommendations) {
+      final existing = byId[recommendation.item.id];
+      if (existing == null ||
+          recommendation.matchScore > existing.matchScore ||
+          (recommendation.isAiPick && !existing.isAiPick)) {
+        byId[recommendation.item.id] = recommendation.copyWith(
+          isTopPick: false,
+        );
+      }
+    }
+    final merged = byId.values.toList()
+      ..sort((a, b) => b.matchScore.compareTo(a.matchScore));
+    if (merged.isEmpty) return merged;
+    return [
+      merged.first.copyWith(isTopPick: true),
+      for (final recommendation in merged.skip(1))
+        recommendation.copyWith(isTopPick: false),
+    ];
+  }
+
+  List<String> _uniqueStrings(Iterable<String> values) {
+    final seen = <String>{};
+    return [
+      for (final value in values)
+        if (value.trim().isNotEmpty && seen.add(value.trim())) value.trim(),
+    ];
+  }
+
   _ServiceWorkspace? _workspaceForSuggestedService(
     Iterable<_ServiceWorkspace> workspaces,
     String serviceName,
@@ -1135,7 +1301,7 @@ class _HomeScreenState extends State<HomeScreen> {
       profile,
       knownRecommendations,
       query: query,
-      limit: 5,
+      limit: 10,
     );
     if (suggestions.isEmpty) return const [];
 
@@ -2670,7 +2836,7 @@ class _RecommendationState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final topPick = recommendations.isEmpty ? null : recommendations.first;
-    final otherPicks = recommendations.skip(1).take(18).toList();
+    final otherPicks = recommendations.skip(1).toList();
     final readableInset = EdgeInsets.only(left: isMobileSurface ? 54 : 0);
 
     return Stack(
@@ -2699,6 +2865,15 @@ class _RecommendationState extends StatelessWidget {
                       onCancelSearch: onCancelSearch,
                     ),
                   ),
+                  if (isRefreshing) ...[
+                    const SizedBox(height: 10),
+                    Padding(
+                      padding: readableInset,
+                      child: _RecommendationLoadingStrip(
+                        resultCount: recommendations.length,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 14),
                   if (topPick == null)
                     Padding(
@@ -2709,7 +2884,15 @@ class _RecommendationState extends StatelessWidget {
                       ),
                     )
                   else
-                    _TopRecommendationCard(recommendation: topPick),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 360),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      child: _TopRecommendationCard(
+                        key: ValueKey('top-${topPick.item.id}'),
+                        recommendation: topPick,
+                      ),
+                    ),
                   if (otherPicks.isNotEmpty) ...[
                     const SizedBox(height: 18),
                     Padding(
@@ -2735,7 +2918,23 @@ class _RecommendationState extends StatelessWidget {
             else
               SliverList.separated(
                 itemBuilder: (context, index) {
-                  return _RecommendationTile(recommendation: otherPicks[index]);
+                  final recommendation = otherPicks[index];
+                  return TweenAnimationBuilder<double>(
+                    key: ValueKey('ranked-${recommendation.item.id}'),
+                    tween: Tween(begin: 0, end: 1),
+                    duration: Duration(milliseconds: 260 + index * 35),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, value, child) {
+                      return Opacity(
+                        opacity: value,
+                        child: Transform.translate(
+                          offset: Offset(0, 12 * (1 - value)),
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: _RecommendationTile(recommendation: recommendation),
+                  );
                 },
                 separatorBuilder: (context, index) =>
                     const SizedBox(height: 10),
@@ -2785,6 +2984,44 @@ class _TasteSummary extends StatelessWidget {
                 .take(5)
                 .map((genre) => _TextChip(label: genre))
                 .toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecommendationLoadingStrip extends StatelessWidget {
+  final int resultCount;
+
+  const _RecommendationLoadingStrip({required this.resultCount});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final label = resultCount == 0
+        ? 'Finding matches'
+        : 'Sorting $resultCount ${resultCount == 1 ? 'match' : 'matches'}';
+
+    return _GlassCard(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        children: [
+          const SizedBox.square(
+            dimension: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: Colors.white.withValues(alpha: 0.72),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
         ],
       ),
@@ -3489,7 +3726,7 @@ class _FilterChipButton extends StatelessWidget {
 class _TopRecommendationCard extends StatelessWidget {
   final Recommendation recommendation;
 
-  const _TopRecommendationCard({required this.recommendation});
+  const _TopRecommendationCard({super.key, required this.recommendation});
 
   @override
   Widget build(BuildContext context) {
