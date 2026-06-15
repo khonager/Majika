@@ -390,9 +390,16 @@ class _HomeScreenState extends State<HomeScreen> {
             }
           }
 
-          if (query.isActive && candidates.isEmpty) {
+          if (_shouldSearchServiceCandidates(
+            workspace.service,
+            query: query,
+            candidates: candidates,
+            preferAiDiscoveryFirst: preferAiDiscoveryFirst,
+          )) {
             progressToast.update(
-              'Searching ${workspace.service.displayName} candidates...',
+              candidates.isEmpty
+                  ? 'Searching ${workspace.service.displayName} candidates...'
+                  : 'Searching for more ${workspace.service.displayName} candidates...',
             );
             final searchedCandidates = await workspace.service
                 .searchRecommendationCandidates(query);
@@ -1158,6 +1165,18 @@ class _HomeScreenState extends State<HomeScreen> {
     final top = recommendations.first.matchScore;
     final next = recommendations.length > 1 ? recommendations[1].matchScore : 0;
     return top >= 95 && (top - next) >= 8;
+  }
+
+  bool _shouldSearchServiceCandidates(
+    MediaService service, {
+    required RecommendationQuery query,
+    required List<MediaItem> candidates,
+    required bool preferAiDiscoveryFirst,
+  }) {
+    if (!query.isActive) return false;
+    if (candidates.isEmpty) return true;
+    if (!preferAiDiscoveryFirst) return false;
+    return service.displayName == 'Steam';
   }
 
   Future<MediaItem?> _resolveSuggestedItem({

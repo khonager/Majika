@@ -691,6 +691,42 @@ void main() {
     },
   );
 
+  testWidgets('Steam AI discovery still augments with broader ranked matches', (
+    WidgetTester tester,
+  ) async {
+    final service = _OfficeSearchSteamMediaService();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          mediaService: service,
+          aiService: const _OfficeSteamDiscoveryAiService(),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build game profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search a genre, mode, game, or vibe'),
+      'i want to pretend to be a boring office worker who gets to solve tasks',
+    );
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(
+      service.searchRequests,
+      containsAll([
+        'Papers, Please',
+        'i want to pretend to be a boring office worker who gets to solve tasks',
+      ]),
+    );
+    expect(service.lastBroadQueryResultCount, 3);
+  });
+
   testWidgets('cancelled recommendation search ignores late results', (
     WidgetTester tester,
   ) async {
@@ -1965,6 +2001,116 @@ class _StickyControllerSteamAiService extends DeterministicLocalAiService {
       mediaTypes: const {'GAME'},
       formats: const {'CONTROLLER'},
     );
+  }
+}
+
+class _OfficeSteamDiscoveryAiService extends DeterministicLocalAiService {
+  const _OfficeSteamDiscoveryAiService();
+
+  @override
+  Future<RecommendationQuery> interpretRecommendationRequest(
+    RecommendationQuery query, {
+    required Iterable<String> availableTags,
+    String serviceName = 'AniList',
+    Iterable<String> allowedMediaTypes = RecommendationQuery.allMediaTypes,
+    Iterable<String> allowedFormats = RecommendationQuery.allFormats,
+  }) async {
+    return query.copyWith(
+      interpretedRequest: 'boring office worker tasks',
+      mediaTypes: const {'GAME'},
+    );
+  }
+
+  @override
+  Future<List<AiRecommendationSuggestion>> suggestRecommendationCandidates(
+    TasteProfile profile,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+    int limit = 5,
+  }) async {
+    return const [
+      AiRecommendationSuggestion(
+        title: 'Papers, Please',
+        serviceName: 'Steam',
+        reason: 'Office bureaucracy fit.',
+      ),
+    ];
+  }
+}
+
+class _OfficeSearchSteamMediaService extends _FakeSteamMediaService {
+  final List<String> searchRequests = [];
+  int lastBroadQueryResultCount = 0;
+
+  @override
+  Future<List<MediaItem>> fetchRecommendationCandidates({
+    bool includeAdult = false,
+  }) async {
+    return const <MediaItem>[];
+  }
+
+  @override
+  Future<List<MediaItem>> searchRecommendationCandidates(
+    RecommendationQuery query,
+  ) async {
+    searchRequests.add(query.request);
+    if (query.request == 'Papers, Please') {
+      return [
+        MediaItem(
+          id: 'steam_papers',
+          title: 'Papers, Please',
+          coverUrl: '',
+          tags: const ['Simulation', 'Single-player', 'Puzzle'],
+          rating: 9.0,
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          sourceId: id,
+          siteUrl: 'https://store.steampowered.com/app/239030',
+          description: 'A grim bureaucratic desk job about checking papers.',
+        ),
+      ];
+    }
+
+    final results = [
+      MediaItem(
+        id: 'steam_papers',
+        title: 'Papers, Please',
+        coverUrl: '',
+        tags: const ['Simulation', 'Single-player', 'Puzzle'],
+        rating: 9.0,
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        sourceId: id,
+        siteUrl: 'https://store.steampowered.com/app/239030',
+        description: 'A grim bureaucratic desk job about checking papers.',
+      ),
+      MediaItem(
+        id: 'steam_stanley',
+        title: 'The Stanley Parable',
+        coverUrl: '',
+        tags: const ['Comedy', 'Story Rich', 'Single-player'],
+        rating: 8.8,
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        sourceId: id,
+        siteUrl: 'https://store.steampowered.com/app/221910',
+        description: 'An office worker wanders a surreal corporate labyrinth.',
+      ),
+      MediaItem(
+        id: 'steam_jobsim',
+        title: 'Job Simulator',
+        coverUrl: '',
+        tags: const ['Simulation', 'Funny', 'VR'],
+        rating: 8.3,
+        format: 'SINGLE_PLAYER',
+        mediaType: 'GAME',
+        sourceId: id,
+        siteUrl: 'https://store.steampowered.com/app/448280',
+        description: 'A comedic simulation of mundane office and service jobs.',
+      ),
+    ];
+    lastBroadQueryResultCount = results.length;
+    return results;
   }
 }
 
