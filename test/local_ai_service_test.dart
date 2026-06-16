@@ -55,6 +55,24 @@ void main() {
   });
 
   test(
+    'query inference treats timetravel as time manipulation, not travel',
+    () {
+      const query = RecommendationQuery(
+        request: 'a romance film involving timetravel',
+      );
+
+      expect(
+        query.inferredTags(const ['Romance', 'Time Manipulation', 'Travel']),
+        contains('Time Manipulation'),
+      );
+      expect(
+        query.inferredTags(const ['Romance', 'Time Manipulation', 'Travel']),
+        isNot(contains('Travel')),
+      );
+    },
+  );
+
+  test(
     'flutter gemma service turns model JSON into query selections',
     () async {
       final service = FlutterGemmaLocalAiService(
@@ -76,6 +94,30 @@ void main() {
       expect(interpreted.aiSelectedTags, contains('Time Manipulation'));
       expect(interpreted.formats, contains('MOVIE'));
       expect(interpreted.mediaTypes, contains('ANIME'));
+    },
+  );
+
+  test(
+    'flutter gemma service sanitizes bloated search text and ignores adult hallucinations',
+    () async {
+      final service = FlutterGemmaLocalAiService(
+        textGenerator: (prompt, maxTokens) async => '''
+{"tags":[],"formats":["MOVIE"],"mediaTypes":["ANIME"],"includeAdult":true,"searchText":"romance film time travel anime movie romance film time travel movie romance film time travel anime movie"}
+''',
+      );
+
+      final interpreted = await service.interpretRecommendationRequest(
+        const RecommendationQuery(
+          request: 'a romance film involving timetravel',
+        ),
+        availableTags: const ['Romance', 'Time Manipulation', 'Travel'],
+      );
+
+      expect(interpreted.searchRequest, 'a romance film involving timetravel');
+      expect(interpreted.aiSelectedTags, contains('Romance'));
+      expect(interpreted.aiSelectedTags, contains('Time Manipulation'));
+      expect(interpreted.aiSelectedTags, isNot(contains('Travel')));
+      expect(interpreted.includeAdult, isFalse);
     },
   );
 

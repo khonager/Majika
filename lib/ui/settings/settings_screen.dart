@@ -400,6 +400,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isLoadingServerModels = false;
   String? _serverModelStatusMessage;
   Set<String> _installedOllamaModels = const {};
+  Set<String> _installedFlmModels = const {};
   double _imageQuality = 0.85;
   double? _downloadProgress;
   CancelToken? _downloadCancelToken;
@@ -461,30 +462,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<_ServerModelPreset> get _serverModelPresets {
     final presets = [..._externalLocalServerModelPresets];
     final knownNames = presets.map((preset) => preset.name).toSet();
-    final installedOnly =
-        _installedOllamaModels
-            .where((name) => !knownNames.contains(name))
-            .where((name) => !_looksLikeEmbeddingModel(name))
-            .toList()
-          ..sort();
-    for (final name in installedOnly) {
-      presets.insert(
-        0,
-        _ServerModelPreset(
-          name: name,
-          runtime: _ServerRuntime.ollama,
-          tier: _AiModelTier.recommended,
-          sizeLabel: 'Installed',
-          description:
-              'Installed Ollama model found on this device. Majika can use it immediately; benchmark quality before making it your default.',
-        ),
-      );
+    final installedByRuntime = {
+      _ServerRuntime.ollama: _installedOllamaModels,
+      _ServerRuntime.fastFlowLm: _installedFlmModels,
+    };
+    for (final entry in installedByRuntime.entries) {
+      final installedOnly =
+          entry.value
+              .where((name) => !knownNames.contains(name))
+              .where((name) => !_looksLikeEmbeddingModel(name))
+              .toList()
+            ..sort();
+      for (final name in installedOnly.reversed) {
+        presets.insert(
+          0,
+          _ServerModelPreset(
+            name: name,
+            runtime: entry.key,
+            tier: _AiModelTier.recommended,
+            sizeLabel: 'Installed',
+            description:
+                'Installed ${entry.key.label} model found on this device. Majika can use it immediately; benchmark quality before making it your default.',
+          ),
+        );
+      }
     }
     return presets;
   }
 
   _ServerModelPreset get _effectiveServerModelPreset {
     final modelName = _localServerModelController.text.trim();
+    final preferredRuntime = _runtimeForEndpoint(
+      _localEndpointController.text.trim(),
+    );
+    for (final preset in _serverModelPresets) {
+      if (preset.name == modelName && preset.runtime == preferredRuntime) {
+        return preset;
+      }
+    }
     for (final preset in _serverModelPresets) {
       if (preset.name == modelName) return preset;
     }
@@ -497,6 +512,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String get _effectiveServerModelName {
     final modelName = _localServerModelController.text.trim();
     return modelName.isEmpty ? defaultLocalAiModel : modelName;
+  }
+
+  _ServerRuntime _runtimeForEndpoint(String endpoint) {
+    return _looksLikeOllamaEndpoint(endpoint)
+        ? _ServerRuntime.ollama
+        : _ServerRuntime.fastFlowLm;
   }
 
   _CloudAiProviderPreset get _effectiveCloudProviderPreset {
@@ -735,15 +756,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final endpoint = _localEndpointController.text.trim().isEmpty
         ? defaultLocalAiEndpoint
         : _localEndpointController.text.trim();
-    if (!_looksLikeOllamaEndpoint(endpoint)) {
-      if (!mounted) return;
-      setState(() {
-        _installedOllamaModels = const {};
-        _serverModelStatusMessage =
-            'FastFlowLM is not installed on this device. Use flm list on a supported Windows Ryzen AI setup to confirm downloaded models.';
-      });
-      return;
-    }
 
     setState(() {
       _isLoadingServerModels = true;
@@ -751,42 +763,91 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     try {
-      final tagsUri = _ollamaTagsUri(endpoint);
-      final response = await http
-          .get(tagsUri)
-          .timeout(const Duration(milliseconds: 1800));
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw StateError('Ollama returned HTTP ${response.statusCode}.');
+      if (_looksLikeOllamaEndpoint(endpoint)) {
+        final names = await _fetchOllamaModels(endpoint);
+        if (!mounted) return;
+        setState(() {
+          _installedOllamaModels = names;
+          _installedFlmModels = const {};
+          _serverModelStatusMessage = names.isEmpty
+              ? 'Ollama is reachable, but no downloaded models were reported.'
+              : 'Found ${names.length} downloaded Ollama model${names.length == 1 ? '' : 's'} on this device.';
+        });
+      } else {
+        final names = await _fetchOpenAiCompatibleModels(endpoint);
+        if (!mounted) return;
+        setState(() {
+          _installedOllamaModels = const {};
+          _installedFlmModels = names;
+          _serverModelStatusMessage = names.isEmpty
+              ? 'FastFlowLM is reachable, but no served models were reported from /v1/models.'
+              : 'Found ${names.length} FastFlowLM model${names.length == 1 ? '' : 's'} via /v1/models.';
+        });
       }
-      final decoded = jsonDecode(response.body);
-      final models = decoded is Map<String, dynamic> ? decoded['models'] : null;
-      final names = <String>{};
-      if (models is List) {
-        for (final model in models) {
-          if (model is! Map<String, dynamic>) continue;
-          final name = model['name'] ?? model['model'];
-          if (name != null) names.add(name.toString());
-        }
-      }
-      if (!mounted) return;
-      setState(() {
-        _installedOllamaModels = names;
-        _serverModelStatusMessage = names.isEmpty
-            ? 'Ollama is reachable, but no downloaded models were reported.'
-            : 'Found ${names.length} downloaded Ollama model${names.length == 1 ? '' : 's'} on this device.';
-      });
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _installedOllamaModels = const {};
-        _serverModelStatusMessage =
-            'Could not reach Ollama at ${_ollamaTagsUri(endpoint)}. Start Ollama, then refresh.';
+        _installedFlmModels = const {};
+        if (_looksLikeOllamaEndpoint(endpoint)) {
+          _serverModelStatusMessage =
+              'Could not reach Ollama at ${_ollamaTagsUri(endpoint)}. Start Ollama, then refresh.';
+        } else {
+          _serverModelStatusMessage =
+              'Could not reach the OpenAI-compatible models endpoint at ${_openAiModelsUri(endpoint)}. Start FastFlowLM, then refresh.';
+        }
       });
     } finally {
       if (mounted) {
         setState(() => _isLoadingServerModels = false);
       }
     }
+  }
+
+  Future<Set<String>> _fetchOllamaModels(String endpoint) async {
+    final tagsUri = _ollamaTagsUri(endpoint);
+    final response = await http
+        .get(tagsUri)
+        .timeout(const Duration(milliseconds: 1800));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Ollama returned HTTP ${response.statusCode}.');
+    }
+    final decoded = jsonDecode(response.body);
+    final models = decoded is Map<String, dynamic> ? decoded['models'] : null;
+    final names = <String>{};
+    if (models is List) {
+      for (final model in models) {
+        if (model is! Map<String, dynamic>) continue;
+        final name = model['name'] ?? model['model'];
+        if (name != null) names.add(name.toString());
+      }
+    }
+    return names;
+  }
+
+  Future<Set<String>> _fetchOpenAiCompatibleModels(String endpoint) async {
+    final modelsUri = _openAiModelsUri(endpoint);
+    final response = await http
+        .get(modelsUri)
+        .timeout(const Duration(milliseconds: 1800));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError(
+        'OpenAI-compatible server returned HTTP ${response.statusCode}.',
+      );
+    }
+    final decoded = jsonDecode(response.body);
+    final data = decoded is Map<String, dynamic> ? decoded['data'] : null;
+    final names = <String>{};
+    if (data is List) {
+      for (final model in data) {
+        if (model is! Map<String, dynamic>) continue;
+        final name = model['id'] ?? model['name'] ?? model['model'];
+        if (name != null && name.toString().trim().isNotEmpty) {
+          names.add(name.toString().trim());
+        }
+      }
+    }
+    return names;
   }
 
   Future<void> _useOllamaDefaults() async {
@@ -1551,6 +1612,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     presets: _serverModelPresets,
                     selectedPreset: _effectiveServerModelPreset,
                     installedOllamaModels: _installedOllamaModels,
+                    installedFlmModels: _installedFlmModels,
                     isLoadingInstalledModels: _isLoadingServerModels,
                     statusMessage: _serverModelStatusMessage,
                     onRefreshInstalledModels: _refreshServerModels,
@@ -2019,6 +2081,25 @@ Uri _ollamaTagsUri(String endpoint) {
   return uri.replace(path: '$path/api/tags', query: '');
 }
 
+Uri _openAiModelsUri(String endpoint) {
+  final uri = Uri.parse(endpoint);
+  var path = uri.path;
+  for (final suffix in ['/v1/chat/completions', '/chat/completions']) {
+    if (path.endsWith(suffix)) {
+      path = path.substring(0, path.length - suffix.length);
+      break;
+    }
+  }
+  if (!path.endsWith('/v1')) {
+    if (path.isEmpty || path == '/') {
+      path = '/v1';
+    } else if (!path.endsWith('/models')) {
+      path = '$path/v1';
+    }
+  }
+  return uri.replace(path: '$path/models', query: '');
+}
+
 class _CloudAiProviderCard extends StatelessWidget {
   final List<_CloudAiProviderPreset> presets;
   final _CloudAiProviderPreset selectedPreset;
@@ -2157,6 +2238,7 @@ class _ServerModelPresetCard extends StatelessWidget {
   final List<_ServerModelPreset> presets;
   final _ServerModelPreset selectedPreset;
   final Set<String> installedOllamaModels;
+  final Set<String> installedFlmModels;
   final bool isLoadingInstalledModels;
   final String? statusMessage;
   final Future<void> Function() onRefreshInstalledModels;
@@ -2166,6 +2248,7 @@ class _ServerModelPresetCard extends StatelessWidget {
     required this.presets,
     required this.selectedPreset,
     required this.installedOllamaModels,
+    required this.installedFlmModels,
     required this.isLoadingInstalledModels,
     required this.statusMessage,
     required this.onRefreshInstalledModels,
@@ -2215,7 +2298,7 @@ class _ServerModelPresetCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Installed Ollama models plus Majika-friendly downloads.',
+                      'Installed server models plus Majika-friendly downloads.',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: Colors.white70,
                       ),
@@ -2341,8 +2424,11 @@ class _ServerModelPresetCard extends StatelessWidget {
   }
 
   bool _isPresetInstalled(_ServerModelPreset preset) {
-    if (preset.runtime == _ServerRuntime.fastFlowLm) return false;
-    return installedOllamaModels.contains(preset.name);
+    final installedModels = switch (preset.runtime) {
+      _ServerRuntime.ollama => installedOllamaModels,
+      _ServerRuntime.fastFlowLm => installedFlmModels,
+    };
+    return installedModels.contains(preset.name);
   }
 }
 

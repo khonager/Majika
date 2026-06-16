@@ -12,6 +12,7 @@ class MediaItem {
   final String? status;
   final String? description;
   final String siteUrl;
+  final List<String> alternativeTitles;
   final List<String> characters;
   final List<String> studios;
   final int? startYear;
@@ -36,6 +37,7 @@ class MediaItem {
     this.status,
     this.description,
     this.siteUrl = '',
+    this.alternativeTitles = const [],
     this.characters = const [],
     this.studios = const [],
     this.startYear,
@@ -77,6 +79,7 @@ class MediaItem {
     String? status,
     String? description,
     String? siteUrl,
+    List<String>? alternativeTitles,
     List<String>? characters,
     List<String>? studios,
     int? startYear,
@@ -101,6 +104,7 @@ class MediaItem {
       status: status ?? this.status,
       description: description ?? this.description,
       siteUrl: siteUrl ?? this.siteUrl,
+      alternativeTitles: alternativeTitles ?? this.alternativeTitles,
       characters: characters ?? this.characters,
       studios: studios ?? this.studios,
       startYear: startYear ?? this.startYear,
@@ -131,6 +135,7 @@ class MediaItem {
       status: json['status'] as String?,
       description: json['description'] as String?,
       siteUrl: json['siteUrl'] as String? ?? '',
+      alternativeTitles: List<String>.from(json['alternativeTitles'] ?? []),
       characters: List<String>.from(json['characters'] ?? []),
       studios: List<String>.from(json['studios'] ?? []),
       startYear: json['startYear'] as int?,
@@ -158,6 +163,7 @@ class MediaItem {
       'status': status,
       'description': description,
       'siteUrl': siteUrl,
+      'alternativeTitles': alternativeTitles,
       'characters': characters,
       'studios': studios,
       'startYear': startYear,

@@ -383,6 +383,7 @@ class _HomeScreenState extends State<HomeScreen> {
             );
             _logAiDiscoveryResults(
               aiLog,
+              workspace.service.displayName,
               aiDiscovered,
               usedAsPrimarySearch: true,
             );
@@ -418,6 +419,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 .searchRecommendationCandidates(query);
             _logCandidateResults(
               aiLog,
+              workspace.service.displayName,
               searchedCandidates,
               emptyMessage:
                   'Direct store search did not find any clear matches yet.',
@@ -474,7 +476,11 @@ class _HomeScreenState extends State<HomeScreen> {
               knownRecommendations: preliminaryRecommendations,
               query: query,
             );
-            _logAiDiscoveryResults(aiLog, aiDiscovered);
+            _logAiDiscoveryResults(
+              aiLog,
+              workspace.service.displayName,
+              aiDiscovered,
+            );
             if (aiDiscovered.isNotEmpty) {
               requestSeedCandidates = _dedupeCandidates([
                 ...requestSeedCandidates,
@@ -851,6 +857,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _logCandidateResults(
     AiConsoleLog log,
+    String serviceName,
     List<MediaItem> items, {
     required String emptyMessage,
   }) {
@@ -859,26 +866,27 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     log.addUserLine(
-      'Steam fallback search found ${items.length} likely matches: ${_summarizeTitles(items)}',
+      '$serviceName search found ${items.length} likely matches: ${_summarizeTitles(items)}',
     );
   }
 
   void _logAiDiscoveryResults(
     AiConsoleLog log,
+    String serviceName,
     List<MediaItem> items, {
     bool usedAsPrimarySearch = false,
   }) {
     if (items.isEmpty) {
       log.addUserLine(
         usedAsPrimarySearch
-            ? 'AI could not produce any verified Steam matches, so I fell back to Steam store search.'
+            ? 'AI could not produce any verified $serviceName matches, so I fell back to direct $serviceName search.'
             : 'AI did not add any extra titles beyond the direct search.',
       );
       return;
     }
     log.addUserLine(
       usedAsPrimarySearch
-          ? 'AI found likely Steam matches: ${_summarizeTitles(items)}'
+          ? 'AI found likely $serviceName matches: ${_summarizeTitles(items)}'
           : 'AI added extra possible matches: ${_summarizeTitles(items)}',
     );
   }
@@ -1363,7 +1371,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     MediaItem? item;
     for (final result in searchResults) {
-      if (_normalizedTitle(result.title) == titleKey) {
+      if (_itemTitleKeys(result).contains(titleKey)) {
         item = result;
         break;
       }
@@ -1374,7 +1382,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (profile.library.any(
       (owned) =>
           owned.id == resolvedItem.id ||
-          _normalizedTitle(owned.title) == _normalizedTitle(resolvedItem.title),
+          _itemTitleKeys(owned).any(_itemTitleKeys(resolvedItem).contains),
     )) {
       return null;
     }
@@ -1430,7 +1438,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     for (final recommendation in knownRecommendations) {
-      if (_normalizedTitle(recommendation.item.title) == titleKey) {
+      if (_itemTitleKeys(recommendation.item).contains(titleKey)) {
         return (
           recommendation: recommendation.copyWith(
             reason: suggestion.reason,
@@ -1471,6 +1479,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _normalizedTitle(String value) {
     return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  Set<String> _itemTitleKeys(MediaItem item) {
+    return {
+      _normalizedTitle(item.title),
+      for (final title in item.alternativeTitles) _normalizedTitle(title),
+    }.where((title) => title.isNotEmpty).toSet();
   }
 
   Future<void> _loadSavedSessions() async {

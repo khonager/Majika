@@ -1126,7 +1126,10 @@ class FlutterGemmaLocalAiService implements LocalAiService {
         .map((type) => allowedMediaTypeSet[_canonicalKey(type)])
         .whereType<String>()
         .toSet();
-    final searchText = decoded['searchText']?.toString().trim();
+    final searchText = _sanitizeModelSearchText(
+      decoded['searchText']?.toString(),
+      original.request,
+    );
     final ruleInterpreted = original.withInferredSelections(availableTags);
     final formats = {
       ...ruleInterpreted.formats,
@@ -1150,9 +1153,12 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       aiSelectedTags: limitedTags,
       formats: formats,
       mediaTypes: mediaTypes,
-      includeAdult:
-          !original.excludeAdult &&
-          (ruleInterpreted.includeAdult || decoded['includeAdult'] == true),
+      includeAdult: _validatedModelIncludeAdult(
+        original: original,
+        ruleInterpreted: ruleInterpreted,
+        matchedTags: tags,
+        rawIncludeAdult: decoded['includeAdult'],
+      ),
       excludeAdult: original.excludeAdult,
     );
   }
@@ -1174,6 +1180,66 @@ class FlutterGemmaLocalAiService implements LocalAiService {
 
   String _canonicalKey(String value) {
     return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  String? _sanitizeModelSearchText(
+    String? rawSearchText,
+    String originalRequest,
+  ) {
+    final trimmed = rawSearchText?.replaceAll(RegExp(r'\s+'), ' ').trim() ?? '';
+    if (trimmed.isEmpty) return null;
+    final fallback = originalRequest.trim();
+    final words = trimmed
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9]+'))
+        .where((word) => word.isNotEmpty)
+        .toList();
+    if (words.length >= 8) {
+      final uniqueRatio = words.toSet().length / words.length;
+      if (uniqueRatio < 0.6 && fallback.isNotEmpty) {
+        return fallback;
+      }
+    }
+    final normalizedFallback = fallback
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .trim();
+    final normalizedTrimmed = trimmed
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .trim();
+    if (normalizedFallback.isNotEmpty) {
+      final repeatedFallback = RegExp(
+        RegExp.escape(normalizedFallback),
+      ).allMatches(normalizedTrimmed).length;
+      if (repeatedFallback > 1) return fallback;
+      if (trimmed.length > max(80, fallback.length * 2)) {
+        return fallback;
+      }
+    }
+    return trimmed;
+  }
+
+  bool _validatedModelIncludeAdult({
+    required RecommendationQuery original,
+    required RecommendationQuery ruleInterpreted,
+    required Set<String> matchedTags,
+    required Object? rawIncludeAdult,
+  }) {
+    if (original.excludeAdult) return false;
+    if (ruleInterpreted.includeAdult) return true;
+    if (rawIncludeAdult != true) return false;
+    const adultTags = {
+      'ecchi',
+      'hentai',
+      'sexualcontent',
+      'nudity',
+      'mature',
+      'nsfw',
+      'boyslove',
+      'yuri',
+    };
+    return matchedTags.any((tag) => adultTags.contains(_canonicalKey(tag)));
   }
 
   Set<String> _limitAiSelectedTags(Iterable<String> tags) {

@@ -993,6 +993,36 @@ void main() {
     expect(find.text('Direct cross-service personal pick.'), findsWidgets);
   });
 
+  testWidgets('AniList AI discovery resolves english titles through aliases', (
+    WidgetTester tester,
+  ) async {
+    final service = _AliasAniListMediaService();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          mediaService: service,
+          aiService: const _AliasAniListAiService(),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search a vibe, tag, format, or request'),
+      'a romance film involving timetravel',
+    );
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(service.searchRequests, contains('Your Name'));
+    expect(find.text('Kimi no Na wa.'), findsWidgets);
+  });
+
   testWidgets('sign out clears only the active saved service', (
     WidgetTester tester,
   ) async {
@@ -1868,6 +1898,78 @@ class _DirectSuggestionAiService extends DeterministicLocalAiService {
       serviceName: 'AniList',
       reason: 'A personal recommendation beyond the fetched tag results.',
     );
+  }
+}
+
+class _AliasAniListMediaService extends _FakeMediaService {
+  final List<String> searchRequests = [];
+
+  @override
+  Future<List<MediaItem>> fetchRecommendationCandidates({
+    bool includeAdult = false,
+  }) async {
+    return const <MediaItem>[];
+  }
+
+  @override
+  Future<List<MediaItem>> searchRecommendationCandidates(
+    RecommendationQuery query,
+  ) async {
+    searchRequests.add(query.request);
+    if (query.request == 'Your Name') {
+      return [
+        MediaItem(
+          id: 'anilist_your_name',
+          title: 'Kimi no Na wa.',
+          alternativeTitles: const ['Your Name'],
+          coverUrl: '',
+          tags: const ['Romance', 'Time Manipulation'],
+          rating: 8.9,
+          format: 'MOVIE',
+          mediaType: 'ANIME',
+          siteUrl: 'https://anilist.co/anime/21519',
+          description:
+              'A romance movie about two teenagers linked across time.',
+        ),
+      ];
+    }
+    return const <MediaItem>[];
+  }
+}
+
+class _AliasAniListAiService extends DeterministicLocalAiService {
+  const _AliasAniListAiService();
+
+  @override
+  Future<RecommendationQuery> interpretRecommendationRequest(
+    RecommendationQuery query, {
+    required Iterable<String> availableTags,
+    String serviceName = 'AniList',
+    Iterable<String> allowedMediaTypes = RecommendationQuery.allMediaTypes,
+    Iterable<String> allowedFormats = RecommendationQuery.allFormats,
+  }) async {
+    return query.copyWith(
+      aiSelectedTags: const {'Romance', 'Time Manipulation'},
+      mediaTypes: const {'ANIME'},
+      formats: const {'MOVIE'},
+    );
+  }
+
+  @override
+  Future<List<AiRecommendationSuggestion>> suggestRecommendationCandidates(
+    TasteProfile profile,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+    int limit = 5,
+  }) async {
+    if (!query.isActive) return const [];
+    return const [
+      AiRecommendationSuggestion(
+        title: 'Your Name',
+        serviceName: 'AniList',
+        reason: 'Canonical english title for the strongest match.',
+      ),
+    ];
   }
 }
 

@@ -342,6 +342,7 @@ class AniListService implements MediaService {
       status: entry?['status']?.toString() ?? media['status']?.toString(),
       description: media['description']?.toString(),
       siteUrl: media['siteUrl']?.toString() ?? '',
+      alternativeTitles: _alternativeTitlesFromAniListTitle(title),
       characters: _namesFromNodes(
         media['characters']?['nodes'],
         nestedName: true,
@@ -371,6 +372,20 @@ class AniListService implements MediaService {
     return {
       for (final tag in tags)
         if (tag.trim().isNotEmpty) tag,
+    }.toList();
+  }
+
+  static List<String> _alternativeTitlesFromAniListTitle(dynamic title) {
+    if (title is! Map) return const [];
+    return {
+      for (final value in [
+        title['userPreferred'],
+        title['english'],
+        title['romaji'],
+        title['native'],
+      ])
+        if (value != null && value.toString().trim().isNotEmpty)
+          value.toString().trim(),
     }.toList();
   }
 
@@ -428,7 +443,7 @@ class AniListService implements MediaService {
               id
               type
               format
-              title { userPreferred romaji english }
+              title { userPreferred romaji english native }
               coverImage { extraLarge large }
               genres
               tags { name rank isMediaSpoiler isAdult }
@@ -465,7 +480,7 @@ class AniListService implements MediaService {
           id
           type
           format
-          title { userPreferred romaji english }
+          title { userPreferred romaji english native }
           coverImage { extraLarge large }
           genres
           tags { name rank isMediaSpoiler isAdult }
@@ -514,7 +529,7 @@ class AniListService implements MediaService {
           id
           type
           format
-          title { userPreferred romaji english }
+          title { userPreferred romaji english native }
           coverImage { extraLarge large }
           genres
           tags { name rank isMediaSpoiler isAdult }

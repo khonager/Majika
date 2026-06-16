@@ -818,6 +818,10 @@ class RecommendationQuery {
     if (normalizedTag.isEmpty || _blockedAutoTags.contains(normalizedTag)) {
       return false;
     }
+    if (normalizedTag == 'travel' &&
+        _looksLikeTimeTravelRequest(normalizedRequest)) {
+      return false;
+    }
     return _containsWholePhrase(normalizedRequest, normalizedTag);
   }
 
@@ -836,6 +840,23 @@ class RecommendationQuery {
       'infamous like',
       'in famous-like',
       'in famous like',
+    ]);
+  }
+
+  static bool _looksLikeTimeTravelRequest(String text) {
+    return _containsAny(text, [
+      'time travel',
+      'time traveller',
+      'time traveler',
+      'time travelling',
+      'time traveling',
+      'timetravel',
+      'timetraveler',
+      'timetraveller',
+      'timeloop',
+      'time loop',
+      'rewind time',
+      'back in time',
     ]);
   }
 
@@ -954,7 +975,13 @@ class RecommendationQuery {
     ],
     'Time Manipulation': [
       'time travel',
+      'time travelling',
+      'time traveling',
       'time loop',
+      'timetravel',
+      'timetraveller',
+      'timetraveler',
+      'timeloop',
       'time traveller',
       'time traveler',
       'rewind time',
