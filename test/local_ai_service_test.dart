@@ -1429,6 +1429,7 @@ void main() {
   test('local AI retries when reasoning consumes the response budget', () async {
     final log = AiConsoleLog();
     var calls = 0;
+    Map<String, dynamic>? retryPayload;
     final service = FlutterGemmaLocalAiService(
       settingsLoader: () async => const LocalAiRuntimeSettings(
         useLocalAi: true,
@@ -1436,7 +1437,7 @@ void main() {
         mode: localAiModeExternalServer,
         provider: externalLocalAiProvider,
         endpoint: defaultLocalAiEndpoint,
-        serverModel: 'reasoning-local:latest',
+        serverModel: 'gemma4:latest',
         contextItems: 24,
       ),
       httpPost: (url, {headers, body}) async {
@@ -1447,6 +1448,7 @@ void main() {
             200,
           );
         }
+        retryPayload = jsonDecode(body.toString()) as Map<String, dynamic>;
         return http.Response(
           '{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"{\\"titles\\":[\\"Elemental Adventure\\"]}"}}]}',
           200,
@@ -1464,6 +1466,10 @@ void main() {
     );
 
     expect(calls, 2);
+    expect(retryPayload?['max_tokens'], greaterThanOrEqualTo(1024));
+    expect(retryPayload?['response_format'], {'type': 'json_object'});
+    expect(retryPayload?['reasoning_effort'], 'none');
+    expect(retryPayload?['think'], isFalse);
     expect(suggestions.single.title, 'Elemental Adventure');
     expect(log.value, contains('retrying final JSON only'));
     expect(log.value, contains('Received retry HTTP 200'));

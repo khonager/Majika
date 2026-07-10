@@ -287,6 +287,19 @@ void main() {
     expect(terms, contains('tasks simulator'));
   });
 
+  test('Steam search term expansion handles comparison preferences', () {
+    final terms = SteamService.expandedSteamStoreSearchTerms(
+      'i want to feel powerfull like a god in a singleplayer story game. '
+      'and not like god of war. more like infamous: second son',
+    );
+
+    expect(terms, contains('infamous: second son'));
+    expect(terms, contains('superpower story'));
+    expect(terms, contains('superhero story'));
+    expect(terms, contains('supernatural abilities'));
+    expect(terms, isNot(contains('god war')));
+  });
+
   test(
     'specific Steam text search does not poison niche queries with controller support terms',
     () async {

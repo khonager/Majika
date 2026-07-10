@@ -586,6 +586,7 @@ class RecommendationQuery {
       'i',
       'in',
       'me',
+      'more',
       'never',
       'new',
       'newcomer',
@@ -638,7 +639,10 @@ class RecommendationQuery {
       'tv',
     };
 
-    return _normalize(source ?? request)
+    final normalized = _normalize(
+      _withoutNegativeReferencePhrases(source ?? request),
+    );
+    final terms = normalized
         .split(RegExp(r'[^a-z0-9+]+'))
         .where(
           (term) =>
@@ -647,6 +651,35 @@ class RecommendationQuery {
               !structuralTerms.contains(term),
         )
         .toList();
+    final expanded = <String>[];
+    for (final term in terms) {
+      expanded.add(term);
+      if (term == 'powerfull' || term == 'powerful' || term == 'godlike') {
+        expanded.addAll(const ['power', 'powers', 'ability', 'abilities']);
+      }
+      if (term == 'superpower' || term == 'superpowers') {
+        expanded.addAll(const ['power', 'powers', 'ability', 'abilities']);
+      }
+    }
+    return expanded;
+  }
+
+  static String _withoutNegativeReferencePhrases(String text) {
+    var cleaned = text;
+    final patterns = [
+      RegExp(
+        r'\b(?:not|nothing)\s+like\s+[^.!?,;]+(?=(?:[.!?,;]|\s+(?:but|and)\s+more\s+like|\s+rather\s+than|$))',
+        caseSensitive: false,
+      ),
+      RegExp(
+        r"\b(?:don[’\']?t|do\s+not)\s+want\s+[^.!?,;]+(?=(?:[.!?,;]|\s+(?:but|and)\s+more\s+like|\s+rather\s+than|$))",
+        caseSensitive: false,
+      ),
+    ];
+    for (final pattern in patterns) {
+      cleaned = cleaned.replaceAll(pattern, ' ');
+    }
+    return cleaned;
   }
 
   static bool _containsAny(String text, Iterable<String> values) {
@@ -725,6 +758,7 @@ class RecommendationQuery {
     'Shooter',
     'Roguelike',
     'Open World',
+    'Story Rich',
     'Single-player',
     'Multiplayer',
     'Co-op',

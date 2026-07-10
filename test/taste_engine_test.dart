@@ -143,6 +143,57 @@ void main() {
     expect(recommendations.first.item.title, 'Strategy RPG Match');
   });
 
+  test('Steam power fantasy requests survive negative reference wording', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile(
+      '76561198000000000',
+      [
+        MediaItem(
+          id: 'steam_owned',
+          title: 'Played Action Game',
+          coverUrl: '',
+          tags: const ['Action', 'Adventure', 'Single-player'],
+          format: 'SINGLE_PLAYER',
+          mediaType: 'GAME',
+          status: 'OWNED',
+          playtimeMinutes: 6000,
+          sourceId: 'com.majika.service.steam',
+        ),
+      ],
+      serviceId: 'com.majika.service.steam',
+      serviceName: 'Steam',
+    );
+
+    const query = RecommendationQuery(
+      request:
+          'i want to feel powerfull like a god in a singleplayer story game. '
+          'and not like god of war. more like infamous: second son',
+      aiSelectedTags: {'Action', 'Adventure', 'Story Rich', 'Single-player'},
+      formats: {'SINGLE_PLAYER'},
+      mediaTypes: {'GAME'},
+    );
+
+    final candidate = MediaItem(
+      id: 'steam_superpower',
+      title: 'Supernatural City',
+      coverUrl: '',
+      tags: const ['Action', 'Adventure', 'Single-player'],
+      format: 'SINGLE_PLAYER',
+      mediaType: 'GAME',
+      sourceId: 'com.majika.service.steam',
+      description:
+          'A story-driven action game about mastering supernatural abilities in a modern city.',
+    );
+
+    expect(query.matchesText(candidate), isTrue);
+
+    final recommendations = engine.rankCandidates(profile, [
+      candidate,
+    ], query: query);
+
+    expect(recommendations.single.item.id, 'steam_superpower');
+  });
+
   test('Steam mode requests require every requested capability', () {
     final engine = TasteEngine();
     final profile = engine.buildProfile(

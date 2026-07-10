@@ -426,7 +426,7 @@ class TasteEngine {
 
   List<String> _requestTextTerms(String request) {
     final codingHackIntent = _isCodingHackRequest(request);
-    return request
+    final terms = _withoutNegativeReferencePhrases(request)
         .toLowerCase()
         .split(RegExp(r'[^a-z0-9+]+'))
         .where(
@@ -438,6 +438,35 @@ class TasteEngine {
               !_lowSignalRequestTerms.contains(term),
         )
         .toList();
+    final expanded = <String>[];
+    for (final term in terms) {
+      expanded.add(term);
+      if (term == 'powerfull' || term == 'powerful' || term == 'godlike') {
+        expanded.addAll(const ['power', 'powers', 'ability', 'abilities']);
+      }
+      if (term == 'superpower' || term == 'superpowers') {
+        expanded.addAll(const ['power', 'powers', 'ability', 'abilities']);
+      }
+    }
+    return expanded;
+  }
+
+  String _withoutNegativeReferencePhrases(String text) {
+    var cleaned = text;
+    final patterns = [
+      RegExp(
+        r'\b(?:not|nothing)\s+like\s+[^.!?,;]+(?=(?:[.!?,;]|\s+(?:but|and)\s+more\s+like|\s+rather\s+than|$))',
+        caseSensitive: false,
+      ),
+      RegExp(
+        r"\b(?:don[’\']?t|do\s+not)\s+want\s+[^.!?,;]+(?=(?:[.!?,;]|\s+(?:but|and)\s+more\s+like|\s+rather\s+than|$))",
+        caseSensitive: false,
+      ),
+    ];
+    for (final pattern in patterns) {
+      cleaned = cleaned.replaceAll(pattern, ' ');
+    }
+    return cleaned;
   }
 
   double _codingHackIntentScore(MediaItem candidate, String request) {
@@ -882,6 +911,7 @@ class TasteEngine {
     'lot',
     'make',
     'makes',
+    'more',
     'really',
     'recommend',
     'recommendation',

@@ -268,8 +268,15 @@ class SteamService implements MediaService {
     }
 
     add(trimmed);
+    for (final phrase in _positiveReferencePhrases(trimmed)) {
+      add(phrase);
+    }
+    for (final phrase in _powerFantasySearchPhrases(trimmed)) {
+      add(phrase);
+    }
 
-    var simplified = trimmed.toLowerCase();
+    final cleaned = _withoutNegativeReferencePhrases(trimmed);
+    var simplified = cleaned.toLowerCase();
     for (final prefix in const [
       'i want to pretend to be ',
       'i want to be ',
@@ -295,8 +302,9 @@ class SteamService implements MediaService {
       'game ',
     ]) {
       if (simplified.startsWith(prefix)) {
-        add(trimmed.substring(prefix.length));
-        simplified = trimmed.substring(prefix.length).toLowerCase();
+        final stripped = _stripLeadingArticle(cleaned.substring(prefix.length));
+        add(stripped);
+        simplified = stripped.toLowerCase();
         break;
       }
     }
@@ -339,6 +347,67 @@ class SteamService implements MediaService {
       add('$lastKeyword simulator');
     }
     return variants;
+  }
+
+  static Iterable<String> _positiveReferencePhrases(String text) sync* {
+    final normalized = text.replaceAll(RegExp(r'\s+'), ' ');
+    final patterns = [
+      RegExp(
+        r'(?:^|[.!?,;]\s*|\bbut\s+|\band\s+)more\s+like\s+([^.!?,;]+)',
+        caseSensitive: false,
+      ),
+      RegExp(
+        r'(?:^|[.!?,;]\s*|\bbut\s+|\band\s+)similar\s+to\s+([^.!?,;]+)',
+        caseSensitive: false,
+      ),
+      RegExp(
+        r'(?:^|[.!?,;]\s*|\bbut\s+|\band\s+)closer\s+to\s+([^.!?,;]+)',
+        caseSensitive: false,
+      ),
+    ];
+    for (final pattern in patterns) {
+      for (final match in pattern.allMatches(normalized)) {
+        final phrase = match.group(1)?.trim() ?? '';
+        if (phrase.isEmpty) continue;
+        yield phrase;
+      }
+    }
+  }
+
+  static List<String> _powerFantasySearchPhrases(String text) {
+    final normalized = text.toLowerCase();
+    final mentionsPower = RegExp(
+      r'\b(power|powers|powerful|powerfull|godlike|god-like|superpower|superpowers|superhero|abilities|ability)\b',
+    ).hasMatch(normalized);
+    if (!mentionsPower) return const [];
+    return const [
+      'superpower story',
+      'superhero story',
+      'supernatural abilities',
+      'power fantasy',
+    ];
+  }
+
+  static String _withoutNegativeReferencePhrases(String text) {
+    var cleaned = text;
+    final patterns = [
+      RegExp(
+        r'\b(?:not|nothing)\s+like\s+[^.!?,;]+(?=(?:[.!?,;]|\s+(?:but|and)\s+more\s+like|\s+rather\s+than|$))',
+        caseSensitive: false,
+      ),
+      RegExp(
+        r"\b(?:don[’\']?t|do\s+not)\s+want\s+[^.!?,;]+(?=(?:[.!?,;]|\s+(?:but|and)\s+more\s+like|\s+rather\s+than|$))",
+        caseSensitive: false,
+      ),
+    ];
+    for (final pattern in patterns) {
+      cleaned = cleaned.replaceAll(pattern, ' ');
+    }
+    return cleaned;
+  }
+
+  static String _stripLeadingArticle(String text) {
+    return text.trim().replaceFirst(RegExp(r'^(?:a|an|the)\s+'), '');
   }
 
   static const _steamSearchStopWords = {

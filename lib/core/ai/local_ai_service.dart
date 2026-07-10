@@ -961,7 +961,10 @@ class FlutterGemmaLocalAiService implements LocalAiService {
           },
         ],
         'temperature': 0.1,
-        'max_tokens': max(256, min(maxTokens, 512)),
+        'max_tokens': max(1024, min(maxTokens * 2, 2048)),
+        'response_format': {'type': 'json_object'},
+        'reasoning_effort': 'none',
+        'think': false,
         'stream': false,
       }),
     ).timeout(const Duration(seconds: 60));
