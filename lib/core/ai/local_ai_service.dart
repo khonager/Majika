@@ -15,6 +15,30 @@ import 'package:majika/core/models/taste_profile.dart';
 
 final Object localAiConsoleLogZoneKey = Object();
 final Object manualAiRequestHandlerZoneKey = Object();
+final Object aiFailureFallbackHandlerZoneKey = Object();
+
+enum AiFailureFallbackChoice { cancel, retry, useFallback }
+
+class AiFailureFallbackRequest {
+  final String operation;
+  final Object error;
+  final String fallbackLabel;
+
+  const AiFailureFallbackRequest({
+    required this.operation,
+    required this.error,
+    required this.fallbackLabel,
+  });
+}
+
+class AiFallbackCanceledException implements Exception {
+  final String operation;
+
+  const AiFallbackCanceledException(this.operation);
+
+  @override
+  String toString() => 'AI fallback canceled for $operation.';
+}
 
 enum _AiPromptTier { compact, balanced, rich }
 
@@ -117,6 +141,8 @@ class _ExternalAiTool {
 
 typedef ManualAiRequestHandler =
     Future<String> Function(ManualAiRequest request);
+typedef AiFailureFallbackHandler =
+    Future<AiFailureFallbackChoice> Function(AiFailureFallbackRequest request);
 
 class ManualAiRequest {
   final String prompt;
@@ -517,22 +543,45 @@ class FlutterGemmaLocalAiService implements LocalAiService {
         allowedFormats: allowedFormats,
       );
       if (interpreted == null) {
-        return fallback.interpretRecommendationRequest(
+        return _handleAiFailure(
+          operation: '$serviceName search interpretation',
+          error: StateError('AI returned unusable search JSON.'),
+          retry: () => interpretRecommendationRequest(
+            query,
+            availableTags: availableTags,
+            serviceName: serviceName,
+            allowedMediaTypes: allowedMediaTypes,
+            allowedFormats: allowedFormats,
+          ),
+          fallbackValue: () => fallback.interpretRecommendationRequest(
+            effectiveQuery,
+            availableTags: availableTags,
+            serviceName: serviceName,
+            allowedMediaTypes: allowedMediaTypes,
+            allowedFormats: allowedFormats,
+          ),
+        );
+      }
+      return interpreted;
+    } catch (error) {
+      if (error is AiFallbackCanceledException) rethrow;
+      return _handleAiFailure(
+        operation: '$serviceName search interpretation',
+        error: error,
+        retry: () => interpretRecommendationRequest(
+          query,
+          availableTags: availableTags,
+          serviceName: serviceName,
+          allowedMediaTypes: allowedMediaTypes,
+          allowedFormats: allowedFormats,
+        ),
+        fallbackValue: () => fallback.interpretRecommendationRequest(
           effectiveQuery,
           availableTags: availableTags,
           serviceName: serviceName,
           allowedMediaTypes: allowedMediaTypes,
           allowedFormats: allowedFormats,
-        );
-      }
-      return interpreted;
-    } catch (_) {
-      return fallback.interpretRecommendationRequest(
-        effectiveQuery,
-        availableTags: availableTags,
-        serviceName: serviceName,
-        allowedMediaTypes: allowedMediaTypes,
-        allowedFormats: allowedFormats,
+        ),
       );
     }
   }
@@ -1255,6 +1304,45 @@ class FlutterGemmaLocalAiService implements LocalAiService {
   ManualAiRequestHandler? get _currentManualAiRequestHandler {
     final value = Zone.current[manualAiRequestHandlerZoneKey];
     return value is ManualAiRequestHandler ? value : null;
+  }
+
+  AiFailureFallbackHandler? get _currentAiFailureFallbackHandler {
+    final value = Zone.current[aiFailureFallbackHandlerZoneKey];
+    return value is AiFailureFallbackHandler ? value : null;
+  }
+
+  Future<T> _handleAiFailure<T>({
+    required String operation,
+    required Object error,
+    required Future<T> Function() retry,
+    required FutureOr<T> Function() fallbackValue,
+    String fallbackLabel = 'fallback rules',
+  }) async {
+    final handler = _currentAiFailureFallbackHandler;
+    if (handler == null) return await fallbackValue();
+
+    while (true) {
+      final choice = await handler(
+        AiFailureFallbackRequest(
+          operation: operation,
+          error: error,
+          fallbackLabel: fallbackLabel,
+        ),
+      );
+      switch (choice) {
+        case AiFailureFallbackChoice.cancel:
+          throw AiFallbackCanceledException(operation);
+        case AiFailureFallbackChoice.useFallback:
+          return await fallbackValue();
+        case AiFailureFallbackChoice.retry:
+          try {
+            return await retry();
+          } catch (retryError) {
+            if (retryError is AiFallbackCanceledException) rethrow;
+            error = retryError;
+          }
+      }
+    }
   }
 
   RecommendationQuery? _queryFromModelJson(
@@ -3233,8 +3321,20 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
         budget: budget,
         allowSearchTools: true,
       );
-    } catch (_) {
-      return const [];
+    } catch (error) {
+      if (error is AiFallbackCanceledException) rethrow;
+      return _handleAiFailure(
+        operation: '${profile.serviceName} AI candidate discovery',
+        error: error,
+        retry: () => suggestRecommendationCandidates(
+          profile,
+          knownRecommendations,
+          query: query,
+          limit: limit,
+        ),
+        fallbackValue: () => const <AiRecommendationSuggestion>[],
+        fallbackLabel: 'skip AI discovery',
+      );
     }
   }
 
@@ -3287,8 +3387,16 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
         budget: budget,
         allowSearchTools: true,
       );
-    } catch (_) {
-      return null;
+    } catch (error) {
+      if (error is AiFallbackCanceledException) rethrow;
+      return _handleAiFailure<AiRecommendationSuggestion?>(
+        operation: '${profile.serviceName} direct AI recommendation',
+        error: error,
+        retry: () =>
+            suggestRecommendation(profile, knownRecommendations, query: query),
+        fallbackValue: () => null,
+        fallbackLabel: 'skip the direct AI pick',
+      );
     }
   }
 
@@ -3334,8 +3442,19 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
         fallbackServiceName: '',
         allowedServices: profiles.map((profile) => profile.serviceName),
       );
-    } catch (_) {
-      return null;
+    } catch (error) {
+      if (error is AiFallbackCanceledException) rethrow;
+      return _handleAiFailure<AiRecommendationSuggestion?>(
+        operation: 'Home direct AI recommendation',
+        error: error,
+        retry: () => suggestHomeRecommendation(
+          profiles,
+          knownRecommendations,
+          query: query,
+        ),
+        fallbackValue: () => null,
+        fallbackLabel: 'skip the direct AI pick',
+      );
     }
   }
 
@@ -3570,11 +3689,18 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
         reason: reason == null || reason.isEmpty ? chosen.reason : reason,
         isAiPick: true,
       );
-    } catch (_) {
-      return fallback.chooseTopRecommendation(
-        profile,
-        selectableRecommendations,
-        query: query,
+    } catch (error) {
+      if (error is AiFallbackCanceledException) rethrow;
+      return _handleAiFailure<Recommendation?>(
+        operation: '${profile.serviceName} top recommendation choice',
+        error: error,
+        retry: () =>
+            chooseTopRecommendation(profile, recommendations, query: query),
+        fallbackValue: () => fallback.chooseTopRecommendation(
+          profile,
+          selectableRecommendations,
+          query: query,
+        ),
       );
     }
   }
@@ -3707,11 +3833,18 @@ Options: ${jsonEncode(options)}
         reason: reason == null || reason.isEmpty ? chosen.reason : reason,
         isAiPick: true,
       );
-    } catch (_) {
-      return fallback.chooseHomeRecommendation(
-        profiles,
-        recommendations,
-        query: query,
+    } catch (error) {
+      if (error is AiFallbackCanceledException) rethrow;
+      return _handleAiFailure<Recommendation?>(
+        operation: 'Home top recommendation choice',
+        error: error,
+        retry: () =>
+            chooseHomeRecommendation(profiles, recommendations, query: query),
+        fallbackValue: () => fallback.chooseHomeRecommendation(
+          profiles,
+          recommendations,
+          query: query,
+        ),
       );
     }
   }

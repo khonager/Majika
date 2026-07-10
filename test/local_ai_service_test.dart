@@ -477,6 +477,67 @@ void main() {
     },
   );
 
+  test('AI search failure asks before using fallback rules', () async {
+    var handled = 0;
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        throw StateError('invalid api key');
+      },
+    );
+
+    final interpreted = await runZoned(
+      () => service.interpretRecommendationRequest(
+        const RecommendationQuery(request: 'single player rpg'),
+        availableTags: const ['RPG', 'Strategy'],
+        serviceName: 'Steam',
+        allowedMediaTypes: RecommendationQuery.steamMediaTypes,
+        allowedFormats: RecommendationQuery.steamFormats,
+      ),
+      zoneValues: {
+        aiFailureFallbackHandlerZoneKey:
+            (AiFailureFallbackRequest request) async {
+              handled += 1;
+              expect(request.operation, contains('Steam search'));
+              expect(request.error.toString(), contains('invalid api key'));
+              return AiFailureFallbackChoice.useFallback;
+            },
+      },
+    );
+
+    expect(handled, 1);
+    expect(interpreted.aiSelectedTags, contains('RPG'));
+    expect(interpreted.formats, contains('SINGLE_PLAYER'));
+  });
+
+  test(
+    'AI search failure can cancel instead of using fallback rules',
+    () async {
+      final service = FlutterGemmaLocalAiService(
+        textGenerator: (prompt, maxTokens) async {
+          throw StateError('invalid api key');
+        },
+      );
+
+      await expectLater(
+        runZoned(
+          () => service.interpretRecommendationRequest(
+            const RecommendationQuery(request: 'single player rpg'),
+            availableTags: const ['RPG', 'Strategy'],
+            serviceName: 'Steam',
+            allowedMediaTypes: RecommendationQuery.steamMediaTypes,
+            allowedFormats: RecommendationQuery.steamFormats,
+          ),
+          zoneValues: {
+            aiFailureFallbackHandlerZoneKey:
+                (AiFailureFallbackRequest request) async =>
+                    AiFailureFallbackChoice.cancel,
+          },
+        ),
+        throwsA(isA<AiFallbackCanceledException>()),
+      );
+    },
+  );
+
   test('flutter gemma service can choose an AI top recommendation', () async {
     final service = FlutterGemmaLocalAiService(
       textGenerator: (prompt, maxTokens) async {

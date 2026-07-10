@@ -552,6 +552,7 @@ class _HomeScreenState extends State<HomeScreen> {
         zoneValues: {
           localAiConsoleLogZoneKey: aiLog,
           manualAiRequestHandlerZoneKey: _handleManualAiRequest,
+          aiFailureFallbackHandlerZoneKey: _handleAiFailureFallback,
         },
       );
     } catch (error) {
@@ -559,12 +560,17 @@ class _HomeScreenState extends State<HomeScreen> {
           workspace.activeRecommendationSearchRunId != searchRunId) {
         return;
       }
+      final wasCanceled = error is AiFallbackCanceledException;
       setState(() {
-        workspace.error = error.toString();
+        workspace.error = wasCanceled ? null : error.toString();
         workspace.isRefreshingRecommendations = false;
         workspace.activeRecommendationSearchRunId = null;
       });
-      showErrorToast(context, 'Could not refresh recommendations: $error');
+      if (wasCanceled) {
+        showInfoToast(context, 'Recommendation search canceled.');
+      } else {
+        showErrorToast(context, 'Could not refresh recommendations: $error');
+      }
     } finally {
       if (_activeRecommendationProgressToast == progressToast) {
         _activeRecommendationProgressToast = null;
@@ -813,16 +819,22 @@ class _HomeScreenState extends State<HomeScreen> {
         zoneValues: {
           localAiConsoleLogZoneKey: aiLog,
           manualAiRequestHandlerZoneKey: _handleManualAiRequest,
+          aiFailureFallbackHandlerZoneKey: _handleAiFailureFallback,
         },
       );
     } catch (error) {
       if (!mounted || _activeHomeSearchRunId != searchRunId) return;
+      final wasCanceled = error is AiFallbackCanceledException;
       setState(() {
-        _homeError = error.toString();
+        _homeError = wasCanceled ? null : error.toString();
         _isRefreshingHome = false;
         _activeHomeSearchRunId = null;
       });
-      showErrorToast(context, 'Could not refresh Home: $error');
+      if (wasCanceled) {
+        showInfoToast(context, 'Home search canceled.');
+      } else {
+        showErrorToast(context, 'Could not refresh Home: $error');
+      }
     } finally {
       if (_activeHomeProgressToast == progressToast) {
         _activeHomeProgressToast = null;
@@ -1090,6 +1102,89 @@ class _HomeScreenState extends State<HomeScreen> {
       throw StateError('Manual AI response was empty.');
     }
     return response.trim();
+  }
+
+  Future<AiFailureFallbackChoice> _handleAiFailureFallback(
+    AiFailureFallbackRequest request,
+  ) async {
+    if (!mounted) return AiFailureFallbackChoice.cancel;
+
+    final choice = await showDialog<AiFailureFallbackChoice>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        final theme = Theme.of(context);
+        final errorText = request.error.toString();
+        return AlertDialog(
+          title: const Text('AI request failed'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Majika could not finish ${request.operation}.',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 160),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: theme.dividerColor.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      errorText,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () =>
+                  Navigator.pop(context, AiFailureFallbackChoice.cancel),
+              child: const Text('Cancel request'),
+            ),
+            TextButton.icon(
+              onPressed: () =>
+                  Navigator.pop(context, AiFailureFallbackChoice.retry),
+              icon: const Icon(Icons.settings_rounded),
+              label: const Text('Fix settings'),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.pop(context, AiFailureFallbackChoice.useFallback),
+              child: Text('Use ${request.fallbackLabel}'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (choice != AiFailureFallbackChoice.retry) {
+      return choice ?? AiFailureFallbackChoice.cancel;
+    }
+    if (!mounted) return AiFailureFallbackChoice.cancel;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const SettingsScreen()),
+    );
+    return mounted
+        ? AiFailureFallbackChoice.retry
+        : AiFailureFallbackChoice.cancel;
   }
 
   void _cancelRecommendationSearch() {
