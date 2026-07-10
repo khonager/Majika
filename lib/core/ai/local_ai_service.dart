@@ -845,9 +845,105 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       return value;
     }
 
+    final retry = await _retryExternalTextOnlyAfterEmptyContent(
+      originalPrompt: prompt,
+      maxTokens: maxTokens,
+      settings: settings,
+      headers: headers,
+      endpoint: endpoint,
+      model: model,
+      post: post,
+      decoded: decoded,
+    );
+    if (retry != null) return retry;
+
     log?.addDetail('AI response shape: ${_responseShapeSummary(decoded)}');
     log?.addSection('Raw AI response excerpt', _trimForLog(response.body));
     throw const FormatException('Local AI response did not include text.');
+  }
+
+  Future<String?> _retryExternalTextOnlyAfterEmptyContent({
+    required String originalPrompt,
+    required int maxTokens,
+    required LocalAiRuntimeSettings settings,
+    required Map<String, String> headers,
+    required Uri endpoint,
+    required String model,
+    required Future<http.Response> Function(
+      Uri url, {
+      Map<String, String>? headers,
+      Object? body,
+    })
+    post,
+    required Map<String, dynamic> decoded,
+  }) async {
+    final choice = _firstChoiceOrNull(decoded);
+    if (choice == null) return null;
+    final message = choice['message'];
+    if (message is! Map) return null;
+    final content = _messageTextContent(message['content']);
+    final reasoning = _messageTextContent(
+      message['reasoning_content'] ?? message['reasoning'],
+    );
+    final finishReason = choice['finish_reason']?.toString().trim();
+    if (content.isNotEmpty || reasoning.isEmpty || finishReason != 'length') {
+      return null;
+    }
+
+    _currentConsoleLog?.addDetail(
+      'AI used the response budget for reasoning without final text; retrying final JSON only.',
+    );
+    final retryResponse = await post(
+      endpoint,
+      headers: headers,
+      body: jsonEncode({
+        'model': model,
+        'messages': [
+          {'role': 'user', 'content': originalPrompt},
+          {
+            'role': 'assistant',
+            'content':
+                'I used the response budget for reasoning and did not return final content.',
+          },
+          {
+            'role': 'user',
+            'content':
+                'Return only the final JSON answer now. No reasoning, no markdown, no explanation.',
+          },
+        ],
+        'temperature': 0.1,
+        'max_tokens': max(256, min(maxTokens, 512)),
+        'stream': false,
+      }),
+    ).timeout(const Duration(seconds: 60));
+
+    if (retryResponse.statusCode < 200 || retryResponse.statusCode >= 300) {
+      return null;
+    }
+    _currentConsoleLog?.addDetail(
+      'Received retry HTTP ${retryResponse.statusCode}.',
+    );
+    final retryDecoded = jsonDecode(retryResponse.body);
+    if (retryDecoded is! Map<String, dynamic>) return null;
+    final retryChoice = _firstChoiceOrNull(retryDecoded);
+    final retryMessage = retryChoice?['message'];
+    if (retryMessage is Map) {
+      _logModelReasoningIfPresent(retryMessage);
+      final retryText = _messageTextContent(retryMessage['content']);
+      if (retryText.isNotEmpty) {
+        _currentConsoleLog?.addSection('Response', retryText);
+        return retryText;
+      }
+    }
+    final retryText = _firstChoiceText(retryDecoded);
+    if (retryText.isNotEmpty) {
+      _currentConsoleLog?.addSection('Response', retryText);
+      return retryText;
+    }
+    _currentConsoleLog?.addDetail(
+      'AI retry response shape: ${_responseShapeSummary(retryDecoded)}',
+    );
+    return null;
   }
 
   Future<String> _generateExternalTextWithTools(
@@ -991,6 +1087,13 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       );
     }
     return message;
+  }
+
+  Map<String, dynamic>? _firstChoiceOrNull(Map<String, dynamic> decoded) {
+    final choices = decoded['choices'];
+    if (choices is! List || choices.isEmpty) return null;
+    final firstChoice = choices.first;
+    return firstChoice is Map<String, dynamic> ? firstChoice : null;
   }
 
   String _firstChoiceText(Map<String, dynamic> decoded) {

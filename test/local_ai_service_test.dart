@@ -1365,6 +1365,49 @@ void main() {
     expect(log.value, contains('AI request failed'));
   });
 
+  test('local AI retries when reasoning consumes the response budget', () async {
+    final log = AiConsoleLog();
+    var calls = 0;
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        mode: localAiModeExternalServer,
+        provider: externalLocalAiProvider,
+        endpoint: defaultLocalAiEndpoint,
+        serverModel: 'reasoning-local:latest',
+        contextItems: 24,
+      ),
+      httpPost: (url, {headers, body}) async {
+        calls += 1;
+        if (calls == 1) {
+          return http.Response(
+            '{"choices":[{"finish_reason":"length","message":{"role":"assistant","content":"","reasoning":"I identified likely titles but ran out of budget."}}]}',
+            200,
+          );
+        }
+        return http.Response(
+          '{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"{\\"titles\\":[\\"Elemental Adventure\\"]}"}}]}',
+          200,
+        );
+      },
+    );
+
+    final suggestions = await runZoned(
+      () => service.suggestRecommendationCandidates(
+        _profile(serviceName: 'Steam'),
+        const [],
+        query: const RecommendationQuery(request: 'elemental adventure game'),
+      ),
+      zoneValues: {localAiConsoleLogZoneKey: log},
+    );
+
+    expect(calls, 2);
+    expect(suggestions.single.title, 'Elemental Adventure');
+    expect(log.value, contains('retrying final JSON only'));
+    expect(log.value, contains('Received retry HTTP 200'));
+  });
+
   test('AI recommendation chat prompt includes current context', () async {
     late String capturedPrompt;
     final service = FlutterGemmaLocalAiService(

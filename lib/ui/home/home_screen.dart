@@ -428,6 +428,10 @@ class _HomeScreenState extends State<HomeScreen> {
               ...searchedCandidates,
               ...candidates,
             ]);
+            requestSeedCandidates = _dedupeCandidates([
+              ...requestSeedCandidates,
+              ..._directSearchRequestSeeds(query, searchedCandidates),
+            ]);
             if (candidates.isNotEmpty) {
               _publishRecommendationSearchStage(
                 workspace: workspace,
@@ -1239,7 +1243,10 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final (index, item) in seedCandidates.indexed) {
       final recommendation = byId[item.id];
       if (recommendation == null) continue;
-      final requestFitScore = max(58.0, 88.0 - index * 4.0);
+      final textOverlapScore = _requestTitleTextOverlapScore(query, item);
+      final requestFitScore = textOverlapScore > 0
+          ? max(88.0, 96.0 + textOverlapScore.clamp(0, 2).toDouble())
+          : max(58.0, 88.0 - index * 4.0);
       trusted.add(
         recommendation.copyWith(
           matchScore: max(recommendation.matchScore, requestFitScore),
@@ -1251,6 +1258,71 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
     return trusted;
+  }
+
+  List<MediaItem> _directSearchRequestSeeds(
+    RecommendationQuery query,
+    Iterable<MediaItem> candidates,
+  ) {
+    return [
+      for (final candidate in candidates)
+        if (_requestTitleTextOverlapScore(query, candidate) > 0) candidate,
+    ];
+  }
+
+  int _requestTitleTextOverlapScore(RecommendationQuery query, MediaItem item) {
+    final terms = _requestTextTerms(query);
+    if (terms.length < 2) return 0;
+    final titleText = _normalizeSearchText(
+      [item.title, ...item.alternativeTitles].join(' '),
+    );
+    if (titleText.isEmpty) return 0;
+    final titleTokens = titleText.split(' ').where((term) => term.length > 2);
+    final overlap = terms.where(titleTokens.toSet().contains).length;
+    if (overlap >= 2) return overlap;
+    return 0;
+  }
+
+  Set<String> _requestTextTerms(RecommendationQuery query) {
+    final text = _normalizeSearchText(
+      [query.request, query.searchRequest].join(' '),
+    );
+    if (text.isEmpty) return const {};
+    const stopWords = {
+      'about',
+      'also',
+      'any',
+      'are',
+      'based',
+      'for',
+      'game',
+      'games',
+      'good',
+      'like',
+      'looking',
+      'really',
+      'search',
+      'similar',
+      'simmilar',
+      'steam',
+      'that',
+      'the',
+      'there',
+      'want',
+      'with',
+    };
+    return text
+        .split(' ')
+        .where((term) => term.length > 2 && !stopWords.contains(term))
+        .toSet();
+  }
+
+  String _normalizeSearchText(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
   }
 
   List<Recommendation> _mergeRankedRecommendations(
