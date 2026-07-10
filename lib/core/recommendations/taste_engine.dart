@@ -637,16 +637,13 @@ class TasteEngine {
 
   bool _isSuperpoweredOpenWorldRequest(String request) {
     final normalized = request.toLowerCase();
-    final mentionsReference = _superpoweredReferenceTerms.any(
-      (term) => _containsWholePhrase(normalized, term),
-    );
     final mentionsPowers = _superpoweredRequestTerms.any(
       (term) => _containsWholePhrase(normalized, term),
     );
     final mentionsOpenWorld =
         _containsWholePhrase(normalized, 'open world') ||
         _containsWholePhrase(normalized, 'sandbox');
-    return mentionsReference || (mentionsPowers && mentionsOpenWorld);
+    return mentionsPowers && mentionsOpenWorld;
   }
 
   bool _isMundanePowerRequest(String request) {
@@ -1066,15 +1063,6 @@ class TasteEngine {
     'voice control',
     'voice controlled',
     'voice commands',
-  };
-
-  static const Set<String> _superpoweredReferenceTerms = {
-    'infamous',
-    'infamous second son',
-    'prototype',
-    'spider man',
-    'spiderman',
-    'sunset overdrive',
   };
 
   static const Set<String> _superpoweredRequestTerms = {

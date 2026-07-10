@@ -895,7 +895,7 @@ void main() {
       );
 
       await service.interpretRecommendationRequest(
-        const RecommendationQuery(request: 'like harry potter'),
+        const RecommendationQuery(request: 'magic school adventure'),
         availableTags: availableTags,
       );
 
@@ -1328,6 +1328,43 @@ void main() {
     expect(log.value, contains('gemini-3.1-flash-lite'));
   });
 
+  test('local AI service logs response shape when text is missing', () async {
+    final log = AiConsoleLog();
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        mode: localAiModeExternalServer,
+        provider: externalLocalAiProvider,
+        endpoint: defaultLocalAiEndpoint,
+        serverModel: 'gemma4:latest',
+        contextItems: 24,
+      ),
+      httpPost: (url, {headers, body}) async {
+        return http.Response(
+          '{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":null,"reasoning_content":"I considered broad action adventure tags."}}]}',
+          200,
+        );
+      },
+    );
+
+    await runZoned(
+      () => service.interpretRecommendationRequest(
+        const RecommendationQuery(request: 'mystery tv'),
+        availableTags: const ['Mystery', 'Romance'],
+      ),
+      zoneValues: {localAiConsoleLogZoneKey: log},
+    );
+
+    expect(log.value, contains('provider=local server'));
+    expect(log.value, contains('model=gemma4:latest'));
+    expect(log.value, contains('Model reasoning'));
+    expect(log.value, contains('AI response shape'));
+    expect(log.value, contains('content=null/0 chars'));
+    expect(log.value, contains('Raw AI response excerpt'));
+    expect(log.value, contains('AI request failed'));
+  });
+
   test('AI recommendation chat prompt includes current context', () async {
     late String capturedPrompt;
     final service = FlutterGemmaLocalAiService(
@@ -1699,22 +1736,26 @@ void main() {
       ),
       textGenerator: (prompt, maxTokens) async {
         capturedPrompt = prompt;
-        return '{"id":"anilist_wistoria","reason":"Best request fit."}';
+        return '{"id":"anilist_magic_school","reason":"Best request fit."}';
       },
     );
 
-    await service.chooseTopRecommendation(_profile(), [
-      _recommendation(
-        'anilist_slime',
-        'Tensei Shitara Slime Datta Ken 4th Season',
-        tags: const ['Action', 'Adventure', 'Fantasy', 'Magic'],
-      ),
-      _recommendation(
-        'anilist_wistoria',
-        'Tsue to Tsurugi no Wistoria Season 2',
-        tags: const ['Action', 'Adventure', 'Fantasy', 'Magic', 'School'],
-      ),
-    ], query: const RecommendationQuery(request: 'like harry potter'));
+    await service.chooseTopRecommendation(
+      _profile(),
+      [
+        _recommendation(
+          'anilist_fantasy_quest',
+          'Fantasy Quest',
+          tags: const ['Action', 'Adventure', 'Fantasy', 'Magic'],
+        ),
+        _recommendation(
+          'anilist_magic_school',
+          'Magic School Adventure',
+          tags: const ['Action', 'Adventure', 'Fantasy', 'Magic', 'School'],
+        ),
+      ],
+      query: const RecommendationQuery(request: 'magic school adventure'),
+    );
 
     expect(capturedPrompt, contains("Prioritize the user's request"));
     expect(capturedPrompt, contains('Request-inferred AniList tags:'));

@@ -229,8 +229,7 @@ void main() {
 
       final results = await service.searchRecommendationCandidates(
         const RecommendationQuery(
-          request:
-              'family anime that is good to watch with kids and parents. something fun like spy family',
+          request: 'family anime that is good to watch with kids and parents',
         ).withInferredSelections(const ['Comedy', 'Family Life', 'Go', 'Kids']),
       );
 

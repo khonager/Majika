@@ -788,8 +788,9 @@ class FlutterGemmaLocalAiService implements LocalAiService {
         ? settings.cloudChatCompletionsUri
         : settings.localChatCompletionsUri;
     final model = isCloud ? settings.cloudModel : settings.serverModel;
+    final providerName = isCloud ? settings.cloudProvider : 'local server';
     log?.addDetail(
-      'Sending request to ${isCloud ? settings.cloudProvider : 'local server'}: $model',
+      'AI request: provider=$providerName, model=$model, mode=${settings.mode}, maxTokens=$maxTokens, tools=off.',
     );
     final response = await post(
       endpoint,
@@ -829,6 +830,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
 
     final message = firstChoice['message'];
     if (message is Map<String, dynamic>) {
+      _logModelReasoningIfPresent(message);
       final text = _messageTextContent(message['content']);
       if (text.isNotEmpty) {
         log?.addSection('Response', text);
@@ -843,6 +845,8 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       return value;
     }
 
+    log?.addDetail('AI response shape: ${_responseShapeSummary(decoded)}');
+    log?.addSection('Raw AI response excerpt', _trimForLog(response.body));
     throw const FormatException('Local AI response did not include text.');
   }
 
@@ -878,8 +882,9 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     final toolByName = {for (final tool in tools) tool.name: tool};
     final completedToolPayloads = <String, List<String>>{};
 
+    final providerName = isCloud ? settings.cloudProvider : 'local server';
     log?.addDetail(
-      'Sending tool-enabled request to ${isCloud ? settings.cloudProvider : 'local server'}: $model',
+      'AI request: provider=$providerName, model=$model, mode=${settings.mode}, maxTokens=$maxTokens, tools=${tools.map((tool) => tool.name).join(', ')}.',
     );
 
     for (var round = 0; round < 3; round++) {
@@ -909,6 +914,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
         throw const FormatException('Local AI response was not a JSON object.');
       }
       final message = _firstChoiceMessage(decoded);
+      _logModelReasoningIfPresent(message);
       final toolCalls = _toolCallsFromMessage(message);
       if (toolCalls.isEmpty) {
         final content = _messageTextContent(message['content']);
@@ -921,6 +927,8 @@ class FlutterGemmaLocalAiService implements LocalAiService {
           log?.addSection('Response', fallbackText);
           return fallbackText;
         }
+        log?.addDetail('AI response shape: ${_responseShapeSummary(decoded)}');
+        log?.addSection('Raw AI response excerpt', _trimForLog(response.body));
         throw const FormatException(
           'Tool-enabled AI response did not include text.',
         );
@@ -1031,6 +1039,56 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       return parts.join('\n').trim();
     }
     return content.toString().trim();
+  }
+
+  void _logModelReasoningIfPresent(Map message) {
+    final reasoning = _messageTextContent(
+      message['reasoning_content'] ??
+          message['reasoning'] ??
+          message['thinking'] ??
+          message['thoughts'],
+    );
+    if (reasoning.isEmpty) return;
+    _currentConsoleLog?.addSection('Model reasoning', _trimForLog(reasoning));
+  }
+
+  String _responseShapeSummary(Map<String, dynamic> decoded) {
+    final choices = decoded['choices'];
+    if (choices is! List || choices.isEmpty) {
+      return 'top-level keys=${decoded.keys.join(', ')}; choices=missing-or-empty';
+    }
+    final firstChoice = choices.first;
+    if (firstChoice is! Map) {
+      return 'top-level keys=${decoded.keys.join(', ')}; firstChoice=${firstChoice.runtimeType}';
+    }
+    final message = firstChoice['message'];
+    final finishReason = firstChoice['finish_reason']?.toString().trim();
+    if (message is Map) {
+      final content = message['content'];
+      final contentType = content == null ? 'null' : content.runtimeType;
+      final contentLength = _messageTextContent(content).length;
+      return [
+        'top-level keys=${decoded.keys.join(', ')}',
+        'choice keys=${firstChoice.keys.join(', ')}',
+        if (finishReason != null && finishReason.isNotEmpty)
+          'finish_reason=$finishReason',
+        'message keys=${message.keys.join(', ')}',
+        'content=$contentType/$contentLength chars',
+      ].join('; ');
+    }
+    return [
+      'top-level keys=${decoded.keys.join(', ')}',
+      'choice keys=${firstChoice.keys.join(', ')}',
+      if (finishReason != null && finishReason.isNotEmpty)
+        'finish_reason=$finishReason',
+      'message=${message.runtimeType}',
+    ].join('; ');
+  }
+
+  String _trimForLog(String value, {int maxLength = 1200}) {
+    final trimmed = value.trim();
+    if (trimmed.length <= maxLength) return trimmed;
+    return '${trimmed.substring(0, maxLength)}...';
   }
 
   String? _bestEffortToolResponse(
@@ -1542,93 +1600,9 @@ Signals: ${recommendation.signals.take(itemLimit).join(', ')}
     return '''
 Search tools are available in this runtime.
 Start with your own knowledge of real games and name the most likely exact Steam-searchable titles first.
-Only if your own knowledge is not enough, use search_web to discover candidates and search_steam_games to verify exact Steam titles.
+Only if your own knowledge is not enough, use search_web to resolve unfamiliar acronyms, shorthand, reference titles, or candidate names, then use search_steam_games to verify exact Steam titles.
 Do not browse first when you can already name likely matches confidently.
 ''';
-  }
-
-  String _steamSearchVocabularyHint(String request) {
-    final terms = request
-        .toLowerCase()
-        .split(RegExp(r'[^a-z0-9]+'))
-        .where((term) => term.isNotEmpty)
-        .toSet();
-    final hints = <String>[];
-    final mentionsFaceControl =
-        terms.contains('face') ||
-        terms.contains('facial') ||
-        terms.contains('webcam') ||
-        terms.contains('camera') ||
-        terms.contains('eye') ||
-        terms.contains('eyes') ||
-        terms.contains('blink') ||
-        terms.contains('blinks') ||
-        terms.contains('gaze');
-    final mentionsVoiceControl =
-        terms.contains('voice') ||
-        terms.contains('speech') ||
-        terms.contains('microphone') ||
-        terms.contains('mic') ||
-        terms.contains('sing') ||
-        terms.contains('singing');
-    final mentionsVr =
-        terms.contains('vr') ||
-        terms.contains('virtual') ||
-        terms.contains('reality') ||
-        terms.contains('steamvr');
-    final mentionsClimbing =
-        terms.contains('climb') ||
-        terms.contains('climbs') ||
-        terms.contains('climber') ||
-        terms.contains('climbers') ||
-        terms.contains('climbing') ||
-        terms.contains('ascend') ||
-        terms.contains('ascent') ||
-        terms.contains('mountain') ||
-        terms.contains('mountains') ||
-        terms.contains('grapple') ||
-        terms.contains('grappling');
-    final mentionsOpenWorld =
-        terms.contains('open') ||
-        terms.contains('world') ||
-        terms.contains('sandbox') ||
-        terms.contains('city');
-    final mentionsSuperpowered =
-        terms.contains('infamous') ||
-        terms.contains('superpower') ||
-        terms.contains('superpowers') ||
-        terms.contains('superhero') ||
-        terms.contains('superheroes') ||
-        terms.contains('powers') ||
-        terms.contains('power') ||
-        terms.contains('prototype') ||
-        terms.contains('spider') ||
-        terms.contains('spiderman') ||
-        terms.contains('sunset') ||
-        terms.contains('overdrive');
-
-    if (mentionsFaceControl) {
-      hints.add(
-        'For face/webcam/eye/blink control requests, infer related mechanics such as webcam input, eye tracking, gaze, and real-life blinking.',
-      );
-    }
-    if (mentionsVoiceControl) {
-      hints.add(
-        'For voice/microphone/singing control requests, infer related mechanics such as speech commands, microphone input, vocal puzzles, and singing.',
-      );
-    }
-    if (mentionsVr && mentionsClimbing) {
-      hints.add(
-        'For VR climbing requests, infer related mechanics such as hand-based locomotion, rock climbing, vertical traversal, grappling, parkour, and mountaineering.',
-      );
-    }
-    if (mentionsOpenWorld && mentionsSuperpowered) {
-      hints.add(
-        'For superpowered open-world requests, infer related mechanics such as superhero abilities, high-mobility traversal, parkour, swinging, dashing, city traversal, and chaotic action.',
-      );
-    }
-    if (hints.isEmpty) return '';
-    return hints.join('\n');
   }
 
   List<_ExternalAiTool> _steamExternalTools() {
@@ -1762,8 +1736,8 @@ For adult/sexual Steam requests, use Steam tags such as Sexual Content, Nudity, 
 Do not return AniList media types, AniList release formats, or adult-content fields.
 Keep leftover natural-language game terms in searchText.
 Keep searchText short and close to the user's wording. Do not rewrite the whole request.
+If the request contains an acronym, shorthand, or reference title you recognize, preserve both the shorthand and the expanded meaning in searchText when that helps retrieval. If you are uncertain, preserve the user's original wording.
 For niche Steam requests about a specific job, machine, object, profession, or activity, prefer searchText over broad tags. Leave tags empty unless an exact Steam tag adds real precision.
-${_steamSearchVocabularyHint(query.request)}
 ${_formatInstruction('Steam', allowedFormats)}
 ${_tagInstruction('Steam', tier, tagList)}
 User request: ${query.request}
@@ -2516,7 +2490,6 @@ Do not pick a broadly popular or profile-shaped game when another option better 
 Write the reason around why the chosen game fits the request; mention personal taste only when it adds useful context.
 Only the listed Steam game options are eligible for this request.
 If missingPlayCapabilities is empty, that game satisfies every required Steam play capability.
-${_steamSearchVocabularyHint(query.request)}
 Return JSON only. Use exactly these keys: id, reason. The id must match one option id. Keep reason to one short sentence under 25 words.
 ${_profilePromptEvidence(profile, tier, limits)}
 Game request: ${query.request}
@@ -2754,7 +2727,6 @@ If the request names reference titles, infer their core appeal, tone, character 
 The title must be an exact game title that Majika can search for on Steam. Do not invent a game and do not recommend a game the user already owns.
 Titles shown in profile evidence are already owned and are taste signals only, never valid recommendations.
 Respect required play capabilities when they are present.
-${_steamSearchVocabularyHint(query.request)}
 ${_steamToolInstruction(allowSearchTools)}
 Return JSON only. Use exactly these keys: title, reason. Keep reason to one short sentence under 25 words.
 ${_profilePromptEvidence(profile, tier, limits)}
@@ -2907,7 +2879,6 @@ Prefer a useful mix of obvious popular matches and lesser-known matches when bot
 Use the request as the primary decision. Use the user's profile only as a light tie-breaker.
 Return exact titles that should be searchable on ${profile.serviceName}. Do not invent titles and do not suggest titles already in the user's library.
 Respect hard $formatLabel when they are present.
-${isSteam ? _steamSearchVocabularyHint(query.request) : ''}
 ${isSteam ? _steamToolInstruction(allowSearchTools) : ''}
 Return JSON only. Prefer exactly this shape: {"titles":["..."]}. Titles only, no reasons.
 Request: ${query.request}

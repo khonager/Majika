@@ -78,6 +78,7 @@ The desired search flow is:
 - Vision models such as FastVLM are intentionally excluded until Majika has an image-understanding workflow.
 - Keep deterministic summaries as fallback when no model is configured.
 - Use local AI to turn natural-language searches like `romance movie about time travel` into structured tags/formats such as `Romance`, `Time Manipulation`, and `MOVIE`. Do not rely on a large synonym table as the main product path; deterministic parsing is only the no-model safety net.
+- Do not add hard-coded media knowledge such as title acronym maps, franchise aliases, creator shorthand, or one-off "if the user says X, search for Y" rules. Fix failed searches by improving grounding, service/API retrieval, prompt contracts, logging, or benchmark coverage.
 - Let the app fetch current releases and service data itself, then pass structured context to the local model for summaries and recommendation explanations.
 - Later, optional custom providers can be added for users who want their own API key or external local server.
 

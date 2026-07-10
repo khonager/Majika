@@ -269,15 +269,6 @@ class SteamService implements MediaService {
 
     add(trimmed);
 
-    final rawKeywordSet = trimmed
-        .toLowerCase()
-        .split(RegExp(r'[^a-z0-9]+'))
-        .where((term) => term.isNotEmpty)
-        .toSet();
-    _addUnusualInputControlSearchTerms(add, rawKeywordSet);
-    _addVrClimbingSearchTerms(add, rawKeywordSet);
-    _addSuperpoweredOpenWorldSearchTerms(add, rawKeywordSet);
-
     var simplified = trimmed.toLowerCase();
     for (final prefix in const [
       'i want to pretend to be ',
@@ -347,119 +338,7 @@ class SteamService implements MediaService {
         !_steamSimulatorSuffixBlockedTerms.contains(lastKeyword)) {
       add('$lastKeyword simulator');
     }
-    final keywordSet = keywords.toSet();
-    if (keywordSet.contains('office')) {
-      add('office worker');
-      add('office job');
-      add('office work');
-      if (keywordSet.contains('worker') || keywordSet.contains('job')) {
-        add('office worker simulator');
-        add('office job simulator');
-      }
-      if (keywordSet.contains('task') || keywordSet.contains('tasks')) {
-        add('office tasks');
-      }
-    }
-
     return variants;
-  }
-
-  static void _addUnusualInputControlSearchTerms(
-    void Function(String value) add,
-    Set<String> keywords,
-  ) {
-    final mentionsFaceControl =
-        keywords.contains('face') ||
-        keywords.contains('facial') ||
-        keywords.contains('webcam') ||
-        keywords.contains('camera') ||
-        keywords.contains('eye') ||
-        keywords.contains('eyes') ||
-        keywords.contains('blink') ||
-        keywords.contains('blinks') ||
-        keywords.contains('gaze');
-    final mentionsVoiceControl =
-        keywords.contains('voice') ||
-        keywords.contains('speech') ||
-        keywords.contains('microphone') ||
-        keywords.contains('mic') ||
-        keywords.contains('sing') ||
-        keywords.contains('singing');
-
-    if (mentionsFaceControl) {
-      add('eye tracking');
-      add('blink control');
-      add('webcam control');
-      add('face controlled game');
-    }
-    if (mentionsVoiceControl) {
-      add('voice control');
-      add('microphone control');
-      add('speech controlled game');
-      add('singing game');
-    }
-  }
-
-  static void _addVrClimbingSearchTerms(
-    void Function(String value) add,
-    Set<String> keywords,
-  ) {
-    final mentionsVr =
-        keywords.contains('vr') ||
-        keywords.contains('virtual') ||
-        keywords.contains('reality') ||
-        keywords.contains('steamvr');
-    final mentionsClimbing =
-        keywords.contains('climb') ||
-        keywords.contains('climbs') ||
-        keywords.contains('climber') ||
-        keywords.contains('climbers') ||
-        keywords.contains('climbing') ||
-        keywords.contains('ascend') ||
-        keywords.contains('ascent') ||
-        keywords.contains('mountain') ||
-        keywords.contains('mountains') ||
-        keywords.contains('grapple') ||
-        keywords.contains('grappling');
-    if (!mentionsVr || !mentionsClimbing) return;
-
-    add('VR climbing');
-    add('VR rock climbing');
-    add('VR parkour');
-    add('VR grappling');
-    add('VR hand locomotion');
-  }
-
-  static void _addSuperpoweredOpenWorldSearchTerms(
-    void Function(String value) add,
-    Set<String> keywords,
-  ) {
-    final mentionsOpenWorld =
-        keywords.contains('open') ||
-        keywords.contains('world') ||
-        keywords.contains('sandbox') ||
-        keywords.contains('city');
-    final mentionsPowers =
-        keywords.contains('infamous') ||
-        keywords.contains('superpower') ||
-        keywords.contains('superpowers') ||
-        keywords.contains('superhero') ||
-        keywords.contains('superheroes') ||
-        keywords.contains('powers') ||
-        keywords.contains('power') ||
-        keywords.contains('prototype') ||
-        keywords.contains('spider') ||
-        keywords.contains('spiderman') ||
-        keywords.contains('sunset') ||
-        keywords.contains('overdrive');
-    if (!mentionsOpenWorld && !mentionsPowers) return;
-
-    add('superhero open world');
-    add('superpowers open world');
-    add('open world parkour');
-    add('open world traversal');
-    add('superpowered action game');
-    add('superhero parkour');
   }
 
   static const _steamSearchStopWords = {

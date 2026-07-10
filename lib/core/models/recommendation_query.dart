@@ -281,8 +281,6 @@ class RecommendationQuery {
     ]);
   }
 
-  bool get infersInfamousLike => _infersInfamousLike(_normalize(request));
-
   String get searchRequest {
     final interpreted = interpretedRequest.trim();
     if (interpreted.isNotEmpty) return interpreted;
@@ -455,9 +453,6 @@ class RecommendationQuery {
     if (_containsAny(text, ['single player', 'single-player', 'solo'])) {
       formats.add('SINGLE_PLAYER');
     }
-    if (_infersInfamousLike(text)) {
-      formats.add('SINGLE_PLAYER');
-    }
     if (_containsAny(text, ['multiplayer', 'pvp'])) {
       formats.add('MULTIPLAYER');
     }
@@ -548,10 +543,6 @@ class RecommendationQuery {
     ])) {
       types.add('GAME');
     }
-    if (_infersInfamousLike(text)) {
-      types.add('GAME');
-    }
-
     return types;
   }
 
@@ -573,11 +564,7 @@ class RecommendationQuery {
       ].join(' '),
     );
 
-    return terms.any((term) {
-      if (haystack.contains(term)) return true;
-      final aliases = _searchTermAliases[term];
-      return aliases != null && aliases.any(haystack.contains);
-    });
+    return terms.any(haystack.contains);
   }
 
   List<String> _searchTerms({String? source}) {
@@ -662,153 +649,6 @@ class RecommendationQuery {
         .toList();
   }
 
-  static const Map<String, List<String>> _searchTermAliases = {
-    'ascend': ['climb', 'climbing', 'ascent', 'grapple', 'grappling'],
-    'ascent': ['climb', 'climbing', 'ascend', 'grapple', 'grappling'],
-    'climb': [
-      'climbing',
-      'climber',
-      'ascend',
-      'ascent',
-      'grapple',
-      'grappling',
-      'vertical',
-    ],
-    'climber': ['climb', 'climbing', 'ascend', 'ascent'],
-    'climbing': [
-      'climb',
-      'climber',
-      'ascend',
-      'ascent',
-      'grapple',
-      'grappling',
-      'vertical',
-    ],
-    'fun': [
-      'absurd',
-      'comedy',
-      'comedic',
-      'funny',
-      'hilarious',
-      'joke',
-      'jokes',
-      'laugh',
-      'slapstick',
-    ],
-    'harry': [
-      'magic',
-      'magical',
-      'school',
-      'spell',
-      'spells',
-      'witch',
-      'wizard',
-      'wizardry',
-    ],
-    'horny': ['adult', 'erotic', 'sex', 'sexual', 'steamy'],
-    'infamous': [
-      'action',
-      'open world',
-      'prototype',
-      'superhero',
-      'supernatural',
-    ],
-    'job': [
-      'company',
-      'employee',
-      'office',
-      'part time',
-      'part-time',
-      'salaryman',
-      'work',
-      'worker',
-      'workplace',
-    ],
-    'laugh': [
-      'absurd',
-      'comedy',
-      'comedic',
-      'funny',
-      'hilarious',
-      'humor',
-      'joke',
-      'jokes',
-      'slapstick',
-    ],
-    'naughty': ['adult', 'erotic', 'sex', 'sexual', 'steamy'],
-    'potter': [
-      'magic',
-      'magical',
-      'school',
-      'spell',
-      'spells',
-      'witch',
-      'wizard',
-      'wizardry',
-    ],
-    'powerfull': [
-      'ability',
-      'abilities',
-      'demon',
-      'magic',
-      'overpowered',
-      'power',
-      'powerful',
-      'super power',
-      'superpower',
-      'supernatural',
-    ],
-    'sexy': ['adult', 'erotic', 'sex', 'sexual', 'steamy'],
-    'overdrive': ['action', 'open world', 'parkour', 'superhero', 'traversal'],
-    'powers': [
-      'ability',
-      'abilities',
-      'power',
-      'superhero',
-      'superhuman',
-      'supernatural',
-    ],
-    'second': ['action', 'open world', 'parkour', 'superhero', 'supernatural'],
-    'seconds': ['action', 'open world', 'parkour', 'superhero', 'supernatural'],
-    'son': ['action', 'open world', 'parkour', 'superhero', 'supernatural'],
-    'spider': [
-      'open world',
-      'superhero',
-      'swing',
-      'swinging',
-      'web',
-      'web-slinging',
-    ],
-    'spiderman': [
-      'open world',
-      'superhero',
-      'swing',
-      'swinging',
-      'web',
-      'web-slinging',
-    ],
-    'superpower': [
-      'ability',
-      'abilities',
-      'power',
-      'superhero',
-      'superhuman',
-      'supernatural',
-    ],
-    'superpowers': [
-      'ability',
-      'abilities',
-      'power',
-      'superhero',
-      'superhuman',
-      'supernatural',
-    ],
-    'sunset': ['action', 'open world', 'parkour', 'superhero', 'traversal'],
-    'face': ['webcam', 'camera', 'eye', 'eyes', 'blink', 'blinking', 'gaze'],
-    'facial': ['webcam', 'camera', 'eye', 'eyes', 'blink', 'blinking', 'gaze'],
-    'voice': ['speech', 'microphone', 'mic', 'sing', 'singing'],
-  };
-
   static bool _containsAny(String text, Iterable<String> values) {
     return values.any((value) => _containsWholePhrase(text, _normalize(value)));
   }
@@ -828,19 +668,6 @@ class RecommendationQuery {
   static bool _containsWholePhrase(String text, String phrase) {
     final escaped = RegExp.escape(phrase);
     return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(text);
-  }
-
-  static bool _infersInfamousLike(String text) {
-    return _containsAny(text, [
-      'infamous game',
-      'infamous games',
-      'in famous game',
-      'in famous games',
-      'infamous-like',
-      'infamous like',
-      'in famous-like',
-      'in famous like',
-    ]);
   }
 
   static bool _looksLikeTimeTravelRequest(String text) {
@@ -1038,8 +865,6 @@ class RecommendationQuery {
       'laugh',
       'laughing',
       'laugh a lot',
-      'spy family',
-      'spy x family',
     ],
     'Family Life': [
       'family anime',
@@ -1049,8 +874,6 @@ class RecommendationQuery {
       'watch with parents',
       'kids and parents',
       'parents and kids',
-      'spy family',
-      'spy x family',
     ],
     'Hentai': [
       'hentai',
@@ -1130,29 +953,17 @@ class RecommendationQuery {
       'flirting',
     ],
     'Visual Novel': ['visual novel', 'choice-driven', 'choice driven', 'vn'],
-    'Action': [
-      'action',
-      'fight',
-      'fighting',
-      'infamous game',
-      'infamous games',
-    ],
-    'Adventure': [
-      'adventure',
-      'exploration',
-      'explore',
-      'infamous game',
-      'infamous games',
-    ],
-    'Fantasy': ['fantasy', 'harry potter', 'wizard', 'witch', 'witchcraft'],
+    'Action': ['action', 'fight', 'fighting'],
+    'Adventure': ['adventure', 'exploration', 'explore'],
+    'Fantasy': ['fantasy', 'wizard', 'witch', 'witchcraft'],
     'RPG': ['role playing', 'role-playing', 'rpg'],
     'Strategy': ['strategy', 'tactics', 'tactical'],
     'Simulation': ['simulation', 'simulator', 'management'],
     'Puzzle': ['puzzle', 'brain teaser'],
     'Shooter': ['shooter', 'fps', 'third person shooter'],
     'Roguelike': ['roguelike', 'roguelite', 'run based'],
-    'Open World': ['open world', 'sandbox', 'infamous game', 'infamous games'],
-    'Supernatural': ['super powers', 'superpowers', 'infamous games'],
+    'Open World': ['open world', 'sandbox'],
+    'Supernatural': ['super powers', 'superpowers'],
     'Co-op': ['co op', 'co-op', 'coop'],
     'Multiplayer': ['multiplayer', 'pvp'],
     'Magic': [
@@ -1164,20 +975,8 @@ class RecommendationQuery {
       'spell',
       'spells',
       'sorcery',
-      'harry potter',
-      'hogwarts',
-      'mashle',
     ],
-    'School': [
-      'school',
-      'academy',
-      'magic school',
-      'wizard school',
-      'hogwarts',
-      'harry potter',
-      'mashle',
-      'wistoria',
-    ],
-    'Coming of Age': ['coming of age', 'harry potter'],
+    'School': ['school', 'academy', 'magic school', 'wizard school'],
+    'Coming of Age': ['coming of age'],
   };
 }

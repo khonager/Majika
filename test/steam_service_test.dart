@@ -270,52 +270,22 @@ void main() {
     },
   );
 
-  test('Steam search term expansion helps office-job fantasy requests', () {
+  test('Steam search term expansion uses generic request decomposition', () {
     final terms = SteamService.expandedSteamStoreSearchTerms(
       'i want to pretend to be a boring office worker who gets to solve tasks',
     );
 
+    expect(
+      terms,
+      contains(
+        'i want to pretend to be a boring office worker who gets to solve tasks',
+      ),
+    );
+    expect(terms, contains('boring office worker who gets to solve tasks'));
     expect(terms, contains('office worker'));
-    expect(terms, contains('office job'));
-    expect(terms, contains('office worker simulator'));
     expect(terms, contains('solve tasks'));
+    expect(terms, contains('tasks simulator'));
   });
-
-  test('Steam search term expansion helps unusual input-control requests', () {
-    final terms = SteamService.expandedSteamStoreSearchTerms(
-      'a game that you can control with just your voice or your face',
-    );
-
-    expect(terms, contains('blink control'));
-    expect(terms, contains('webcam control'));
-    expect(terms, contains('voice control'));
-    expect(terms, contains('microphone control'));
-  });
-
-  test('Steam search term expansion includes strong VR climbing concepts', () {
-    final terms = SteamService.expandedSteamStoreSearchTerms(
-      'a vr game about climbing',
-    );
-
-    expect(terms, contains('VR climbing'));
-    expect(terms, contains('VR rock climbing'));
-    expect(terms, contains('VR parkour'));
-    expect(terms, contains('VR grappling'));
-  });
-
-  test(
-    'Steam search term expansion includes superpowered open-world concepts',
-    () {
-      final terms = SteamService.expandedSteamStoreSearchTerms(
-        'something similar to infamous seconds son. superpowers and open world',
-      );
-
-      expect(terms, contains('superhero open world'));
-      expect(terms, contains('superpowers open world'));
-      expect(terms, contains('open world parkour'));
-      expect(terms, contains('open world traversal'));
-    },
-  );
 
   test(
     'specific Steam text search does not poison niche queries with controller support terms',
@@ -371,6 +341,7 @@ void main() {
         isEmpty,
       );
       expect(searchTerms, contains('office worker'));
+      expect(searchTerms, isNot(contains('office job')));
     },
   );
 
