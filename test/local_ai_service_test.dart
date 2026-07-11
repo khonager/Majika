@@ -477,6 +477,52 @@ void main() {
     },
   );
 
+  test(
+    'flutter gemma service recovers query JSON with smart quotes',
+    () async {
+      final service = FlutterGemmaLocalAiService(
+        textGenerator: (prompt, maxTokens) async => '''
+{
+  "tags": [
+    "Romance",
+    "School",
+    "Boys' Love",
+    "Slice of Life"
+  ],
+  "formats": [],
+  "mediaTypes": [
+    "ANIME",
+    "MANGA"
+  ],
+  “includeAdult”: false,
+  “searchText”: “romance between two males in school”
+}
+''',
+      );
+
+      final interpreted = await service.interpretRecommendationRequest(
+        const RecommendationQuery(request: 'a romance between two males in school'),
+        availableTags: const [
+          'Romance',
+          'School',
+          "Boys' Love",
+          'Slice of Life',
+        ],
+      );
+
+      expect(
+        interpreted.aiSelectedTags,
+        containsAll(['Romance', 'School', "Boys' Love", 'Slice of Life']),
+      );
+      expect(interpreted.mediaTypes, containsAll(['ANIME', 'MANGA']));
+      expect(interpreted.includeAdult, isFalse);
+      expect(
+        interpreted.interpretedRequest,
+        'romance between two males in school',
+      );
+    },
+  );
+
   test('AI search failure asks before using fallback rules', () async {
     var handled = 0;
     final service = FlutterGemmaLocalAiService(

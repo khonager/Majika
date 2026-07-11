@@ -2505,16 +2505,41 @@ Recent chat messages: ${jsonEncode(history)}
         depth--;
         if (depth == 0 && start != -1) {
           final jsonText = text.substring(start, index + 1);
-          try {
-            final decoded = jsonDecode(jsonText);
-            if (decoded is Map<String, dynamic>) yield decoded;
-          } catch (_) {
-            // Keep scanning; small local models may emit several fragments.
-          }
+          final decoded = _decodeLikelyJsonObject(jsonText);
+          if (decoded != null) yield decoded;
           start = -1;
         }
       }
     }
+  }
+
+  Map<String, dynamic>? _decodeLikelyJsonObject(String jsonText) {
+    try {
+      final decoded = jsonDecode(jsonText);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } catch (_) {
+      final normalized = _normalizeLikelyJsonTypos(jsonText);
+      if (normalized == jsonText) return null;
+      try {
+        final decoded = jsonDecode(normalized);
+        if (decoded is Map<String, dynamic>) return decoded;
+      } catch (_) {
+        // Keep scanning; small local models may emit several fragments.
+      }
+    }
+    return null;
+  }
+
+  String _normalizeLikelyJsonTypos(String text) {
+    return text
+        .replaceAll('“', '"')
+        .replaceAll('”', '"')
+        .replaceAll('„', '"')
+        .replaceAll('‟', '"')
+        .replaceAll('’', "'")
+        .replaceAll('‘', "'")
+        .replaceAll('‚', "'")
+        .replaceAll('‛', "'");
   }
 
   Map<String, Object?> _serviceTopOptionEvidence({
