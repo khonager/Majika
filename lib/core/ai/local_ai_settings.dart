@@ -607,7 +607,12 @@ AiModelTrustTier resolveAiModelTrustTier({
           'openrouter meta-llama/llama-3.2-3b-instruct:free',
           'openrouter qwen/qwen3-coder:free',
           'openrouter openrouter/free',
-        ])) {
+      ])) {
+        return AiModelTrustTier.constrained;
+      }
+
+    if (mode == localAiModeExternalServer &&
+        _looksLikeToolCapableModel(modelName)) {
       return AiModelTrustTier.constrained;
     }
 

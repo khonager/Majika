@@ -477,11 +477,9 @@ void main() {
     },
   );
 
-  test(
-    'flutter gemma service recovers query JSON with smart quotes',
-    () async {
-      final service = FlutterGemmaLocalAiService(
-        textGenerator: (prompt, maxTokens) async => '''
+  test('flutter gemma service recovers query JSON with smart quotes', () async {
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async => '''
 {
   "tags": [
     "Romance",
@@ -498,28 +496,84 @@ void main() {
   “searchText”: “romance between two males in school”
 }
 ''',
+    );
+
+    final interpreted = await service.interpretRecommendationRequest(
+      const RecommendationQuery(
+        request: 'a romance between two males in school',
+      ),
+      availableTags: const ['Romance', 'School', "Boys' Love", 'Slice of Life'],
+    );
+
+    expect(
+      interpreted.aiSelectedTags,
+      containsAll(['Romance', 'School', "Boys' Love", 'Slice of Life']),
+    );
+    expect(interpreted.mediaTypes, containsAll(['ANIME', 'MANGA']));
+    expect(interpreted.includeAdult, isFalse);
+    expect(
+      interpreted.interpretedRequest,
+      'romance between two males in school',
+    );
+  });
+
+  test(
+    'flutter gemma service sanitizes clue-style AniList JSON from small models',
+    () async {
+      final service = FlutterGemmaLocalAiService(
+        textGenerator: (prompt, maxTokens) async => '''
+```json
+{
+  "tags": [],
+  "formats": [
+    "Series",
+    "Movie"
+  ],
+  "mediaTypes": [
+    "Anime",
+    "Manga"
+  ],
+  “includeAdult”: true,
+  "searchText": "main characters hand turns into living thing talks to me”
+}
+```
+''',
       );
 
       final interpreted = await service.interpretRecommendationRequest(
-        const RecommendationQuery(request: 'a romance between two males in school'),
-        availableTags: const [
-          'Romance',
-          'School',
-          "Boys' Love",
-          'Slice of Life',
-        ],
+        const RecommendationQuery(
+          request:
+              'the main characters hand turns into a living thing that he can talk to',
+        ),
+        availableTags: RecommendationQuery.browsableTags,
       );
 
-      expect(
-        interpreted.aiSelectedTags,
-        containsAll(['Romance', 'School', "Boys' Love", 'Slice of Life']),
-      );
       expect(interpreted.mediaTypes, containsAll(['ANIME', 'MANGA']));
+      expect(interpreted.formats, isEmpty);
       expect(interpreted.includeAdult, isFalse);
       expect(
         interpreted.interpretedRequest,
-        'romance between two males in school',
+        'main characters hand turns into living thing talks to me',
       );
+    },
+  );
+
+  test(
+    'flutter gemma service accepts title-case AniList format when request asks for it',
+    () async {
+      final service = FlutterGemmaLocalAiService(
+        textGenerator: (prompt, maxTokens) async =>
+            '{"tags":[],"formats":["Series"],"mediaTypes":["Anime"],"includeAdult":false,"searchText":"talking parasite hand"}',
+      );
+
+      final interpreted = await service.interpretRecommendationRequest(
+        const RecommendationQuery(request: 'anime series with a talking hand'),
+        availableTags: RecommendationQuery.browsableTags,
+      );
+
+      expect(interpreted.mediaTypes, contains('ANIME'));
+      expect(interpreted.formats, contains('SERIES'));
+      expect(interpreted.interpretedRequest, 'talking parasite hand');
     },
   );
 
@@ -1220,6 +1274,88 @@ void main() {
         suggestions.first.reason,
         contains('Grounded Steam match from store search'),
       );
+    },
+  );
+
+  test(
+    'AniList title discovery uses grounded web titles before broad model guesses',
+    () async {
+      final service = FlutterGemmaLocalAiService(
+        textGenerator: (prompt, maxTokens) async {
+          return '{"titles":["Broad Fantasy Show"]}';
+        },
+        searchToolbox: AiSearchToolbox(
+          httpGet: (url, {headers}) async {
+            expect(url.host, contains('duckduckgo.com'));
+            return http.Response('''
+<html>
+  <a class="result__a" href="https://anilist.co/anime/100/Right-Hand-Companion/">Right Hand Companion - AniList</a>
+  <div class="result__snippet">A specific anime about a living hand companion.</div>
+  <a class="result__a" href="https://myanimelist.net/anime/200/Body_Partner">Body Partner - MyAnimeList.net</a>
+  <div class="result__snippet">A protagonist wakes up with a talking body-part partner.</div>
+</html>
+''', 200);
+          },
+        ),
+      );
+
+      final suggestions = await service.suggestRecommendationCandidates(
+        _profile(serviceName: 'AniList'),
+        const [],
+        query: const RecommendationQuery(
+          request:
+              'the main characters hand turns into a living thing that he can talk to',
+          mediaTypes: {'ANIME', 'MANGA'},
+        ),
+        limit: 3,
+      );
+
+      expect(suggestions.map((suggestion) => suggestion.title), [
+        'Right Hand Companion',
+        'Body Partner',
+        'Broad Fantasy Show',
+      ]);
+      expect(suggestions.first.reason, contains('Grounded from web search'));
+    },
+  );
+
+  test(
+    'web search falls back to Wikipedia when DuckDuckGo is a challenge',
+    () async {
+      final requestedHosts = <String>[];
+      final toolbox = AiSearchToolbox(
+        httpGet: (url, {headers}) async {
+          requestedHosts.add(url.host);
+          if (url.host.contains('duckduckgo.com')) {
+            return http.Response('<html><title>DuckDuckGo</title></html>', 200);
+          }
+          return http.Response(
+            jsonEncode({
+              'query': {
+                'search': [
+                  {
+                    'title': 'Midori Days',
+                    'snippet': 'His right hand becomes a girl.',
+                  },
+                  {
+                    'title': 'Parasyte',
+                    'snippet': 'An alien parasite takes over his hand.',
+                  },
+                ],
+              },
+            }),
+            200,
+          );
+        },
+      );
+
+      final results = await toolbox.searchWeb('"right hand" anime manga');
+
+      expect(requestedHosts, ['html.duckduckgo.com', 'en.wikipedia.org']);
+      expect(results.map((result) => result['title']), [
+        'Midori Days',
+        'Parasyte',
+      ]);
     },
   );
 
@@ -2046,6 +2182,64 @@ void main() {
     expect(chosen?.isAiPick, isTrue);
     expect(chosen?.reason, 'Best PC fit.');
   });
+
+  test(
+    'external local server remains local for top-pick selection even when cloud fallback is configured',
+    () async {
+      Uri? requestUrl;
+      Map<String, dynamic>? requestBody;
+      final service = FlutterGemmaLocalAiService(
+        settingsLoader: () async => const LocalAiRuntimeSettings(
+          useLocalAi: true,
+          useAiForSearch: true,
+          mode: localAiModeExternalServer,
+          provider: externalLocalAiProvider,
+          endpoint: defaultLocalAiEndpoint,
+          serverModel: 'gemma3:4b',
+          cloudProvider: 'Google Gemini',
+          cloudEndpoint: defaultCloudAiEndpoint,
+          cloudModel: defaultCloudAiModel,
+          cloudApiKey: 'gemini_test_key',
+          contextItems: 24,
+        ),
+        httpPost: (url, {headers, body}) async {
+          requestUrl = url;
+          requestBody = jsonDecode(body.toString()) as Map<String, dynamic>;
+          return http.Response(
+            jsonEncode({
+              'choices': [
+                {
+                  'message': {
+                    'role': 'assistant',
+                    'content':
+                        '{"id":"anilist_local","reason":"Best request fit."}',
+                  },
+                },
+              ],
+            }),
+            200,
+          );
+        },
+      );
+
+      final chosen = await service.chooseTopRecommendation(
+        _profile(),
+        [
+          _recommendation('anilist_local', 'Local Pick'),
+          _recommendation('anilist_other', 'Other Pick'),
+        ],
+        query: const RecommendationQuery(request: 'surreal mystery anime'),
+      );
+
+      expect(
+        requestUrl.toString(),
+        'http://127.0.0.1:11434/v1/chat/completions',
+      );
+      expect(requestBody?['model'], 'gemma3:4b');
+      expect(chosen?.item.id, 'anilist_local');
+      expect(chosen?.isAiPick, isTrue);
+    },
+  );
 
   test(
     'prompt benchmark: rich Steam picker includes personal game evidence',

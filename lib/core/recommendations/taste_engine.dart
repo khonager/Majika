@@ -426,8 +426,10 @@ class TasteEngine {
 
   List<String> _requestTextTerms(String request) {
     final codingHackIntent = _isCodingHackRequest(request);
-    final terms = _withoutNegativeReferencePhrases(request)
-        .toLowerCase()
+    final normalized = _withoutNegativeReferencePhrases(
+      request,
+    ).toLowerCase().replaceAll(RegExp(r'[_-]+'), ' ').trim();
+    final terms = normalized
         .split(RegExp(r'[^a-z0-9+]+'))
         .where(
           (term) =>
@@ -447,6 +449,17 @@ class TasteEngine {
       if (term == 'superpower' || term == 'superpowers') {
         expanded.addAll(const ['power', 'powers', 'ability', 'abilities']);
       }
+    }
+    if (normalized.contains('living thing')) {
+      expanded.addAll(const ['creature', 'creatures', 'organism']);
+    }
+    if (normalized.contains('talk to') || normalized.contains('talks to')) {
+      expanded.addAll(const ['talking', 'speak', 'speaks']);
+    }
+    if (normalized.contains('turns into') ||
+        normalized.contains('turned into') ||
+        normalized.contains('turn into')) {
+      expanded.addAll(const ['transform', 'transforms', 'transformation']);
     }
     return expanded;
   }
@@ -947,9 +960,19 @@ class TasteEngine {
   };
 
   static const Set<String> _lowSignalRequestTerms = {
+    'can',
+    'character',
+    'characters',
     'entertaining',
     'fun',
+    'into',
     'learn',
+    'main',
+    'thing',
+    'things',
+    'turn',
+    'turned',
+    'turns',
   };
 
   static const Set<String> _codingHackLowSignalTerms = {

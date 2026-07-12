@@ -90,7 +90,7 @@ class AiSearchToolbox {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return const [];
 
-    final safeLimit = limit.clamp(1, 6);
+    final safeLimit = limit.clamp(1, 20);
     final uri = Uri.https('html.duckduckgo.com', '/html/', {'q': trimmed});
     final response = await _get(
       uri,
@@ -135,7 +135,50 @@ class AiSearchToolbox {
       if (results.length >= safeLimit) break;
     }
 
-    return results;
+    if (results.isNotEmpty) return results;
+    return _searchWikipedia(trimmed, limit: safeLimit);
+  }
+
+  Future<List<Map<String, Object?>>> _searchWikipedia(
+    String query, {
+    required int limit,
+  }) async {
+    final uri = Uri.https('en.wikipedia.org', '/w/api.php', {
+      'action': 'query',
+      'list': 'search',
+      'srsearch': query,
+      'srlimit': '$limit',
+      'format': 'json',
+      'formatversion': '2',
+      'origin': '*',
+    });
+    final response = await _get(
+      uri,
+      headers: const {'User-Agent': 'Majika/1.0', 'Accept': 'application/json'},
+    ).timeout(const Duration(seconds: 20));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError(
+        'Wikipedia search returned HTTP ${response.statusCode}.',
+      );
+    }
+
+    final decoded = jsonDecode(response.body);
+    final queryData = decoded is Map ? decoded['query'] : null;
+    final search = queryData is Map ? queryData['search'] : null;
+    if (search is! List) return const [];
+    return [
+      for (final result in search)
+        if (result is Map &&
+            result['title']?.toString().trim().isNotEmpty == true)
+          {
+            'title': result['title'].toString().trim(),
+            'snippet': _cleanHtml(result['snippet']?.toString() ?? ''),
+            'url': Uri.https(
+              'en.wikipedia.org',
+              '/wiki/${result['title'].toString().replaceAll(' ', '_')}',
+            ).toString(),
+          },
+    ];
   }
 
   Future<http.Response> _get(Uri uri, {Map<String, String>? headers}) {

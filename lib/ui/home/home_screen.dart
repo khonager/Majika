@@ -978,7 +978,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   bool _prefersAiDiscoveryFirst(MediaService service) {
-    return service.displayName == 'Steam';
+    return service.displayName == 'Steam' || service.displayName == 'AniList';
   }
 
   String _searchSummaryForLog(RecommendationQuery query) {
@@ -1312,9 +1312,28 @@ class _HomeScreenState extends State<HomeScreen> {
       query,
       requestSeedCandidates,
     );
-    if (requestSeedRanked.isEmpty) return ranked;
-    if (ranked.isEmpty) return requestSeedRanked;
-    return _mergeRankedRecommendations([...ranked, ...requestSeedRanked]);
+    final merged = requestSeedRanked.isEmpty
+        ? ranked
+        : ranked.isEmpty
+        ? requestSeedRanked
+        : _mergeRankedRecommendations([...ranked, ...requestSeedRanked]);
+    return _focusDistinctiveAniListMatches(service, query, merged);
+  }
+
+  List<Recommendation> _focusDistinctiveAniListMatches(
+    MediaService service,
+    RecommendationQuery query,
+    List<Recommendation> recommendations,
+  ) {
+    if (service.displayName != 'AniList' || !_isDistinctivePlotRequest(query)) {
+      return recommendations;
+    }
+    final evidenced = [
+      for (final recommendation in recommendations)
+        if (_requestEvidenceTextOverlapScore(query, recommendation.item) >= 3)
+          recommendation,
+    ];
+    return evidenced.take(6).toList();
   }
 
   List<Recommendation> _trustedRequestRecommendations(
@@ -1338,9 +1357,9 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final (index, item) in seedCandidates.indexed) {
       final recommendation = byId[item.id];
       if (recommendation == null) continue;
-      final textOverlapScore = _requestTitleTextOverlapScore(query, item);
-      final requestFitScore = textOverlapScore > 0
-          ? max(88.0, 96.0 + textOverlapScore.clamp(0, 2).toDouble())
+      final evidenceScore = _requestEvidenceTextOverlapScore(query, item);
+      final requestFitScore = evidenceScore > 0
+          ? max(88.0, 96.0 + evidenceScore.clamp(0, 2).toDouble())
           : max(58.0, 88.0 - index * 4.0);
       trusted.add(
         recommendation.copyWith(
@@ -1361,21 +1380,46 @@ class _HomeScreenState extends State<HomeScreen> {
   ) {
     return [
       for (final candidate in candidates)
-        if (_requestTitleTextOverlapScore(query, candidate) > 0) candidate,
+        if (_requestEvidenceTextOverlapScore(query, candidate) >= 3) candidate,
     ];
   }
 
-  int _requestTitleTextOverlapScore(RecommendationQuery query, MediaItem item) {
+  int _requestEvidenceTextOverlapScore(
+    RecommendationQuery query,
+    MediaItem item,
+  ) {
     final terms = _requestTextTerms(query);
     if (terms.length < 2) return 0;
     final titleText = _normalizeSearchText(
       [item.title, ...item.alternativeTitles].join(' '),
     );
-    if (titleText.isEmpty) return 0;
-    final titleTokens = titleText.split(' ').where((term) => term.length > 2);
-    final overlap = terms.where(titleTokens.toSet().contains).length;
-    if (overlap >= 2) return overlap;
-    return 0;
+    final evidenceText = _normalizeSearchText(
+      [
+        item.title,
+        item.subtitle,
+        ...item.alternativeTitles,
+        item.description ?? '',
+        ...item.tags,
+      ].join(' '),
+    );
+    if (evidenceText.isEmpty) return 0;
+    final titleTokens = titleText
+        .split(' ')
+        .where((term) => term.length > 2)
+        .toSet();
+    final evidenceTokens = evidenceText
+        .split(' ')
+        .where((term) => term.length > 2)
+        .toSet();
+    var overlap = 0;
+    for (final term in terms) {
+      if (titleTokens.contains(term)) {
+        overlap += 2;
+      } else if (_matchesEvidenceTerm(evidenceText, evidenceTokens, term)) {
+        overlap += 1;
+      }
+    }
+    return overlap;
   }
 
   Set<String> _requestTextTerms(RecommendationQuery query) {
@@ -1389,12 +1433,17 @@ class _HomeScreenState extends State<HomeScreen> {
       'any',
       'are',
       'based',
+      'can',
+      'character',
+      'characters',
       'for',
       'game',
       'games',
       'good',
+      'into',
       'like',
       'looking',
+      'main',
       'really',
       'search',
       'similar',
@@ -1402,14 +1451,71 @@ class _HomeScreenState extends State<HomeScreen> {
       'steam',
       'that',
       'the',
+      'thing',
+      'things',
       'there',
+      'turn',
+      'turned',
+      'turns',
       'want',
       'with',
     };
-    return text
+    final terms = text
         .split(' ')
         .where((term) => term.length > 2 && !stopWords.contains(term))
         .toSet();
+    if (text.contains('living thing')) {
+      terms.addAll(const [
+        'alien',
+        'aliens',
+        'creature',
+        'creatures',
+        'girl',
+        'human',
+        'organism',
+        'parasite',
+        'parasites',
+        'person',
+        'woman',
+      ]);
+    }
+    if (text.contains('talk to') || text.contains('talks to')) {
+      terms.addAll(const [
+        'companion',
+        'sentient',
+        'talk',
+        'talking',
+        'speak',
+        'speaks',
+      ]);
+    }
+    if (text.contains('turns into') ||
+        text.contains('turned into') ||
+        text.contains('turn into')) {
+      terms.addAll(const [
+        'became',
+        'becomes',
+        'transform',
+        'transforms',
+        'transformation',
+      ]);
+    }
+    return terms;
+  }
+
+  bool _isDistinctivePlotRequest(RecommendationQuery query) {
+    final normalized = _normalizeSearchText(query.request);
+    if (normalized.isEmpty) return false;
+    final wordCount = normalized
+        .split(' ')
+        .where((word) => word.isNotEmpty)
+        .length;
+    return wordCount >= 7 && _requestTextTerms(query).length >= 4;
+  }
+
+  bool _matchesEvidenceTerm(String text, Set<String> tokens, String term) {
+    if (term.length <= 3) return tokens.contains(term);
+    return tokens.contains(term) || text.contains(term);
   }
 
   String _normalizeSearchText(String value) {
@@ -1476,7 +1582,7 @@ class _HomeScreenState extends State<HomeScreen> {
       profile,
       knownRecommendations,
       query: query,
-      limit: 10,
+      limit: service.displayName == 'AniList' ? 4 : 10,
     );
     if (suggestions.isEmpty) return const [];
 
@@ -1486,16 +1592,19 @@ class _HomeScreenState extends State<HomeScreen> {
             _normalizedTitle(profile.serviceName))
           suggestion,
     ];
-    final discovered = await Future.wait([
-      for (final suggestion in matchingSuggestions)
-        _resolveSuggestedItem(
-          service: service,
-          profile: profile,
-          query: query,
-          suggestion: suggestion,
-        ),
-    ]);
-    return _dedupeCandidates(discovered.whereType<MediaItem>().toList());
+    final discovered = <MediaItem>[];
+    for (final suggestion in matchingSuggestions) {
+      final item = await _resolveSuggestedItem(
+        service: service,
+        profile: profile,
+        query: query,
+        suggestion: suggestion,
+      );
+      if (item == null) continue;
+      discovered.add(item);
+      if (discovered.length >= 4) break;
+    }
+    return _dedupeCandidates(discovered);
   }
 
   bool _shouldKeepRankedTopPick(
@@ -1517,7 +1626,8 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!query.isActive) return false;
     if (candidates.isEmpty) return true;
     if (!preferAiDiscoveryFirst) return false;
-    return service.displayName == 'Steam';
+    return service.displayName == 'Steam' ||
+        (service.displayName == 'AniList' && candidates.length < 2);
   }
 
   Future<MediaItem?> _resolveSuggestedItem({
@@ -1546,6 +1656,11 @@ class _HomeScreenState extends State<HomeScreen> {
     if (item == null) return null;
 
     final resolvedItem = item;
+    if (service.displayName == 'AniList' &&
+        _isDistinctivePlotRequest(query) &&
+        _requestEvidenceTextOverlapScore(query, resolvedItem) < 3) {
+      return null;
+    }
     if (profile.library.any(
       (owned) =>
           owned.id == resolvedItem.id ||

@@ -233,9 +233,9 @@ void main() {
         ).withInferredSelections(const ['Comedy', 'Family Life', 'Go', 'Kids']),
       );
 
+      expect(results, hasLength(1), reason: requests.toString());
       expect(results.single.title, 'Family Comedy');
       expect(requests, hasLength(2));
-      expect(requests.first['genreIn'], contains('Comedy'));
       expect(requests.first['tagIn'], contains('Family Life'));
       expect(requests.first['tagIn'], isNot(contains('Go')));
       expect(requests.first['tagIn'], isNot(contains('Kids')));
@@ -317,6 +317,77 @@ void main() {
     expect(requests.single['perPage'], 50);
   });
 
+  test(
+    'descriptive AniList title-search miss falls back to broader candidates',
+    () async {
+      final requests = <Map<String, dynamic>>[];
+      final service = AniListService(
+        client: MockClient((request) async {
+          final payload = jsonDecode(request.body) as Map<String, dynamic>;
+          final graphQuery = payload['query'] as String;
+          if (graphQuery.contains('GenreCollection')) {
+            return _json({
+              'data': {
+                'GenreCollection': <String>[],
+                'MediaTagCollection': <Object>[],
+              },
+            });
+          }
+
+          final variables = Map<String, dynamic>.from(
+            payload['variables'] as Map,
+          );
+          requests.add(variables);
+
+          if (variables.containsKey('search')) {
+            return _json({
+              'data': {
+                'Page': {'media': <Object>[]},
+              },
+            });
+          }
+
+          return _json({
+            'data': {
+              'Page': {
+                'media': [
+                  _candidateJson(
+                    30,
+                    'Generic Popular Show',
+                    description:
+                        'A main character changes his life while living in a city.',
+                  ),
+                  _candidateJson(
+                    20623,
+                    'Body Clue Match',
+                    description:
+                        'An alien creature takes control of his hand and becomes a talking companion.',
+                  ),
+                ],
+              },
+            },
+          });
+        }),
+      );
+
+      final results = await service.searchRecommendationCandidates(
+        const RecommendationQuery(
+          request:
+              'the main characters hand turns into a living thing that he can talk to',
+          interpretedRequest:
+              'main characters hand turns into living thing talks to me',
+          mediaTypes: {'ANIME'},
+        ),
+      );
+
+      expect(results.map((item) => item.title), ['Body Clue Match']);
+      expect(requests.first['search'], contains('hand'));
+      expect(requests.first['sort'], contains('SEARCH_MATCH'));
+      expect(requests.last, isNot(contains('search')));
+      expect(requests.last['sort'], ['POPULARITY_DESC']);
+    },
+  );
+
   test('broad series search discovers candidates on deeper pages', () async {
     final pages = <int>[];
     final service = AniListService(
@@ -379,7 +450,11 @@ http.Response _json(Map<String, Object?> body) {
   );
 }
 
-Map<String, Object?> _candidateJson(int id, String title) {
+Map<String, Object?> _candidateJson(
+  int id,
+  String title, {
+  String description = 'An approachable series.',
+}) {
   return {
     'id': id,
     'type': 'ANIME',
@@ -398,6 +473,6 @@ Map<String, Object?> _candidateJson(int id, String title) {
     'status': 'FINISHED',
     'isAdult': false,
     'startDate': {'year': 2024},
-    'description': 'An approachable series.',
+    'description': description,
   };
 }

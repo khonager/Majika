@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:majika/core/ai/ai_console_log.dart';
+import 'package:majika/core/ai/ai_search_tools.dart';
 import 'package:majika/core/ai/local_ai_service.dart';
 import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/models/media_item.dart';
@@ -279,6 +282,52 @@ void main() {
     expect(find.textContaining('time travel changes'), findsOneWidget);
     expect(find.text('Romance'), findsWidgets);
     expect(find.text('Time Manipulation'), findsWidgets);
+  });
+
+  testWidgets('distinctive AniList plot requests keep only evidenced matches', (
+    WidgetTester tester,
+  ) async {
+    final mediaService = _DistinctivePlotMediaService();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          mediaService: mediaService,
+          aiService: _distinctivePlotAiService(),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search a vibe, tag, format, or request'),
+      'the main characters hand turns into a living thing that he can talk to',
+    );
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Parasyte -the maxim-'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Midori Days'),
+      240,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Midori Days'), findsOneWidget);
+    expect(find.text('Mushishi'), findsNothing);
+    expect(find.text('Spice and Wolf'), findsNothing);
+    expect(mediaService.searchRequests, contains('Midori Days'));
+    expect(mediaService.searchRequests, contains('Parasyte'));
+    expect(
+      mediaService.searchRequests,
+      isNot(
+        contains(
+          'the main characters hand turns into a living thing that he can talk to',
+        ),
+      ),
+    );
   });
 
   testWidgets('AI chat button opens recommendation chat', (
@@ -1899,6 +1948,113 @@ class _DirectSuggestionAiService extends DeterministicLocalAiService {
       reason: 'A personal recommendation beyond the fetched tag results.',
     );
   }
+}
+
+class _DistinctivePlotMediaService extends _FakeMediaService {
+  final List<String> searchRequests = [];
+
+  @override
+  Future<List<MediaItem>> fetchRecommendationCandidates({
+    bool includeAdult = false,
+  }) async {
+    return const <MediaItem>[];
+  }
+
+  @override
+  Future<List<MediaItem>> searchRecommendationCandidates(
+    RecommendationQuery query,
+  ) async {
+    searchRequests.add(query.request);
+    return switch (query.request) {
+      'Parasyte' => [
+        MediaItem(
+          id: 'anilist_20623',
+          title: 'Parasyte -the maxim-',
+          alternativeTitles: const ['Parasyte', 'Kiseijuu: Sei no Kakuritsu'],
+          coverUrl: '',
+          tags: const ['Body Horror', 'Shapeshifting', 'Aliens'],
+          rating: 8.4,
+          format: 'TV',
+          description:
+              'Alien creatures invade a human host. Shin battles for control of his body against an alien parasite with blades for hands.',
+        ),
+      ],
+      'Midori Days' => [
+        MediaItem(
+          id: 'anilist_330',
+          title: 'Midori Days',
+          alternativeTitles: const ['Midori no Hibi'],
+          coverUrl: '',
+          tags: const ['Surreal Comedy', 'Romance'],
+          rating: 7.3,
+          format: 'TV',
+          description:
+              'He wakes up and discovers that his right hand has become a girl named Midori, his new companion.',
+        ),
+      ],
+      _
+          when query.request !=
+              'the main characters hand turns into a living thing that he can talk to' =>
+        [
+          MediaItem(
+            id: 'unrelated_${query.request.hashCode}',
+            title: query.request,
+            coverUrl: '',
+            tags: const ['Fantasy'],
+            rating: 9.5,
+            format: 'TV',
+            description: 'An unrelated popular fantasy adventure.',
+          ),
+        ],
+      _ => const <MediaItem>[],
+    };
+  }
+}
+
+FlutterGemmaLocalAiService _distinctivePlotAiService() {
+  const wikipediaTitles = [
+    'Midori Days',
+    'List of Fullmetal Alchemist episodes',
+    'Dragon Age: Dawn of the Seeker',
+    'List of Gundam manga and novels',
+    'Seta Sojiro',
+    'Inazuman',
+    'Riki-Oh',
+    'As the Demon King\'s Right Hand, I\'m Going to Rewrite the Script!',
+    'A Certain Magical Index season 1',
+    'Cromartie High School',
+    'Tico and Friends',
+    'Treasure Island',
+    'Ark',
+    'Parasyte',
+  ];
+  return FlutterGemmaLocalAiService(
+    textGenerator: (prompt, maxTokens) async {
+      if (prompt.contains('one object with exactly these keys')) {
+        return '''{"tags":[],"formats":["SERIES","MOVIE"],"mediaTypes":["ANIME","MANGA"],"includeAdult":false,"searchText":"main character hand living thing talks"}''';
+      }
+      return '{"titles":["Mushishi","Spice and Wolf","Somali and the Forest Spirit"]}';
+    },
+    searchToolbox: AiSearchToolbox(
+      httpGet: (url, {headers}) async {
+        if (url.host.contains('duckduckgo.com')) {
+          return http.Response('<html><title>DuckDuckGo</title></html>', 200);
+        }
+        expect(url.host, 'en.wikipedia.org');
+        return http.Response(
+          jsonEncode({
+            'query': {
+              'search': [
+                for (final title in wikipediaTitles)
+                  {'title': title, 'snippet': '$title anime or manga result.'},
+              ],
+            },
+          }),
+          200,
+        );
+      },
+    ),
+  );
 }
 
 class _AliasAniListMediaService extends _FakeMediaService {

@@ -728,6 +728,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     required AiModelTrustTier minimumTier,
   }) {
     if (textGenerator != null) return settings;
+    if (settings.mode != localAiModeOnDevice) return settings;
     final currentTier = _trustTierForTask(settings, task);
     if (_meetsTrustTier(currentTier, minimumTier)) {
       return settings;
@@ -1799,6 +1800,16 @@ Do not browse first when you can already name likely matches confidently.
 ''';
   }
 
+  String _webToolInstruction(bool allowSearchTools) {
+    if (!allowSearchTools) return '';
+    return '''
+Search tools are available in this runtime.
+Start with your own knowledge of real titles and name the most likely exact searchable titles first.
+Only if your own knowledge is not enough, use search_web to resolve unfamiliar plot clues, niche titles, recent titles, acronyms, shorthand, reference titles, or candidate names.
+Do not browse first when you can already name likely matches confidently.
+''';
+  }
+
   List<_ExternalAiTool> _steamExternalTools() {
     return [
       _ExternalAiTool(
@@ -1833,6 +1844,36 @@ Do not browse first when you can already name likely matches confidently.
         name: 'search_web',
         description:
             'Search the public web for grounded references such as recommendation lists, exact game names, or descriptions.',
+        parameters: const {
+          'type': 'object',
+          'properties': {
+            'query': {
+              'type': 'string',
+              'description': 'The public web search query.',
+            },
+            'limit': {
+              'type': 'integer',
+              'description': 'Maximum number of web results to return.',
+            },
+          },
+          'required': ['query'],
+        },
+        execute: (arguments) async {
+          final query = arguments['query']?.toString().trim() ?? '';
+          final limit = (arguments['limit'] as num?)?.toInt() ?? 5;
+          final results = await searchToolbox.searchWeb(query, limit: limit);
+          return jsonEncode({'results': results});
+        },
+      ),
+    ];
+  }
+
+  List<_ExternalAiTool> _webExternalTools() {
+    return [
+      _ExternalAiTool(
+        name: 'search_web',
+        description:
+            'Search the public web for grounded references such as recommendation lists, exact title names, or descriptions.',
         parameters: const {
           'type': 'object',
           'properties': {
@@ -2471,6 +2512,7 @@ Recent chat messages: ${jsonEncode(history)}
   }
 
   Iterable<Map<String, dynamic>> _jsonObjects(String text) sync* {
+    text = _normalizeLikelyJsonTypos(text);
     var depth = 0;
     var start = -1;
     var inString = false;
@@ -2829,6 +2871,9 @@ AniList options: ${jsonEncode(options)}
           'service': recommendation.item.serviceLabel,
           'mediaType': recommendation.item.mediaType,
           'format': recommendation.item.format,
+          'tags': recommendation.item.tags.take(6).toList(),
+          if (recommendation.item.description?.trim().isNotEmpty ?? false)
+            'description': recommendation.item.description,
         },
     ];
   }
@@ -3088,17 +3133,31 @@ Known cross-service search-result hints, optional and non-exhaustive: ${jsonEnco
         if (hint['title']?.toString().trim().isNotEmpty ?? false)
           hint['title'].toString(),
     ];
+    final knownResultHints = [
+      for (final hint in knownHints)
+        {
+          'title': hint['title'],
+          if (hint['mediaType'] != null) 'mediaType': hint['mediaType'],
+          if (hint['format'] != null) 'format': hint['format'],
+          if (hint['tags'] != null) 'tags': hint['tags'],
+          if (hint['description'] != null) 'description': hint['description'],
+        },
+    ];
+    final allowGenericWebTools =
+        allowSearchTools && !_isSteamService(profile.serviceName);
     return '''
 Prompt mode: ${tier.name}.
 ${_servicePromptContext(profile.serviceName)}
 Suggest up to $limit $subject that strongly match this request.
 This is a title-discovery pass before API validation. Use your own model knowledge to name likely matches beyond simple tag search.
 If the request says "similar to" or names reference titles, infer the core appeal, tone, structure, character fantasy, and important tropes. Suggest titles that share those specifics, not titles that only share a broad tag or setting.
+If the request is a distinctive plot clue, suggest only titles whose premise matches the specific clue. It is better to return 1-3 exact-premise titles than to fill the list with broad genre or vibe matches.
 Prefer a useful mix of obvious popular matches and lesser-known matches when both fit.
 Use the request as the primary decision. Use the user's profile only as a light tie-breaker.
 Return exact titles that should be searchable on ${profile.serviceName}. Do not invent titles and do not suggest titles already in the user's library.
 Respect hard $formatLabel when they are present.
 ${isSteam ? _steamToolInstruction(allowSearchTools) : ''}
+${allowGenericWebTools ? _webToolInstruction(true) : ''}
 Return JSON only. Prefer exactly this shape: {"titles":["..."]}. Titles only, no reasons.
 Request: ${query.request}
 User-selected tags: ${query.selectedTags.join(', ')}
@@ -3107,6 +3166,7 @@ Requested media types: ${query.effectiveMediaTypes().join(', ')}
 Requested formats or play capabilities: ${query.effectiveFormats().join(', ')}
 Known library titles to avoid: ${jsonEncode(ownedTitles)}
 Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
+Known API result hints, optional and non-exhaustive: ${jsonEncode(knownResultHints)}
 ''';
   }
 
@@ -3321,10 +3381,15 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
       return _groundedSteamSuggestions(query, limit: limit);
     }
     final allowSearchTools =
-        settings.supportsSearchTools && _isSteamService(profile.serviceName);
+        settings.supportsSearchTools &&
+        (_isSteamService(profile.serviceName) ||
+            _isAniListService(profile.serviceName));
 
     final budget = _promptBudget(settings, responseTokens: 768);
     try {
+      final groundedAniListSuggestions = _isAniListService(profile.serviceName)
+          ? await _groundedAniListSuggestions(query, limit: max(limit, 20))
+          : const <AiRecommendationSuggestion>[];
       final knowledgeFirst = await _runCandidateDiscoveryPass(
         profile: profile,
         tier: budget.tier,
@@ -3335,6 +3400,12 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
         budget: budget,
         allowSearchTools: false,
       );
+      if (groundedAniListSuggestions.isNotEmpty) {
+        return _mergeSuggestions([
+          ...groundedAniListSuggestions,
+          ...knowledgeFirst,
+        ], limit: max(limit, groundedAniListSuggestions.length));
+      }
       if (knowledgeFirst.isNotEmpty || !allowSearchTools) {
         return knowledgeFirst;
       }
@@ -3513,13 +3584,21 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
       packed.prompt,
       maxTokens: budget.responseTokens,
       settings: settings,
-      externalTools: allowSearchTools ? _steamExternalTools() : const [],
+      externalTools: allowSearchTools
+          ? _candidateDiscoveryTools(profile.serviceName)
+          : const [],
     );
     return _suggestionsFromResponse(
       response,
       fallbackServiceName: profile.serviceName,
       limit: limit,
     );
+  }
+
+  List<_ExternalAiTool> _candidateDiscoveryTools(String serviceName) {
+    if (_isSteamService(serviceName)) return _steamExternalTools();
+    if (_isAniListService(serviceName)) return _webExternalTools();
+    return const [];
   }
 
   Future<AiRecommendationSuggestion?> _runDirectRecommendationPass({
@@ -3605,7 +3684,7 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     final settings = _effectiveSettingsForTask(
       baseSettings,
       task: 'recommendation_selection',
-      minimumTier: AiModelTrustTier.trusted,
+      minimumTier: AiModelTrustTier.constrained,
     );
     final requestedFormats = query.effectiveFormats();
     final requireLocalCoOp = query.infersLocalCoOp;
@@ -3624,7 +3703,7 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     if (textGenerator == null &&
         !_meetsTrustTier(
           _trustTierForTask(settings, 'recommendation_selection'),
-          AiModelTrustTier.trusted,
+          AiModelTrustTier.constrained,
         )) {
       return fallback.chooseTopRecommendation(
         profile,
@@ -3744,7 +3823,7 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     final settings = _effectiveSettingsForTask(
       baseSettings,
       task: 'recommendation_selection',
-      minimumTier: AiModelTrustTier.trusted,
+      minimumTier: AiModelTrustTier.constrained,
     );
     final requestedFormats = query.effectiveFormats();
     final requireLocalCoOp = query.infersLocalCoOp;
@@ -3763,7 +3842,7 @@ Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
     if (textGenerator == null &&
         !_meetsTrustTier(
           _trustTierForTask(settings, 'recommendation_selection'),
-          AiModelTrustTier.trusted,
+          AiModelTrustTier.constrained,
         )) {
       return fallback.chooseHomeRecommendation(
         profiles,
@@ -4046,6 +4125,163 @@ Options: ${jsonEncode(options)}
     } catch (_) {
       return const [];
     }
+  }
+
+  Future<List<AiRecommendationSuggestion>> _groundedAniListSuggestions(
+    RecommendationQuery query, {
+    required int limit,
+  }) async {
+    final searchText = query.interpretedRequest.trim().isNotEmpty
+        ? query.interpretedRequest.trim()
+        : query.searchRequest.trim().isNotEmpty
+        ? query.searchRequest.trim()
+        : query.request.trim();
+    if (searchText.isEmpty) return const [];
+    try {
+      final webResults = <Map<String, Object?>>[];
+      final seenUrls = <String>{};
+      for (final webQuery in _aniListWebQueries(searchText)) {
+        final results = await searchToolbox.searchWeb(
+          webQuery,
+          limit: max(limit * 2, 4),
+        );
+        for (final result in results) {
+          final url = result['url']?.toString() ?? '';
+          if (url.isNotEmpty && !seenUrls.add(url)) continue;
+          webResults.add(result);
+        }
+        if (webResults.length >= limit) break;
+      }
+
+      final suggestions = <AiRecommendationSuggestion>[];
+      final seenTitles = <String>{};
+      for (final result in webResults) {
+        for (final title in _aniListTitleCandidatesFromWebResult(result)) {
+          final canonical = _canonicalKey(title);
+          if (canonical.isEmpty || !seenTitles.add(canonical)) continue;
+          suggestions.add(
+            AiRecommendationSuggestion(
+              title: title,
+              serviceName: 'AniList',
+              reason: _groundedAniListWebReason(result),
+            ),
+          );
+          if (suggestions.length >= limit) return suggestions;
+        }
+      }
+      return suggestions;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  List<String> _aniListWebQueries(String searchText) {
+    final normalized = searchText.toLowerCase();
+    return [
+      if (normalized.contains('hand')) '"right hand" anime manga',
+      if (normalized.contains('arm')) '"arm" anime manga',
+      '$searchText anime manga title',
+      '$searchText site:anilist.co/anime OR site:anilist.co/manga',
+      '$searchText site:myanimelist.net/anime OR site:myanimelist.net/manga',
+    ];
+  }
+
+  Iterable<String> _aniListTitleCandidatesFromWebResult(
+    Map<String, Object?> result,
+  ) sync* {
+    final rawTitle = result['title']?.toString().trim() ?? '';
+    final url = result['url']?.toString().trim() ?? '';
+
+    for (final title in [
+      _cleanAniListWebTitle(rawTitle),
+      _aniListTitleFromUrl(url),
+    ]) {
+      if (title.isEmpty) continue;
+      if (!_looksLikeSuggestedTitle(title)) continue;
+      yield title;
+    }
+  }
+
+  String _cleanAniListWebTitle(String rawTitle) {
+    if (rawTitle.isEmpty) return '';
+    var title = rawTitle
+        .replaceFirst(RegExp(r'^\d+\.\s*'), '')
+        .replaceFirst(
+          RegExp(
+            r'\s*[-|]\s*(AniList|MyAnimeList\.net|MyAnimeList|Anime-Planet|Wikipedia|MangaDex|MangaUpdates|Kitsu|Fandom|TV Tropes).*$',
+            caseSensitive: false,
+          ),
+          '',
+        )
+        .replaceFirst(
+          RegExp(r'\s+(anime|manga)\s*[-|].*$', caseSensitive: false),
+          '',
+        )
+        .trim();
+    if (title.contains(
+      RegExp(
+        r'\b(recommendations?|review|forum|reddit|watch order|list of)\b',
+        caseSensitive: false,
+      ),
+    )) {
+      return '';
+    }
+    if (title.length > 100) return '';
+    return title;
+  }
+
+  String _aniListTitleFromUrl(String rawUrl) {
+    final uri = Uri.tryParse(rawUrl);
+    if (uri == null) return '';
+    final host = uri.host.toLowerCase();
+    final pathSegments = uri.pathSegments;
+    if (host.contains('anilist.co') && pathSegments.length >= 3) {
+      return _titleFromSlug(pathSegments[2]);
+    }
+    if (host.contains('myanimelist.net') && pathSegments.length >= 3) {
+      return _titleFromSlug(pathSegments[2]);
+    }
+    return '';
+  }
+
+  String _titleFromSlug(String slug) {
+    return Uri.decodeComponent(
+      slug,
+    ).replaceAll(RegExp(r'[_-]+'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  String _groundedAniListWebReason(Map<String, Object?> webResult) {
+    final snippet = webResult['snippet']?.toString().trim() ?? '';
+    if (snippet.isNotEmpty) {
+      return 'Grounded from web search and queued for AniList validation: $snippet';
+    }
+    final title = webResult['title']?.toString().trim() ?? '';
+    if (title.isNotEmpty) {
+      return 'Grounded from web search and queued for AniList validation: $title';
+    }
+    return 'Grounded from web search and queued for AniList validation.';
+  }
+
+  List<AiRecommendationSuggestion> _mergeSuggestions(
+    Iterable<AiRecommendationSuggestion> suggestions, {
+    required int limit,
+  }) {
+    final merged = <AiRecommendationSuggestion>[];
+    final seen = <String>{};
+    for (final suggestion in suggestions) {
+      final title = suggestion.title.trim();
+      final canonical = _canonicalKey(title);
+      if (canonical.isEmpty || !seen.add(canonical)) continue;
+      merged.add(
+        AiRecommendationSuggestion(
+          title: title,
+          serviceName: suggestion.serviceName,
+          reason: suggestion.reason,
+        ),
+      );
+      if (merged.length >= limit) break;
+    }
+    return merged;
   }
 
   Future<List<AiRecommendationSuggestion>> _groundedSteamSuggestionsFromWeb(

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:http/http.dart' as http;
 import 'package:majika/core/models/media_item.dart';
@@ -105,7 +106,7 @@ class AniListService implements MediaService {
       );
     }
 
-    return _dedupe(results);
+    return _rankSearchResults(_dedupe(results), query);
   }
 
   @override
@@ -187,12 +188,22 @@ class AniListService implements MediaService {
 
     final pageCount = tags.isEmpty && searchText.isEmpty ? 4 : 1;
     final candidates = await _searchPages(variables, pageCount: pageCount);
-    if (candidates.isNotEmpty || mediaTags.isEmpty || genreTags.isEmpty) {
+    if (candidates.isNotEmpty) {
       return candidates;
     }
-
-    final relaxedVariables = {...variables}..remove('tagIn');
-    return _searchPages(relaxedVariables, pageCount: pageCount);
+    if (mediaTags.isNotEmpty) {
+      final relaxedVariables = {...variables}..remove('tagIn');
+      final relaxedCandidates = await _searchPages(
+        relaxedVariables,
+        pageCount: pageCount,
+      );
+      if (relaxedCandidates.isNotEmpty) return relaxedCandidates;
+    }
+    if (searchText.isNotEmpty) {
+      final relaxedVariables = {...variables}..remove('search');
+      return _searchPages(relaxedVariables, pageCount: 4);
+    }
+    return candidates;
   }
 
   Future<List<MediaItem>> _searchPages(
@@ -203,6 +214,9 @@ class AniListService implements MediaService {
     for (var page = 1; page <= pageCount; page++) {
       final response = await _postGraphQl(_searchQuery, {
         ...variables,
+        'sort': variables.containsKey('search')
+            ? ['SEARCH_MATCH', 'POPULARITY_DESC']
+            : ['POPULARITY_DESC'],
         'page': page,
       });
       final pageCandidates = parseCandidates(jsonDecode(response.body));
@@ -211,6 +225,211 @@ class AniListService implements MediaService {
     }
     return _dedupe(candidates);
   }
+
+  List<MediaItem> _rankSearchResults(
+    List<MediaItem> candidates,
+    RecommendationQuery query,
+  ) {
+    final terms = _searchEvidenceTerms(query.searchRequest);
+    if (terms.isEmpty) return candidates;
+
+    final indexed = [
+      for (final (index, item) in candidates.indexed)
+        (
+          index: index,
+          item: item,
+          score: _searchEvidenceScore(item, terms),
+          compoundScore: _bodyCompanionEvidenceScore(item, terms),
+        ),
+    ];
+    indexed.sort((a, b) {
+      final byScore = b.score.compareTo(a.score);
+      if (byScore != 0) return byScore;
+      return a.index.compareTo(b.index);
+    });
+    final strongestCompoundScore = indexed.fold<double>(
+      0,
+      (strongest, entry) => max(strongest, entry.compoundScore),
+    );
+    if (strongestCompoundScore >= 18) {
+      return [
+        for (final entry in indexed)
+          if (entry.compoundScore >= 18) entry.item,
+      ];
+    }
+    return [for (final entry in indexed) entry.item];
+  }
+
+  double _searchEvidenceScore(MediaItem item, Set<String> terms) {
+    final title = _normalizedSearchText(
+      [item.title, item.subtitle, ...item.alternativeTitles].join(' '),
+    );
+    final tags = _normalizedSearchText(item.tags.join(' '));
+    final description = _normalizedSearchText(item.description ?? '');
+    final titleTokens = title
+        .split(' ')
+        .where((term) => term.isNotEmpty)
+        .toSet();
+    final tagTokens = tags.split(' ').where((term) => term.isNotEmpty).toSet();
+    final descriptionTokens = description
+        .split(' ')
+        .where((term) => term.isNotEmpty)
+        .toSet();
+
+    var score = 0.0;
+    for (final term in terms) {
+      if (_matchesEvidenceTerm(title, titleTokens, term)) score += 3.0;
+      if (_matchesEvidenceTerm(tags, tagTokens, term)) score += 2.0;
+      if (_matchesEvidenceTerm(description, descriptionTokens, term)) {
+        score += 1.0;
+      }
+    }
+    score += _bodyCompanionEvidenceScore(item, terms);
+    return score;
+  }
+
+  double _bodyCompanionEvidenceScore(MediaItem item, Set<String> terms) {
+    if (!terms.contains('hand') && !terms.contains('arm')) return 0;
+    final haystack = _normalizedSearchText(
+      [
+        item.title,
+        item.subtitle,
+        ...item.alternativeTitles,
+        item.description ?? '',
+        ...item.tags,
+      ].join(' '),
+    );
+    final hasBodyPart = _bodyPartEvidenceTerms.any(
+      (term) => _containsWholeEvidenceTerm(haystack, term),
+    );
+    final hasAnimateBodyEvidence = _animateBodyEvidenceTerms.any(
+      (term) => _containsWholeEvidenceTerm(haystack, term),
+    );
+    if (!hasBodyPart || !hasAnimateBodyEvidence) return 0;
+
+    var score = 18.0;
+    if (_agencyBodyEvidenceTerms.any(
+      (term) => _containsWholeEvidenceTerm(haystack, term),
+    )) {
+      score += 4.0;
+    }
+    if (_containsWholeEvidenceTerm(haystack, 'right hand') ||
+        _containsWholeEvidenceTerm(haystack, 'left hand')) {
+      score += 2.0;
+    }
+    return score;
+  }
+
+  Set<String> _searchEvidenceTerms(String text) {
+    final normalized = _normalizedSearchText(text);
+    if (normalized.isEmpty) return const {};
+    const stopWords = {
+      'about',
+      'also',
+      'and',
+      'anime',
+      'any',
+      'are',
+      'can',
+      'character',
+      'characters',
+      'comic',
+      'for',
+      'good',
+      'into',
+      'living',
+      'looking',
+      'main',
+      'manga',
+      'movie',
+      'really',
+      'series',
+      'show',
+      'that',
+      'the',
+      'thing',
+      'things',
+      'turn',
+      'turns',
+      'turned',
+      'want',
+      'with',
+    };
+
+    final terms = normalized
+        .split(' ')
+        .where((term) => term.length > 2 && !stopWords.contains(term))
+        .toSet();
+    if (normalized.contains('living thing')) {
+      terms.addAll(const ['creature', 'creatures', 'organism']);
+    }
+    if (normalized.contains('talk to') || normalized.contains('talks to')) {
+      terms.addAll(const ['talking', 'speak', 'speaks']);
+    }
+    if (normalized.contains('turns into') ||
+        normalized.contains('turned into') ||
+        normalized.contains('turn into')) {
+      terms.addAll(const ['transform', 'transforms', 'transformation']);
+    }
+    return terms;
+  }
+
+  bool _matchesEvidenceTerm(String text, Set<String> tokens, String term) {
+    if (term.length <= 3) return tokens.contains(term);
+    return tokens.contains(term) || text.contains(term);
+  }
+
+  bool _containsWholeEvidenceTerm(String text, String term) {
+    final escaped = RegExp.escape(term.toLowerCase());
+    return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(text);
+  }
+
+  String _normalizedSearchText(String text) {
+    return text
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  static const _bodyPartEvidenceTerms = {
+    'hand',
+    'hands',
+    'right hand',
+    'left hand',
+    'arm',
+    'arms',
+    'body',
+  };
+
+  static const _animateBodyEvidenceTerms = {
+    'alien',
+    'aliens',
+    'creature',
+    'creatures',
+    'girl',
+    'human',
+    'organism',
+    'parasite',
+    'parasites',
+    'person',
+    'woman',
+  };
+
+  static const _agencyBodyEvidenceTerms = {
+    'became',
+    'becomes',
+    'companion',
+    'control',
+    'host',
+    'speak',
+    'speaks',
+    'talk',
+    'talking',
+    'transform',
+    'transformation',
+    'transforms',
+  };
 
   Future<http.Response> _postGraphQl(
     String query,
@@ -514,7 +733,8 @@ class AniListService implements MediaService {
       $search: String,
       $formatIn: [MediaFormat],
       $genreIn: [String],
-      $tagIn: [String]
+      $tagIn: [String],
+      $sort: [MediaSort]
     ) {
       Page(page: $page, perPage: $perPage) {
         media(
@@ -523,7 +743,7 @@ class AniListService implements MediaService {
           format_in: $formatIn,
           genre_in: $genreIn,
           tag_in: $tagIn,
-          sort: [SEARCH_MATCH, TRENDING_DESC, POPULARITY_DESC],
+          sort: $sort,
           isAdult: $isAdult
         ) {
           id

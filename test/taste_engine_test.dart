@@ -1379,6 +1379,58 @@ void main() {
     );
   });
 
+  test('plot clue requests prefer description evidence over generic words', () {
+    final engine = TasteEngine();
+    final profile = engine.buildProfile('tester', [
+      MediaItem(
+        id: 'anilist_seen',
+        title: 'Seen Action Show',
+        coverUrl: '',
+        tags: const ['Action'],
+        rating: 9,
+        format: 'TV',
+        status: 'COMPLETED',
+      ),
+    ]);
+
+    final recommendations = engine.rankCandidates(
+      profile,
+      [
+        MediaItem(
+          id: 'anilist_generic',
+          title: 'Generic Popular Show',
+          coverUrl: '',
+          tags: const ['Action'],
+          rating: 9.0,
+          popularity: 900000,
+          format: 'TV',
+          mediaType: 'ANIME',
+          description:
+              'A main character turns his life around while living in a city.',
+        ),
+        MediaItem(
+          id: 'anilist_clue',
+          title: 'Body Clue Match',
+          coverUrl: '',
+          tags: const ['Action', 'Horror'],
+          rating: 8.2,
+          popularity: 50000,
+          format: 'TV',
+          mediaType: 'ANIME',
+          description:
+              'An alien creature takes control of his hand and becomes a talking companion.',
+        ),
+      ],
+      query: const RecommendationQuery(
+        request:
+            'the main characters hand turns into a living thing that he can talk to',
+        mediaTypes: {'ANIME'},
+      ),
+    );
+
+    expect(recommendations.first.item.title, 'Body Clue Match');
+  });
+
   test(
     'new searches clear stale AI selected tags while keeping pinned tags',
     () {
