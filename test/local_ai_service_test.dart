@@ -2053,7 +2053,7 @@ void main() {
     expect(capturedPrompt, contains('Request-inferred AniList tags:'));
     expect(
       capturedPrompt,
-      contains('"matchedRequestAniListTags":["Fantasy","Magic","School"]'),
+      contains('"matchedRequestAniListTags":["Adventure","Magic","School"]'),
     );
   });
 

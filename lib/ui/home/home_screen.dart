@@ -22,7 +22,8 @@ import 'package:majika/ui/settings/settings_screen.dart';
 import 'package:majika/ui/profile/profile_screen.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:majika/core/storage/media_library.dart';
+import 'package:majika/ui/shared/media_actions.dart';
 
 enum _ActiveSurface { home, service }
 
@@ -65,6 +66,7 @@ class _ServiceWorkspace {
   bool adultCandidatesLoaded;
   String userNameDraft;
   int? activeRecommendationSearchRunId;
+  int importRevision = 0;
 
   _ServiceWorkspace({required this.service})
     : candidates = [],
@@ -121,6 +123,7 @@ class _ServiceWorkspace {
   }
 
   void clear({String draft = ''}) {
+    importRevision++;
     profile = null;
     candidates = [];
     baseCandidates = [];
@@ -160,6 +163,8 @@ class _HomeScreenState extends State<HomeScreen> {
   late final TasteEngine _tasteEngine;
   late final LocalAiService _aiService;
   late final LocalProfileStore _profileStore;
+  final MediaLibrary _library = MediaLibrary();
+  bool _isRestoring = true;
   late final Map<String, _ServiceWorkspace> _workspaces;
   final TextEditingController _userNameController = TextEditingController();
 
@@ -199,91 +204,139 @@ class _HomeScreenState extends State<HomeScreen> {
       for (final service in _mediaServices)
         service.id: _ServiceWorkspace(service: service),
     };
+    _library.addListener(_libraryChanged);
     _loadSavedSessions();
   }
 
   @override
   void dispose() {
-    _activeRecommendationProgressToast?.dismiss();
-    _activeHomeProgressToast?.dismiss();
+    _activeRecommendationProgressToast?.forceDismiss();
+    _activeHomeProgressToast?.forceDismiss();
+    _library.removeListener(_libraryChanged);
     _userNameController.dispose();
     super.dispose();
   }
 
-  Future<void> _importProfile() async {
+  void _libraryChanged() {
+    if (mounted) setState(() {});
+  }
+
+  List<Recommendation> _visibleRecommendations(List<Recommendation> items) =>
+      items.where((pick) => !_library.isHidden(pick.item)).toList();
+
+  Future<void> _openSaved() async {
+    final allowExplicitContent = await _allowsExplicitContent();
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SavedLibraryScreen(
+          library: _library,
+          allowExplicitContent: allowExplicitContent,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _importProfile({bool refresh = false}) async {
     final workspace = _activeWorkspace;
-    final userName = _userNameController.text.trim();
+    if (workspace.isLoading || _isRestoring) return;
+    final userName = refresh
+        ? workspace.profile?.userName ?? ''
+        : _userNameController.text.trim();
     if (userName.isEmpty) {
       showErrorToast(context, workspace.service.userNameEmptyMessage);
       return;
     }
-
+    FocusManager.instance.primaryFocus?.unfocus();
+    final revision = ++workspace.importRevision;
+    workspace.activeRecommendationSearchRunId = null;
+    workspace.isRefreshingRecommendations = false;
     setState(() {
       workspace.isLoading = true;
       workspace.error = null;
       workspace.userNameDraft = userName;
     });
+    final warnings = <String>[];
+    Future<T> optional<T>(Future<T> request, T fallback, String label) async {
+      try {
+        return await request.timeout(const Duration(seconds: 30));
+      } catch (_) {
+        warnings.add(label);
+        return fallback;
+      }
+    }
 
     try {
       final service = workspace.service;
-      final initialQuery = RecommendationQuery(
-        excludeAdult:
-            service.supportsAdultContent && !await _allowsExplicitContent(),
-      );
-      final importResults = await Future.wait<Object?>([
-        service.fetchUserProfile(userName),
-        service.fetchUserLibrary(userName),
-        service.fetchTasteSignals(userName),
-        service.fetchRecommendationCandidates(
-          includeAdult: initialQuery.includeAdult,
+      final initialQuery =
+          (refresh ? workspace.query : const RecommendationQuery()).copyWith(
+            includeAdult: false,
+            excludeAdult:
+                service.supportsAdultContent && !await _allowsExplicitContent(),
+          );
+      final results = await Future.wait<Object?>([
+        optional(service.fetchUserProfile(userName), null, 'profile details'),
+        service.fetchUserLibrary(userName).timeout(const Duration(seconds: 45)),
+        optional(
+          service.fetchTasteSignals(userName),
+          const UserTasteSignals(),
+          'favorites',
         ),
-        service.fetchAvailableTags(),
+        optional(
+          service.fetchRecommendationCandidates(
+            includeAdult: initialQuery.allowsAdult,
+          ),
+          workspace.baseCandidates,
+          'new recommendations',
+        ),
+        optional(service.fetchAvailableTags(), workspace.serviceTags, 'tags'),
       ]);
-      final serviceProfile = importResults[0] as ServiceUserProfile?;
-      final library = importResults[1] as List<MediaItem>;
-      final signals = importResults[2] as UserTasteSignals;
-      final candidates = importResults[3] as List<MediaItem>;
-      final serviceTags = importResults[4] as List<String>;
+      final serviceProfile = results[0] as ServiceUserProfile?;
       final profile = _tasteEngine.buildProfile(
         serviceProfile?.userName ?? userName,
-        library,
-        signals: signals,
+        results[1] as List<MediaItem>,
+        signals: results[2] as UserTasteSignals,
         serviceId: service.id,
         serviceName: service.displayName,
         displayName: serviceProfile?.displayName,
-        avatarUrl: serviceProfile?.avatarUrl ?? '',
-        profileUrl: serviceProfile?.profileUrl ?? '',
+        avatarUrl:
+            serviceProfile?.avatarUrl ?? workspace.profile?.avatarUrl ?? '',
+        profileUrl:
+            serviceProfile?.profileUrl ?? workspace.profile?.profileUrl ?? '',
       );
-      final selection = await _withChosenTopRecommendation(
-        service,
-        profile,
-        _tasteEngine.rankCandidates(profile, candidates, query: initialQuery),
-        initialQuery,
-      );
-      final recommendations = selection.recommendations;
-      final storedCandidates = _dedupeCandidates([
-        ...candidates,
-        if (selection.discoveredItem != null) selection.discoveredItem!,
+      final baseCandidates = results[3] as List<MediaItem>;
+      final candidates = _dedupeCandidates([
+        ...baseCandidates,
+        if (refresh && initialQuery.isActive) ...workspace.candidates,
       ]);
-
-      if (!mounted) return;
+      if (!mounted || revision != workspace.importRevision) return;
       setState(() {
         workspace.profile = profile;
-        workspace.candidates = storedCandidates;
-        workspace.baseCandidates = candidates;
-        workspace.serviceTags = serviceTags;
-        workspace.recommendations = recommendations;
+        workspace.candidates = candidates;
+        workspace.baseCandidates = baseCandidates;
+        workspace.serviceTags = results[4] as List<String>;
+        workspace.recommendations = _tasteEngine.rankCandidates(
+          profile,
+          candidates,
+          query: initialQuery,
+        );
         workspace.query = initialQuery;
-        workspace.adultCandidatesLoaded = initialQuery.includeAdult;
+        workspace.adultCandidatesLoaded = initialQuery.allowsAdult;
         workspace.isLoading = false;
-        workspace.userNameDraft = userName;
+        workspace.error = warnings.isEmpty
+            ? null
+            : 'Your library is ready. Could not update ${warnings.join(', ')}. Refresh to try again.';
       });
-      unawaited(_persistWorkspace(workspace));
+      await _persistWorkspace(workspace);
       _rebuildHomeRecommendationsSync();
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || revision != workspace.importRevision) return;
       setState(() {
-        workspace.error = error.toString();
+        workspace.error = _friendlyError(
+          error,
+          serviceName: workspace.service.displayName,
+        );
         workspace.isLoading = false;
       });
     }
@@ -298,7 +351,15 @@ class _HomeScreenState extends State<HomeScreen> {
       workspace.clear(draft: draft);
       _userNameController.text = draft;
     });
-    unawaited(_profileStore.removeSession(workspace.service.id));
+    unawaited(
+      _profileStore.removeSession(workspace.service.id).catchError((Object _) {
+        if (mounted)
+          showErrorToast(
+            context,
+            'Could not remove the saved profile. Please try again.',
+          );
+      }),
+    );
     _rebuildHomeRecommendationsSync();
   }
 
@@ -357,7 +418,7 @@ class _HomeScreenState extends State<HomeScreen> {
           );
           final query = await _aiService.interpretRecommendationRequest(
             requestQuery,
-            availableTags: _availableTags,
+            availableTags: _availableTagsFor(workspace),
             serviceName: workspace.service.displayName,
             allowedMediaTypes: workspace.service.supportedMediaTypes,
             allowedFormats: workspace.service.supportedFormats,
@@ -562,7 +623,9 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       final wasCanceled = error is AiFallbackCanceledException;
       setState(() {
-        workspace.error = wasCanceled ? null : error.toString();
+        workspace.error = wasCanceled
+            ? null
+            : _friendlyError(error, serviceName: workspace.service.displayName);
         workspace.isRefreshingRecommendations = false;
         workspace.activeRecommendationSearchRunId = null;
       });
@@ -1210,11 +1273,33 @@ class _HomeScreenState extends State<HomeScreen> {
     showInfoToast(context, 'Home search canceled.');
   }
 
-  void _openSettings() {
-    Navigator.push(
+  Future<void> _openSettings() async {
+    await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const SettingsScreen()),
     );
+    final allowExplicitContent = await _allowsExplicitContent();
+    if (!mounted) return;
+    setState(() {
+      for (final workspace in _importedWorkspaces) {
+        workspace.activeRecommendationSearchRunId = null;
+        workspace.isRefreshingRecommendations = false;
+        workspace.query = workspace.query.copyWith(
+          includeAdult: false,
+          excludeAdult:
+              workspace.service.supportsAdultContent && !allowExplicitContent,
+        );
+        workspace.recommendations = _tasteEngine.rankCandidates(
+          workspace.profile!,
+          workspace.candidates,
+          query: workspace.query,
+        );
+        unawaited(_persistWorkspace(workspace));
+      }
+      _activeHomeSearchRunId = null;
+      _isRefreshingHome = false;
+    });
+    _rebuildHomeRecommendationsSync();
   }
 
   void _openProfile() {
@@ -1771,19 +1856,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadSavedSessions() async {
-    final sessions = await _profileStore.loadSessions();
-    if (!mounted || sessions.isEmpty) return;
-    final allowExplicitContent = await _allowsExplicitContent();
-    if (!mounted) return;
-
-    setState(() {
+    try {
+      await _library.load();
+      final sessions = await _profileStore.loadSessions();
+      final allowExplicitContent = await _allowsExplicitContent();
+      if (!mounted) return;
       for (final entry in sessions.entries) {
         final workspace = _workspaces[entry.key];
         if (workspace == null) continue;
-        final session = entry.value;
         workspace.restore(
-          session.copyWith(
-            query: session.query.copyWith(
+          entry.value.copyWith(
+            query: entry.value.query.copyWith(
               includeAdult: false,
               excludeAdult:
                   workspace.service.supportsAdultContent &&
@@ -1793,12 +1876,18 @@ class _HomeScreenState extends State<HomeScreen> {
           tasteEngine: _tasteEngine,
         );
       }
-      final activeWorkspace = _activeWorkspace;
-      _userNameController.text = activeWorkspace.userNameDraft.isNotEmpty
-          ? activeWorkspace.userNameDraft
-          : activeWorkspace.profile?.userName ?? '';
-    });
-    _rebuildHomeRecommendationsSync();
+      final workspace = _activeWorkspace;
+      _userNameController.text = workspace.userNameDraft;
+      _rebuildHomeRecommendationsSync();
+    } catch (_) {
+      if (mounted)
+        showErrorToast(
+          context,
+          'Could not restore your saved profiles. You can try connecting again.',
+        );
+    } finally {
+      if (mounted) setState(() => _isRestoring = false);
+    }
   }
 
   Future<bool> _allowsExplicitContent() async {
@@ -1809,7 +1898,15 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _persistWorkspace(_ServiceWorkspace workspace) async {
     final session = workspace.toLocalSession();
     if (session == null) return;
-    await _profileStore.saveSession(session);
+    try {
+      await _profileStore.saveSession(session);
+    } catch (_) {
+      if (mounted)
+        showErrorToast(
+          context,
+          'Your profile is available now, but could not be saved. Refresh to try again.',
+        );
+    }
   }
 
   void _rebuildHomeRecommendationsSync() {
@@ -2040,100 +2137,128 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF111419), Color(0xFF0B0D10), Color(0xFF191C20)],
-          ),
-        ),
-        child: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final isDesktop = constraints.maxWidth >= 900;
-              final workspace = _activeWorkspace;
-              final shell = _activeSurface == _ActiveSurface.home
-                  ? _HomeContentShell(
-                      isMobileSurface: !isDesktop,
-                      services: _mediaServices,
-                      workspaces: _workspaces,
-                      query: _homeQuery,
-                      recommendations: _homeRecommendations,
-                      recommendationsByService: _homeRecommendationsByService,
-                      isRefreshing: _isRefreshingHome,
-                      error: _homeError,
-                      aiService: _aiService,
-                      onQueryChanged: _updateHomeRecommendationQuery,
-                      onCancelSearch: _cancelHomeSearch,
-                      onConnectService: _selectService,
-                      onChatTap: _openRecommendationChat,
-                    )
-                  : _ContentShell(
-                      isMobileSurface: !isDesktop,
-                      profile: workspace.profile,
-                      recommendations: workspace.recommendations,
-                      isLoading: workspace.isLoading,
-                      error: workspace.error,
-                      aiService: _aiService,
-                      userNameController: _userNameController,
-                      mediaService: workspace.service,
-                      onImport: _importProfile,
-                      onSignOut: _signOut,
-                      onSwitchUser: _switchUser,
-                      query: workspace.query,
-                      isRefreshingRecommendations:
-                          workspace.isRefreshingRecommendations,
-                      availableTags: _availableTags,
-                      onQueryChanged: _updateRecommendationQuery,
-                      onCancelSearch: _cancelRecommendationSearch,
-                      onChatTap: _openRecommendationChat,
-                    );
+    return MediaLibraryScope(
+      library: _library,
+      child: Scaffold(
+        body: _isRestoring
+            ? const Center(
+                child: CircularProgressIndicator(
+                  semanticsLabel: 'Restoring your library',
+                ),
+              )
+            : Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFF111419),
+                      Color(0xFF0B0D10),
+                      Color(0xFF191C20),
+                    ],
+                  ),
+                ),
+                child: SafeArea(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isDesktop = constraints.maxWidth >= 900;
+                      final workspace = _activeWorkspace;
+                      final shell = _activeSurface == _ActiveSurface.home
+                          ? _HomeContentShell(
+                              isMobileSurface: !isDesktop,
+                              services: _mediaServices,
+                              workspaces: _workspaces,
+                              query: _homeQuery,
+                              recommendations: _visibleRecommendations(
+                                _homeRecommendations,
+                              ),
+                              recommendationsByService: {
+                                for (final entry
+                                    in _homeRecommendationsByService.entries)
+                                  entry.key: _visibleRecommendations(
+                                    entry.value,
+                                  ),
+                              },
+                              isRefreshing: _isRefreshingHome,
+                              error: _homeError,
+                              aiService: _aiService,
+                              onQueryChanged: _updateHomeRecommendationQuery,
+                              onCancelSearch: _cancelHomeSearch,
+                              onConnectService: _selectService,
+                              onChatTap: _openRecommendationChat,
+                            )
+                          : _ContentShell(
+                              isMobileSurface: !isDesktop,
+                              profile: workspace.profile,
+                              recommendations: _visibleRecommendations(
+                                workspace.recommendations,
+                              ),
+                              isLoading: workspace.isLoading,
+                              error: workspace.error,
+                              aiService: _aiService,
+                              userNameController: _userNameController,
+                              mediaService: workspace.service,
+                              onImport: _importProfile,
+                              onRefresh: () => _importProfile(refresh: true),
+                              onSignOut: _signOut,
+                              onSwitchUser: _switchUser,
+                              query: workspace.query,
+                              isRefreshingRecommendations:
+                                  workspace.isRefreshingRecommendations,
+                              availableTags: _availableTags,
+                              onQueryChanged: _updateRecommendationQuery,
+                              onCancelSearch: _cancelRecommendationSearch,
+                              onChatTap: _openRecommendationChat,
+                            );
 
-              if (isDesktop) {
-                return Column(
-                  children: [
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(22, 22, 22, 12),
-                        child: shell,
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(22, 0, 22, 18),
-                      child: _ServiceDock(
-                        isDesktop: true,
+                      if (isDesktop) {
+                        return Column(
+                          children: [
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  22,
+                                  22,
+                                  22,
+                                  12,
+                                ),
+                                child: shell,
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(22, 0, 22, 18),
+                              child: _ServiceDock(
+                                isDesktop: true,
+                                services: _mediaServices,
+                                activeServiceId: _mediaService.id,
+                                isHomeActive:
+                                    _activeSurface == _ActiveSurface.home,
+                                onHomeTap: _selectHome,
+                                onServiceTap: _selectService,
+                                onSettingsTap: _openSettings,
+                                onProfileTap: _openProfile,
+                                onSavedTap: _openSaved,
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+
+                      return _MobileLiquidShell(
+                        onSettingsTap: _openSettings,
                         services: _mediaServices,
                         activeServiceId: _mediaService.id,
                         isHomeActive: _activeSurface == _ActiveSurface.home,
                         onHomeTap: _selectHome,
                         onServiceTap: _selectService,
-                        onSettingsTap: _openSettings,
+                        onSavedTap: _openSaved,
                         onProfileTap: _openProfile,
-                        onUnavailableTap: (label) =>
-                            showFeatureComingSoon(context, label),
-                      ),
-                    ),
-                  ],
-                );
-              }
-
-              return _MobileLiquidShell(
-                onSettingsTap: _openSettings,
-                services: _mediaServices,
-                activeServiceId: _mediaService.id,
-                isHomeActive: _activeSurface == _ActiveSurface.home,
-                onHomeTap: _selectHome,
-                onServiceTap: _selectService,
-                onUnavailableTap: (label) =>
-                    showFeatureComingSoon(context, label),
-                onProfileTap: _openProfile,
-                child: shell,
-              );
-            },
-          ),
-        ),
+                        child: shell,
+                      );
+                    },
+                  ),
+                ),
+              ),
       ),
     );
   }
@@ -2184,34 +2309,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-Future<void> _openMedia(BuildContext context, MediaItem item) async {
-  final fallbackId = item.id.startsWith('anilist_')
-      ? item.id.replaceFirst('anilist_', '')
-      : '';
-  final steamFallbackId = item.id.startsWith('steam_')
-      ? item.id.replaceFirst('steam_', '')
-      : '';
-  final url = item.siteUrl.isNotEmpty
-      ? item.siteUrl
-      : fallbackId.isNotEmpty
-      ? 'https://anilist.co/${item.mediaType.toLowerCase()}/$fallbackId'
-      : steamFallbackId.isNotEmpty
-      ? 'https://store.steampowered.com/app/$steamFallbackId'
-      : '';
-  final uri = Uri.tryParse(url);
-  if (uri == null || url.isEmpty) {
-    showErrorToast(
-      context,
-      'No ${item.serviceLabel} page is available for this item.',
-    );
-    return;
+String _friendlyError(Object error, {required String serviceName}) {
+  if (error is TimeoutException)
+    return '$serviceName took too long to respond. Check your connection and try again.';
+  if (error is FormatException) return error.message;
+  final message = error.toString().replaceFirst(
+    RegExp(r'^\w+(?:Exception|Error):\s*'),
+    '',
+  );
+  if (message.contains('SocketException') ||
+      message.contains('ClientException') ||
+      message.contains('XMLHttpRequest')) {
+    return 'Could not reach $serviceName. Check your connection and try again. Your saved library is still available.';
   }
-
-  final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-  if (!launched && context.mounted) {
-    showErrorToast(context, 'Could not open ${item.serviceLabel}.');
-  }
+  return message;
 }
+
+Future<void> _openMedia(BuildContext context, MediaItem item) =>
+    openMediaPage(context, item);
 
 class _HomeContentShell extends StatelessWidget {
   final bool isMobileSurface;
@@ -2258,7 +2373,7 @@ class _HomeContentShell extends StatelessWidget {
       for (final service in services)
         if (workspaces[service.id]?.profile == null) service,
     ];
-    final readableInset = EdgeInsets.only(left: isMobileSurface ? 54 : 0);
+    const readableInset = EdgeInsets.zero;
 
     final shell = Container(
       decoration: BoxDecoration(
@@ -2298,17 +2413,18 @@ class _HomeContentShell extends StatelessWidget {
                 Expanded(
                   child: CustomScrollView(
                     slivers: [
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: readableInset,
-                          child: _HomeSearchPanel(
-                            query: query,
-                            isRefreshing: isRefreshing,
-                            onQueryChanged: onQueryChanged,
-                            onCancelSearch: onCancelSearch,
+                      if (imported.isNotEmpty)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: readableInset,
+                            child: _HomeSearchPanel(
+                              query: query,
+                              isRefreshing: isRefreshing,
+                              onQueryChanged: onQueryChanged,
+                              onCancelSearch: onCancelSearch,
+                            ),
                           ),
                         ),
-                      ),
                       if (error != null)
                         SliverToBoxAdapter(
                           child: Padding(
@@ -2365,10 +2481,17 @@ class _HomeContentShell extends StatelessWidget {
                           _HomeServiceSection(
                             workspace: workspace,
                             recommendations:
-                                recommendationsByService[workspace
-                                    .service
-                                    .id] ??
-                                workspace.recommendations,
+                                (recommendationsByService[workspace
+                                            .service
+                                            .id] ??
+                                        const <Recommendation>[])
+                                    .where(
+                                      (pick) =>
+                                          recommendations.isEmpty ||
+                                          pick.item.id !=
+                                              recommendations.first.item.id,
+                                    )
+                                    .toList(),
                             readableInset: readableInset,
                           ),
                       ],
@@ -2418,7 +2541,7 @@ class _HomeHeader extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                'One local feed across your imported services.',
+                'Find your next favorite. Keep it for later.',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyMedium?.copyWith(
@@ -2733,6 +2856,7 @@ class _ContentShell extends StatelessWidget {
   final LocalAiService aiService;
   final TextEditingController userNameController;
   final VoidCallback onImport;
+  final VoidCallback onRefresh;
   final VoidCallback onSignOut;
   final VoidCallback onSwitchUser;
   final RecommendationQuery query;
@@ -2752,6 +2876,7 @@ class _ContentShell extends StatelessWidget {
     required this.aiService,
     required this.userNameController,
     required this.onImport,
+    required this.onRefresh,
     required this.onSignOut,
     required this.onSwitchUser,
     required this.query,
@@ -2805,11 +2930,24 @@ class _ContentShell extends StatelessWidget {
                   profile: profile,
                   aiService: aiService,
                   serviceName: mediaService.displayName,
+                  onRefresh: isLoading ? null : onRefresh,
                   onSignOut: onSignOut,
                   onSwitchUser: onSwitchUser,
                   onChatTap: onChatTap,
                 ),
                 const SizedBox(height: 14),
+                if (profile != null && isLoading)
+                  const LinearProgressIndicator(
+                    semanticsLabel: 'Refreshing library',
+                  ),
+                if (profile != null && error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      error!,
+                      style: const TextStyle(color: Color(0xFFFF9AA8)),
+                    ),
+                  ),
                 Expanded(
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 220),
@@ -2866,7 +3004,7 @@ class _MobileLiquidShell extends StatelessWidget {
   final ValueChanged<MediaService> onServiceTap;
   final VoidCallback onSettingsTap;
   final VoidCallback onProfileTap;
-  final ValueChanged<String> onUnavailableTap;
+  final VoidCallback onSavedTap;
 
   const _MobileLiquidShell({
     required this.child,
@@ -2877,7 +3015,7 @@ class _MobileLiquidShell extends StatelessWidget {
     required this.onServiceTap,
     required this.onSettingsTap,
     required this.onProfileTap,
-    required this.onUnavailableTap,
+    required this.onSavedTap,
   });
 
   @override
@@ -2885,7 +3023,7 @@ class _MobileLiquidShell extends StatelessWidget {
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        Positioned.fill(child: child),
+        Positioned.fill(left: 64, child: child),
         Positioned(
           top: 132,
           bottom: 16,
@@ -2898,7 +3036,7 @@ class _MobileLiquidShell extends StatelessWidget {
             onServiceTap: onServiceTap,
             onSettingsTap: onSettingsTap,
             onProfileTap: onProfileTap,
-            onUnavailableTap: onUnavailableTap,
+            onSavedTap: onSavedTap,
           ),
         ),
       ],
@@ -2910,6 +3048,7 @@ class _ShellHeader extends StatelessWidget {
   final TasteProfile? profile;
   final LocalAiService aiService;
   final String serviceName;
+  final VoidCallback? onRefresh;
   final VoidCallback onSignOut;
   final VoidCallback onSwitchUser;
   final VoidCallback onChatTap;
@@ -2918,6 +3057,7 @@ class _ShellHeader extends StatelessWidget {
     required this.profile,
     required this.aiService,
     required this.serviceName,
+    required this.onRefresh,
     required this.onSignOut,
     required this.onSwitchUser,
     required this.onChatTap,
@@ -2961,6 +3101,11 @@ class _ShellHeader extends StatelessWidget {
               onTap: onChatTap,
             ),
             if (profile != null) ...[
+              IconButton(
+                tooltip: 'Refresh library',
+                onPressed: onRefresh,
+                icon: const Icon(Icons.refresh_rounded),
+              ),
               const SizedBox(width: 4),
               IconButton(
                 tooltip: 'Switch user',
@@ -2976,7 +3121,7 @@ class _ShellHeader extends StatelessWidget {
           ],
         );
 
-        if (constraints.maxWidth < 360 && profile != null) {
+        if (constraints.maxWidth < 600 && profile != null) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [title, const SizedBox(height: 8), actions],
@@ -3091,8 +3236,8 @@ class _ConnectState extends StatelessWidget {
               const SizedBox(height: 14),
               Text(
                 mediaService.displayName == 'Steam'
-                    ? 'Steam OpenID account linking is designed for later; this slice uses public data and a local API key.'
-                    : 'OAuth and Firebase sync are designed for later; this slice stays local-first.',
+                    ? 'Your Steam profile and game details must be public. Your imported library is saved on this device.'
+                    : 'No password needed. Your public lists are read only and saved on this device. AI setup is optional.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: Colors.white.withValues(alpha: 0.48),
@@ -3134,7 +3279,7 @@ class _RecommendationState extends StatelessWidget {
   Widget build(BuildContext context) {
     final topPick = recommendations.isEmpty ? null : recommendations.first;
     final otherPicks = recommendations.skip(1).toList();
-    final readableInset = EdgeInsets.only(left: isMobileSurface ? 54 : 0);
+    const readableInset = EdgeInsets.zero;
 
     return Stack(
       children: [
@@ -3241,13 +3386,18 @@ class _RecommendationState extends StatelessWidget {
           ],
         ),
         Positioned(
-          left: isMobileSurface ? 60 : 0,
+          left: 0,
           right: 0,
           bottom: isMobileSurface ? 14 : 12,
-          child: _CurrentActivityBar(
-            item: profile.recentActivity,
-            isFloating: isMobileSurface,
-          ),
+          child: profile.recentActivity == null
+              ? const SizedBox.shrink()
+              : InkWell(
+                  onTap: () => _openMedia(context, profile.recentActivity!),
+                  child: _CurrentActivityBar(
+                    item: profile.recentActivity,
+                    isFloating: isMobileSurface,
+                  ),
+                ),
         ),
       ],
     );
@@ -3256,34 +3406,17 @@ class _RecommendationState extends StatelessWidget {
 
 class _TasteSummary extends StatelessWidget {
   final TasteProfile profile;
-
   const _TasteSummary({required this.profile});
-
   @override
   Widget build(BuildContext context) {
-    return _GlassCard(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            profile.summary,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Colors.white.withValues(alpha: 0.78),
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: profile.favoriteGenres
-                .take(5)
-                .map((genre) => _TextChip(label: genre))
-                .toList(),
-          ),
-        ],
-      ),
+    final date = MaterialLocalizations.of(
+      context,
+    ).formatShortDate(profile.importedAt);
+    return Text(
+      '${profile.library.length} titles · Updated $date',
+      style: Theme.of(
+        context,
+      ).textTheme.bodySmall?.copyWith(color: Colors.white70),
     );
   }
 }
@@ -3586,46 +3719,57 @@ class _RecommendationSearchPanelState
             ],
           ),
           const SizedBox(height: 12),
-          if (widget.mediaService.displayName != 'AniList') ...[
-            _FilterSection(
-              label: 'Type',
-              children: [
-                for (final mediaType in widget.mediaService.supportedMediaTypes)
-                  _FilterChipButton(
-                    key: ValueKey('filter-type-${mediaType.toLowerCase()}'),
-                    label: _mediaTypeLabel(mediaType),
-                    selected: widget.query.effectiveMediaTypes().contains(
-                      mediaType,
-                    ),
-                    onSelected: () => _toggleMediaType(mediaType),
-                  ),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: const Text('Filters'),
+            subtitle: widget.query.isActive
+                ? const Text('Search filters are active')
+                : null,
+            initiallyExpanded: MediaQuery.sizeOf(context).width >= 600,
+            children: [
+              if (widget.mediaService.displayName != 'AniList') ...[
+                _FilterSection(
+                  label: 'Type',
+                  children: [
+                    for (final mediaType
+                        in widget.mediaService.supportedMediaTypes)
+                      _FilterChipButton(
+                        key: ValueKey('filter-type-${mediaType.toLowerCase()}'),
+                        label: _mediaTypeLabel(mediaType),
+                        selected: widget.query.effectiveMediaTypes().contains(
+                          mediaType,
+                        ),
+                        onSelected: () => _toggleMediaType(mediaType),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
               ],
-            ),
-            const SizedBox(height: 10),
-          ],
-          _FilterSection(
-            label: widget.mediaService.displayName == 'Steam'
-                ? 'Modes'
-                : 'Format',
-            children: widget.mediaService.supportedFormats.map((format) {
-              return _FilterChipButton(
-                key: ValueKey('filter-format-${format.toLowerCase()}'),
-                label: _formatLabel(format),
-                selected: widget.query.effectiveFormats().contains(format),
-                onSelected: () => _toggleFormat(format),
-              );
-            }).toList(),
+              _FilterSection(
+                label: widget.mediaService.displayName == 'Steam'
+                    ? 'Modes'
+                    : 'Format',
+                children: widget.mediaService.supportedFormats.map((format) {
+                  return _FilterChipButton(
+                    key: ValueKey('filter-format-${format.toLowerCase()}'),
+                    label: _formatLabel(format),
+                    selected: widget.query.effectiveFormats().contains(format),
+                    onSelected: () => _toggleFormat(format),
+                  );
+                }).toList(),
+              ),
+              if (widget.availableTags.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                _TagPickerSection(
+                  availableTags: widget.availableTags,
+                  selectedTags: widget.query.selectedTags,
+                  aiSelectedTags: widget.query.aiSelectedTags,
+                  onBrowse: _openTagPicker,
+                  onToggleTag: _toggleTag,
+                ),
+              ],
+            ],
           ),
-          if (widget.availableTags.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            _TagPickerSection(
-              availableTags: widget.availableTags,
-              selectedTags: widget.query.selectedTags,
-              aiSelectedTags: widget.query.aiSelectedTags,
-              onBrowse: _openTagPicker,
-              onToggleTag: _toggleTag,
-            ),
-          ],
           if (widget.query.isActive) ...[
             const SizedBox(height: 12),
             Align(
@@ -4043,53 +4187,59 @@ class _TopRecommendationCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final item = recommendation.item;
 
-    return _OpenableRecommendation(
-      item: item,
-      child: _GlassCard(
-        padding: EdgeInsets.zero,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final isNarrow = constraints.maxWidth < 560;
-            if (isNarrow) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(
-                    height: 190,
-                    child: _CoverImage(item: item, borderRadius: 24),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: _TopRecommendationDetails(
-                      recommendation: recommendation,
-                      compact: true,
-                    ),
-                  ),
-                ],
-              );
-            }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _OpenableRecommendation(
+          item: item,
+          child: _GlassCard(
+            padding: EdgeInsets.zero,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isNarrow = constraints.maxWidth < 560;
+                if (isNarrow) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(
+                        height: item.hasCover ? 130 : 48,
+                        child: _CoverImage(item: item, borderRadius: 24),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: _TopRecommendationDetails(
+                          recommendation: recommendation,
+                          compact: true,
+                        ),
+                      ),
+                    ],
+                  );
+                }
 
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 132,
-                  height: 282,
-                  child: _CoverImage(item: item, borderRadius: 24),
-                ),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.all(18),
-                    child: _TopRecommendationDetails(
-                      recommendation: recommendation,
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 132,
+                      height: 282,
+                      child: _CoverImage(item: item, borderRadius: 24),
                     ),
-                  ),
-                ),
-              ],
-            );
-          },
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.all(18),
+                        child: _TopRecommendationDetails(
+                          recommendation: recommendation,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
         ),
-      ),
+        RecommendationActions(recommendation: recommendation),
+      ],
     );
   }
 }
@@ -4168,61 +4318,67 @@ class _RecommendationTile extends StatelessWidget {
     final item = recommendation.item;
     final theme = Theme.of(context);
 
-    return _OpenableRecommendation(
-      item: item,
-      child: _GlassCard(
-        padding: const EdgeInsets.all(10),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 70,
-              height: 96,
-              child: _CoverImage(item: item, borderRadius: 16),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _OpenableRecommendation(
+          item: item,
+          child: _GlassCard(
+            padding: const EdgeInsets.all(10),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 70,
+                  height: 96,
+                  child: _CoverImage(item: item, borderRadius: 16),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        item.subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.55),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _recommendationSummary(
+                          recommendation,
+                          preferAiReason: recommendation.isAiPick,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.68),
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _ScoreRing(score: recommendation.matchScore),
+              ],
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    item.subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.55),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _recommendationSummary(
-                      recommendation,
-                      preferAiReason: recommendation.isAiPick,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.68),
-                      height: 1.3,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            _ScoreRing(score: recommendation.matchScore),
-          ],
+          ),
         ),
-      ),
+        RecommendationActions(recommendation: recommendation),
+      ],
     );
   }
 }
@@ -4262,11 +4418,7 @@ class _OpenableRecommendation extends StatelessWidget {
         label: 'Open ${item.title} on ${item.serviceLabel}',
         child: MouseRegion(
           cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => _openMedia(context, item),
-            child: child,
-          ),
+          child: InkWell(onTap: () => _openMedia(context, item), child: child),
         ),
       ),
     );
@@ -4302,7 +4454,9 @@ class _CurrentActivityBar extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                item == null ? 'No current activity found' : 'Current / latest',
+                item == null
+                    ? 'No current activity found'
+                    : 'Continue on ${item!.serviceLabel}',
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.54),
                   fontSize: 11,
@@ -4385,7 +4539,7 @@ class _MobileLiquidRail extends StatelessWidget {
   final ValueChanged<MediaService> onServiceTap;
   final VoidCallback onSettingsTap;
   final VoidCallback onProfileTap;
-  final ValueChanged<String> onUnavailableTap;
+  final VoidCallback onSavedTap;
 
   const _MobileLiquidRail({
     required this.services,
@@ -4395,7 +4549,7 @@ class _MobileLiquidRail extends StatelessWidget {
     required this.onServiceTap,
     required this.onSettingsTap,
     required this.onProfileTap,
-    required this.onUnavailableTap,
+    required this.onSavedTap,
   });
 
   @override
@@ -4420,14 +4574,9 @@ class _MobileLiquidRail extends StatelessWidget {
               onTap: () => onServiceTap(service),
             ),
           _LiquidRailButton(
-            icon: Icons.local_movies_rounded,
-            label: 'Movies/TV',
-            onTap: () => onUnavailableTap('Movies and TV'),
-          ),
-          _LiquidRailButton(
-            icon: Icons.add_rounded,
-            label: 'Add service',
-            onTap: () => onUnavailableTap('Add service'),
+            icon: Icons.bookmark_border_rounded,
+            label: 'Saved',
+            onTap: onSavedTap,
           ),
         ],
       ),
@@ -4608,7 +4757,7 @@ class _ServiceDock extends StatelessWidget {
   final ValueChanged<MediaService> onServiceTap;
   final VoidCallback onSettingsTap;
   final VoidCallback onProfileTap;
-  final ValueChanged<String> onUnavailableTap;
+  final VoidCallback onSavedTap;
 
   const _ServiceDock({
     required this.isDesktop,
@@ -4619,7 +4768,7 @@ class _ServiceDock extends StatelessWidget {
     required this.onServiceTap,
     required this.onSettingsTap,
     required this.onProfileTap,
-    required this.onUnavailableTap,
+    required this.onSavedTap,
   });
 
   @override
@@ -4639,14 +4788,9 @@ class _ServiceDock extends StatelessWidget {
           onTap: () => onServiceTap(service),
         ),
       _DockButton(
-        icon: Icons.local_movies_rounded,
-        label: 'Movies/TV',
-        onTap: () => onUnavailableTap('Movies and TV'),
-      ),
-      _DockButton(
-        icon: Icons.add_rounded,
-        label: 'Add service',
-        onTap: () => onUnavailableTap('Add service'),
+        icon: Icons.bookmark_border_rounded,
+        label: 'Saved',
+        onTap: onSavedTap,
       ),
     ];
     final secondaryChildren = [

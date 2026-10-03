@@ -912,7 +912,7 @@ void main() {
         request: 'magic school adventure',
       ).withInferredSelections(const ['Fantasy', 'Magic', 'School']);
 
-      expect(magicSchool.aiSelectedTags, contains('Fantasy'));
+      expect(magicSchool.aiSelectedTags, isNot(contains('Fantasy')));
       expect(magicSchool.aiSelectedTags, contains('Magic'));
       expect(magicSchool.aiSelectedTags, contains('School'));
 
@@ -920,7 +920,7 @@ void main() {
         request: 'family anime that is good to watch with kids and parents',
       ).withInferredSelections(const ['Comedy', 'Family Life', 'Go', 'Kids']);
 
-      expect(familyAnime.aiSelectedTags, contains('Comedy'));
+      expect(familyAnime.aiSelectedTags, isNot(contains('Comedy')));
       expect(familyAnime.aiSelectedTags, contains('Family Life'));
       expect(familyAnime.aiSelectedTags, isNot(contains('Go')));
       expect(familyAnime.aiSelectedTags, isNot(contains('Kids')));

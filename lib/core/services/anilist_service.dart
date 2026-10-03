@@ -435,19 +435,25 @@ class AniListService implements MediaService {
     String query,
     Map<String, dynamic> variables,
   ) async {
-    final response = await _client.post(
-      Uri.parse(endpoint),
-      headers: const {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'User-Agent': 'Majika/1.0',
-      },
-      body: jsonEncode({'query': query, 'variables': variables}),
-    );
+    final response = await _client
+        .post(
+          Uri.parse(endpoint),
+          headers: const {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'User-Agent': 'Majika/1.0',
+          },
+          body: jsonEncode({'query': query, 'variables': variables}),
+        )
+        .timeout(const Duration(seconds: 30));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw AniListException(
-        'AniList returned HTTP ${response.statusCode}: ${response.body}',
+        response.statusCode == 429
+            ? 'AniList is receiving too many requests. Wait a minute and try again.'
+            : response.statusCode == 404
+            ? 'AniList could not find that username. Check the spelling and make sure the list is public.'
+            : 'AniList is unavailable (HTTP ${response.statusCode}). Please try again shortly.',
       );
     }
 

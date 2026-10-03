@@ -22,6 +22,11 @@ import 'package:majika/ui/settings/settings_screen.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+Future<void> _pumpApp(WidgetTester tester, Widget widget) async {
+  await tester.pumpWidget(widget);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -30,7 +35,7 @@ void main() {
   testWidgets('app renders AniList connect prompt', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(const MajikaApp());
+    await _pumpApp(tester, const MajikaApp());
 
     expect(find.text('Majika'), findsOneWidget);
     expect(find.text('Connect AniList'), findsOneWidget);
@@ -42,7 +47,8 @@ void main() {
     (WidgetTester tester) async {
       final semantics = tester.ensureSemantics();
       try {
-        await tester.pumpWidget(
+        await _pumpApp(
+          tester,
           MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
         );
 
@@ -64,7 +70,8 @@ void main() {
   testWidgets('failed import handles parallel service errors', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FailingImportMediaService())),
     );
 
@@ -73,7 +80,7 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('FormatException: sign in first'), findsOne);
+    expect(find.textContaining('sign in first'), findsOne);
     expect(tester.takeException(), isNull);
   });
 
@@ -85,7 +92,8 @@ void main() {
     });
     final service = _TrackingAdultMediaService();
 
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: service)),
     );
     await tester.enterText(find.byType(TextField), 'tester');
@@ -106,7 +114,8 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
     );
 
@@ -139,7 +148,8 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
     );
 
@@ -147,7 +157,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Settings'), findsOneWidget);
-    expect(find.text('Tune the reading space'), findsOneWidget);
+    expect(find.text('Make Majika yours'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -159,7 +169,8 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(
         home: HomeScreen(
           mediaServices: [_FakeMediaService(), _FakeSteamMediaService()],
@@ -183,7 +194,8 @@ void main() {
     SharedPreferences.setMockInitialValues({
       LocalAiSettingsKeys.allowExplicitContent: true,
     });
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
     );
 
@@ -212,7 +224,8 @@ void main() {
   testWidgets('AniList exposes broad content format filters', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
     );
 
@@ -240,7 +253,8 @@ void main() {
     });
     final service = _TrackingAdultMediaService();
 
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: service)),
     );
     await tester.enterText(find.byType(TextField).first, 'tester');
@@ -261,7 +275,8 @@ void main() {
   testWidgets('natural language search fetches matching candidates', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
     );
 
@@ -288,7 +303,8 @@ void main() {
     WidgetTester tester,
   ) async {
     final mediaService = _DistinctivePlotMediaService();
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(
         home: HomeScreen(
           mediaService: mediaService,
@@ -333,7 +349,8 @@ void main() {
   testWidgets('AI chat button opens recommendation chat', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
     );
 
@@ -353,7 +370,8 @@ void main() {
     WidgetTester tester,
   ) async {
     final aiService = _ChatActionAiService();
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(
         home: HomeScreen(
           mediaService: _FakeMediaService(),
@@ -400,7 +418,8 @@ void main() {
   ) async {
     final mediaService = _DirectPickMediaService();
 
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(
         home: HomeScreen(
           mediaService: mediaService,
@@ -440,7 +459,8 @@ void main() {
   testWidgets('Steam prompt search hides weak fun title matches', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(
         home: HomeScreen(
           mediaService: _WeakFunSteamMediaService(),
@@ -472,7 +492,8 @@ void main() {
   testWidgets('new Steam searches do not reuse previous search candidates', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(
         home: HomeScreen(
           mediaService: _SwitchingSearchSteamMediaService(),
@@ -509,7 +530,8 @@ void main() {
   testWidgets('invalid direct AI pick falls back to ranked recommendations', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(
         home: HomeScreen(
           mediaService: _FakeMediaService(),
@@ -541,7 +563,8 @@ void main() {
       LocalAiSettingsKeys.useLocalAi: true,
     });
 
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
     );
 
@@ -598,7 +621,8 @@ void main() {
   testWidgets('unsent recommendation search edits survive rebuilds', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
     );
 
@@ -617,7 +641,8 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField).first, 'unsent draft');
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
     );
     await tester.pump();
@@ -629,7 +654,8 @@ void main() {
   testWidgets('Steam controller language selects controller mode', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeSteamMediaService())),
     );
 
@@ -659,7 +685,8 @@ void main() {
   testWidgets('new Steam text search clears stale mode filters', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeSteamMediaService())),
     );
 
@@ -703,7 +730,8 @@ void main() {
     'same Steam request does not keep AI-inferred controller mode sticky',
     (WidgetTester tester) async {
       final aiService = _StickyControllerSteamAiService();
-      await tester.pumpWidget(
+      await _pumpApp(
+        tester,
         MaterialApp(
           home: HomeScreen(
             mediaService: _FakeSteamMediaService(),
@@ -744,7 +772,8 @@ void main() {
     WidgetTester tester,
   ) async {
     final service = _OfficeSearchSteamMediaService();
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(
         home: HomeScreen(
           mediaService: service,
@@ -780,7 +809,8 @@ void main() {
     WidgetTester tester,
   ) async {
     final service = _SlowSearchMediaService();
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: service)),
     );
 
@@ -811,7 +841,8 @@ void main() {
   testWidgets('tag picker keeps the long tag list out of the main feed', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
     );
 
@@ -836,7 +867,8 @@ void main() {
   testWidgets('recommendation results expose AniList links', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
     );
 
@@ -851,7 +883,8 @@ void main() {
   testWidgets('Steam service switch imports a game profile', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(
         home: HomeScreen(
           mediaServices: [_FakeMediaService(), _FakeSteamMediaService()],
@@ -879,7 +912,8 @@ void main() {
   testWidgets('service switching keeps imported profiles', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(
         home: HomeScreen(
           mediaServices: [_FakeMediaService(), _FakeSteamMediaService()],
@@ -915,7 +949,8 @@ void main() {
   testWidgets('saved profile restores after HomeScreen restart', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
     );
 
@@ -926,8 +961,9 @@ void main() {
 
     expect(find.text('@tester · Mystery + Drama'), findsOneWidget);
 
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pumpWidget(
+    await _pumpApp(tester, const SizedBox.shrink());
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
     );
     await tester.pumpAndSettle();
@@ -939,7 +975,8 @@ void main() {
   testWidgets('home aggregates services and AI-style query prefers PC games', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(
         home: HomeScreen(
           mediaServices: [_FakeMediaService(), _FakeSteamMediaService()],
@@ -998,7 +1035,8 @@ void main() {
     WidgetTester tester,
   ) async {
     final steamService = _DirectPickSteamMediaService();
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(
         home: HomeScreen(
           mediaServices: [_FakeMediaService(), steamService],
@@ -1046,7 +1084,8 @@ void main() {
     WidgetTester tester,
   ) async {
     final service = _AliasAniListMediaService();
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(
         home: HomeScreen(
           mediaService: service,
@@ -1075,7 +1114,8 @@ void main() {
   testWidgets('sign out clears only the active saved service', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(
         home: HomeScreen(
           mediaServices: [_FakeMediaService(), _FakeSteamMediaService()],
@@ -1116,7 +1156,8 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
 
-      await tester.pumpWidget(
+      await _pumpApp(
+        tester,
         MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
       );
 
@@ -1138,7 +1179,8 @@ void main() {
   testWidgets('sign out clears the imported AniList profile', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
     );
 
@@ -1159,7 +1201,7 @@ void main() {
   testWidgets('settings exposes local AI management controls', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
 
     await tester.scrollUntilVisible(
       find.text('Local AI'),
@@ -1270,7 +1312,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
 
     await tester.scrollUntilVisible(
       find.text('AI mode'),
@@ -1299,7 +1341,7 @@ void main() {
       LocalAiSettingsKeys.downloadedModelName: 'Gemma 3 1B IT',
     });
 
-    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
 
     await tester.scrollUntilVisible(
       find.text('AI mode'),
@@ -1318,7 +1360,7 @@ void main() {
   testWidgets('settings persists Hugging Face token locally', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
 
     await tester.scrollUntilVisible(
       find.text('Local AI'),
@@ -1348,7 +1390,7 @@ void main() {
   testWidgets('settings shows local server fields only for external mode', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
 
     await tester.scrollUntilVisible(
       find.text('Local AI'),
@@ -1383,7 +1425,7 @@ void main() {
       LocalAiSettingsKeys.useLocalAi: true,
     });
 
-    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
 
     await tester.scrollUntilVisible(
       find.text('Serve a local model'),
@@ -1421,7 +1463,7 @@ void main() {
       LocalAiSettingsKeys.localEndpoint: customEndpoint,
     });
 
-    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
 
     await tester.scrollUntilVisible(
       find.text('Local AI'),
@@ -1441,8 +1483,8 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString(LocalAiSettingsKeys.localEndpoint), changedEndpoint);
 
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await _pumpApp(tester, const SizedBox.shrink());
+    await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
@@ -1464,7 +1506,7 @@ void main() {
       LocalAiSettingsKeys.aiContextWindowTokens: 131072,
     });
 
-    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
 
     await tester.scrollUntilVisible(
       find.text('Cloud AI provider'),
@@ -1474,7 +1516,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Cloud API key'), findsOneWidget);
-    expect(find.text('Google Gemini · gemini-2.5-flash-lite'), findsOneWidget);
+    expect(find.textContaining('Google Gemini · gemini-2.5-flash-lite'), findsOneWidget);
     expect(find.text('Cloud endpoint'), findsOneWidget);
     expect(find.text('Free cloud model'), findsOneWidget);
     expect(find.text('gemini-2.5-flash-lite'), findsWidgets);
@@ -1487,7 +1529,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('1M tokens'), findsOneWidget);
     await tester.scrollUntilVisible(
-      find.text('Google Gemini · gemini-2.5-flash-lite'),
+      find.textContaining('Google Gemini · gemini-2.5-flash-lite'),
       -500,
       scrollable: find.byType(Scrollable).first,
     );
@@ -1508,9 +1550,9 @@ void main() {
       'gemini_test_key',
     );
 
-    await tester.tap(find.text('Google Gemini · gemini-2.5-flash-lite'));
+    await tester.tap(find.textContaining('Google Gemini · gemini-2.5-flash-lite'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('OpenRouter · openrouter/free').last);
+    await tester.tap(find.textContaining('OpenRouter · openrouter/free').last);
     await tester.pumpAndSettle();
     expect(prefs.getString(LocalAiSettingsKeys.cloudApiKey), '');
     await tester.scrollUntilVisible(
@@ -1543,7 +1585,7 @@ void main() {
   testWidgets('settings can select manual copy paste AI mode', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
 
     await tester.scrollUntilVisible(
       find.text('AI mode'),
@@ -1574,7 +1616,8 @@ void main() {
     final log = AiConsoleLog();
     late AppProgressToast toast;
 
-    await tester.pumpWidget(
+    await _pumpApp(
+      tester,
       MaterialApp(
         home: Builder(
           builder: (context) {
@@ -1608,8 +1651,8 @@ void main() {
     await tester.tap(toastFinder);
     await tester.pump(const Duration(milliseconds: 250));
 
-    expect(find.textContaining('Prompt body'), findsOneWidget);
-    expect(find.textContaining('Response body'), findsOneWidget);
+    expect(find.textContaining('Waiting for model...'), findsWidgets);
+    expect(find.textContaining('Response body'), findsNothing);
 
     String? copiedText;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
@@ -1631,7 +1674,7 @@ void main() {
 
     final copyButton = tester.widget<IconButton>(
       find.byWidgetPredicate(
-        (widget) => widget is IconButton && widget.tooltip == 'Copy AI log',
+        (widget) => widget is IconButton && widget.tooltip == 'Copy AI details',
       ),
     );
     copyButton.onPressed?.call();
@@ -1658,7 +1701,7 @@ void main() {
         LocalAiSettingsKeys.useLocalAi: true,
       });
 
-      await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+      await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
 
       await tester.scrollUntilVisible(
         find.text('Local AI'),
@@ -1685,7 +1728,7 @@ void main() {
   testWidgets('settings persists AI context window override', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
@@ -1704,8 +1747,8 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getInt(LocalAiSettingsKeys.aiContextWindowTokens), 32768);
 
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await _pumpApp(tester, const SizedBox.shrink());
+    await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
@@ -1730,17 +1773,17 @@ void main() {
   testWidgets('settings points Steam API key storage to Firebase Functions', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
-      find.text('Steam key location'),
+      find.text('Steam connection'),
       500,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('STEAM_WEB_API_KEY'), findsOneWidget);
+    expect(find.textContaining('public Steam profile'), findsOneWidget);
     expect(find.byKey(const ValueKey('steam-api-key')), findsNothing);
   });
 }

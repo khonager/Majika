@@ -121,7 +121,6 @@ class TasteEngine {
           !_matchesSpecificRequestedTags(candidate, hardRequestedTags)) {
         continue;
       }
-      if (!query.matchesText(candidate)) continue;
 
       final signals = <String>[];
       var score = 0.0;
@@ -258,6 +257,13 @@ class TasteEngine {
             requestTagEvidenceScore > 0 ||
             requestedGenreMatches.isNotEmpty ||
             hasAdultRequestEvidence;
+        // Catalog tags and description evidence can express the interpreted
+        // request without repeating the user's exact words.
+        if (!query.matchesText(candidate) &&
+            requestTagEvidenceScore <= 0 &&
+            !hasAdultRequestEvidence) {
+          continue;
+        }
         if (_isCodingHackRequest(query.request) && codingHackScore <= 0) {
           continue;
         }
@@ -367,7 +373,7 @@ class TasteEngine {
     }
 
     if (candidate.rating != null && candidate.rating! >= 8) {
-      return 'A strong community signal that still fits your broader AniList pattern.';
+      return 'A strong community signal that still fits your broader ${profile.serviceName} pattern.';
     }
 
     return 'Recommended from your ${profile.serviceName} profile and current popular releases.';

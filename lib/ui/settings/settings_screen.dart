@@ -382,10 +382,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _immersiveReader = true;
-  bool _downloadOnWifiOnly = true;
   bool _allowExplicitContent = false;
-  bool _enableMotionEffects = true;
   bool _useLocalAi = false;
   bool _useAiForSearch = true;
   bool _isDownloadingModel = false;
@@ -401,7 +398,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _serverModelStatusMessage;
   Set<String> _installedOllamaModels = const {};
   Set<String> _installedFlmModels = const {};
-  double _imageQuality = 0.85;
   double? _downloadProgress;
   CancelToken? _downloadCancelToken;
   final _localEndpointController = TextEditingController(
@@ -628,18 +624,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
 
     setState(() {
-      _immersiveReader =
-          prefs.getBool(LocalAiSettingsKeys.immersiveReader) ??
-          _immersiveReader;
-      _downloadOnWifiOnly =
-          prefs.getBool(LocalAiSettingsKeys.downloadOnWifiOnly) ??
-          _downloadOnWifiOnly;
       _allowExplicitContent =
           prefs.getBool(LocalAiSettingsKeys.allowExplicitContent) ??
           _allowExplicitContent;
-      _enableMotionEffects =
-          prefs.getBool(LocalAiSettingsKeys.enableMotionEffects) ??
-          _enableMotionEffects;
       _useLocalAi =
           prefs.getBool(LocalAiSettingsKeys.useLocalAi) ??
           (normalizedMode == localAiModeOnDevice ||
@@ -663,8 +650,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _downloadedModelName = prefs.getString(
         LocalAiSettingsKeys.downloadedModelName,
       );
-      _imageQuality =
-          prefs.getDouble(LocalAiSettingsKeys.imageQuality) ?? _imageQuality;
       _contextWindowController.text =
           prefs.getInt(LocalAiSettingsKeys.aiContextWindowTokens)?.toString() ??
           '';
@@ -721,11 +706,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveBool(String key, bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(key, value);
-  }
-
-  Future<void> _saveDouble(String key, double value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(key, value);
   }
 
   Future<void> _saveString(String key, String value) async {
@@ -1281,7 +1261,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Tune the reading space',
+                    'Make Majika yours',
                     style: theme.textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: Colors.white,
@@ -1289,133 +1269,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Settings here are saved on this device. Rows marked planned are visible now but not wired into the rest of the app yet.',
+                    'Connect your services and choose how recommendations work. AI is optional; your saved picks stay on this device.',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: Colors.white70,
                       height: 1.45,
                     ),
-                  ),
-                  const SizedBox(height: 18),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      _StatChip(
-                        icon: Icons.auto_awesome_rounded,
-                        label: _enableMotionEffects
-                            ? 'Motion enabled'
-                            : 'Motion reduced',
-                      ),
-                      _StatChip(
-                        icon: Icons.menu_book_rounded,
-                        label: _immersiveReader
-                            ? 'Immersive reader on'
-                            : 'Reader chrome visible',
-                      ),
-                      _StatChip(
-                        icon: Icons.image_rounded,
-                        label:
-                            'Image quality ${(100 * _imageQuality).round()}%',
-                      ),
-                    ],
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 18),
             _SettingsSection(
-              title: 'Reader',
-              subtitle: 'Small polish touches that shape the reading flow.',
-              children: [
-                _SwitchRow(
-                  icon: Icons.chrome_reader_mode_rounded,
-                  title: 'Immersive reader',
-                  subtitle:
-                      'Saved preference; reader chrome integration is planned.',
-                  value: _immersiveReader,
-                  onChanged: (value) {
-                    setState(() => _immersiveReader = value);
-                    _saveBool(LocalAiSettingsKeys.immersiveReader, value);
-                    showInfoToast(
-                      context,
-                      value
-                          ? 'Immersive reader preference saved.'
-                          : 'Reader chrome preference saved.',
-                    );
-                  },
-                ),
-                _SwitchRow(
-                  icon: Icons.animation_rounded,
-                  title: 'Motion effects',
-                  subtitle:
-                      'Saved preference; app-wide motion handling is planned.',
-                  value: _enableMotionEffects,
-                  onChanged: (value) {
-                    setState(() => _enableMotionEffects = value);
-                    _saveBool(LocalAiSettingsKeys.enableMotionEffects, value);
-                    showInfoToast(
-                      context,
-                      value
-                          ? 'Motion preference saved.'
-                          : 'Reduced-motion preference saved.',
-                    );
-                  },
-                ),
-                _SliderRow(
-                  icon: Icons.hd_rounded,
-                  title: 'Image quality',
-                  subtitle:
-                      'Saved preference; image request quality is not wired yet.',
-                  value: _imageQuality,
-                  onChanged: (value) => setState(() => _imageQuality = value),
-                  onChangeEnd: (value) {
-                    _saveDouble(LocalAiSettingsKeys.imageQuality, value);
-                    showInfoToast(
-                      context,
-                      'Preferred image quality set to ${(100 * value).round()}%.',
-                    );
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            _SettingsSection(
-              title: 'Downloads',
-              subtitle: 'Prep for the offline flow we can build next.',
-              children: [
-                _SwitchRow(
-                  icon: Icons.wifi_tethering_rounded,
-                  title: 'Wi-Fi only downloads',
-                  subtitle:
-                      'Saved preference; network gating is not wired yet.',
-                  value: _downloadOnWifiOnly,
-                  onChanged: (value) {
-                    setState(() => _downloadOnWifiOnly = value);
-                    _saveBool(LocalAiSettingsKeys.downloadOnWifiOnly, value);
-                    showInfoToast(
-                      context,
-                      value
-                          ? 'Wi-Fi-only download preference saved.'
-                          : 'Any-network download preference saved.',
-                    );
-                  },
-                ),
-                _ActionRow(
-                  icon: Icons.delete_sweep_rounded,
-                  title: 'Clear image cache',
-                  subtitle: 'Remove cached covers and page previews.',
-                  onTap: () {
-                    imageCache.clear();
-                    imageCache.clearLiveImages();
-                    showInfoToast(context, 'Image cache cleared.');
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            _SettingsSection(
               title: 'Content',
-              subtitle: 'Guard rails for browsing extensions and feeds.',
+              subtitle:
+                  'Choose what appears in recommendations and saved picks.',
               children: [
                 _SwitchRow(
                   icon: Icons.visibility_off_rounded,
@@ -1434,25 +1301,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     );
                   },
                 ),
-                _ActionRow(
-                  icon: Icons.tune_rounded,
-                  title: 'Manage discover filters',
-                  subtitle: 'Saved filters are not developed yet.',
-                  onTap: () =>
-                      showFeatureComingSoon(context, 'Discover filters'),
-                ),
               ],
             ),
             const SizedBox(height: 18),
             _SettingsSection(
               title: 'Services',
-              subtitle: 'Backend-backed service imports and account links.',
+              subtitle:
+                  'AniList uses a public username. Steam also needs a Majika account.',
               children: [
                 const _InfoRow(
                   icon: Icons.cloud_done_rounded,
-                  title: 'Steam key location',
+                  title: 'Steam connection',
                   subtitle:
-                      'The app now expects STEAM_WEB_API_KEY to live in Firebase Functions secrets, not in the frontend.',
+                      'Steam import requires a signed-in Majika account and a public Steam profile with public game details.',
                 ),
                 _ActionRow(
                   icon: Icons.person_rounded,
@@ -1474,7 +1335,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _SettingsSection(
               title: 'Local AI',
               subtitle:
-                  'Model controls for local-only profile summaries and search interpretation.',
+                  'Rules only works without setup. Enable AI for more flexible searches and explanations.',
               children: [
                 _OptionRow(
                   icon: Icons.route_rounded,
@@ -2935,41 +2796,6 @@ class _ModelDownloadCard extends StatelessWidget {
   }
 }
 
-class _StatChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-
-  const _StatChip({required this.icon, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 280),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: Theme.of(context).colorScheme.secondary),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _HuggingFaceTokenPanel extends StatelessWidget {
   final _DownloadableModel model;
   final TextEditingController controller;
@@ -3229,52 +3055,6 @@ class _TextFieldRow extends StatelessWidget {
             style: const TextStyle(color: Colors.white),
             decoration: _fieldDecoration(context).copyWith(hintText: hintText),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SliderRow extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final double value;
-  final ValueChanged<double> onChanged;
-  final ValueChanged<double> onChangeEnd;
-
-  const _SliderRow({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.value,
-    required this.onChanged,
-    required this.onChangeEnd,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Column(
-        children: [
-          Material(
-            type: MaterialType.transparency,
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(icon, color: Colors.white70),
-              title: Text(title, style: const TextStyle(color: Colors.white)),
-              subtitle: Text(
-                subtitle,
-                style: const TextStyle(color: Colors.white70),
-              ),
-              trailing: Text(
-                '${(100 * value).round()}%',
-                style: const TextStyle(color: Colors.white),
-              ),
-            ),
-          ),
-          Slider(value: value, onChanged: onChanged, onChangeEnd: onChangeEnd),
         ],
       ),
     );

@@ -100,6 +100,9 @@ class LocalProfileSession {
 
 class LocalProfileStore {
   static const sessionsKey = 'profiles.sessions.v1';
+  // Instances share one preference key. Serialize read/modify/write operations
+  // so two services finishing at once cannot overwrite each other's profiles.
+  static Future<void> _pendingWrite = Future<void>.value();
 
   const LocalProfileStore();
 
@@ -111,37 +114,50 @@ class LocalProfileStore {
     try {
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return {};
-      return {
-        for (final entry in decoded.entries)
-          if (entry.value is Map)
-            entry.key.toString(): LocalProfileSession.fromJson(
-              Map<String, dynamic>.from(entry.value as Map),
-            ),
-      };
+      final sessions = <String, LocalProfileSession>{};
+      for (final entry in decoded.entries) {
+        if (entry.value is! Map) continue;
+        try {
+          final session = LocalProfileSession.fromJson(
+            Map<String, dynamic>.from(entry.value as Map),
+          );
+          if (session.serviceId == entry.key) sessions[entry.key] = session;
+        } catch (_) {
+          // A damaged service cache must not discard other healthy profiles.
+        }
+      }
+      return sessions;
     } catch (_) {
       return {};
     }
   }
 
-  Future<void> saveSession(LocalProfileSession session) async {
+  Future<void> saveSession(LocalProfileSession session) => _enqueue(() async {
     final sessions = await loadSessions();
     sessions[session.serviceId] = session;
     await _saveSessions(sessions);
-  }
+  });
 
-  Future<void> removeSession(String serviceId) async {
+  Future<void> removeSession(String serviceId) => _enqueue(() async {
     final sessions = await loadSessions();
     sessions.remove(serviceId);
     await _saveSessions(sessions);
+  });
+
+  Future<void> _enqueue(Future<void> Function() operation) {
+    final result = _pendingWrite.then((_) => operation());
+    _pendingWrite = result.catchError((Object _) {});
+    return result;
   }
 
   Future<void> _saveSessions(Map<String, LocalProfileSession> sessions) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
+    final saved = await prefs.setString(
       sessionsKey,
       jsonEncode({
         for (final entry in sessions.entries) entry.key: entry.value.toJson(),
       }),
     );
+    if (!saved) throw StateError('Could not save your profile on this device.');
   }
 }
