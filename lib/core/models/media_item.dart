@@ -52,12 +52,14 @@ class MediaItem {
   bool get hasCover => coverUrl.isNotEmpty;
 
   String get serviceLabel {
-    if (sourceId.contains('anilist') ||
+    if (id.startsWith('anilist_') ||
+        sourceId.contains('anilist') ||
         extensionId.contains('anilist') ||
         siteUrl.contains('anilist.co')) {
       return 'AniList';
     }
-    if (sourceId.contains('steam') ||
+    if (id.startsWith('steam_') ||
+        sourceId.contains('steam') ||
         extensionId.contains('steam') ||
         siteUrl.contains('steampowered.com')) {
       return 'Steam';

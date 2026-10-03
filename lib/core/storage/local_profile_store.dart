@@ -102,7 +102,7 @@ class LocalProfileStore {
   static const sessionsKey = 'profiles.sessions.v1';
   // Instances share one preference key. Serialize read/modify/write operations
   // so two services finishing at once cannot overwrite each other's profiles.
-  static Future<void> _pendingWrite = Future<void>.value();
+  static Future<void>? _pendingWrite;
 
   const LocalProfileStore();
 
@@ -145,8 +145,18 @@ class LocalProfileStore {
   });
 
   Future<void> _enqueue(Future<void> Function() operation) {
-    final result = _pendingWrite.then((_) => operation());
-    _pendingWrite = result.catchError((Object _) {});
+    final previous = _pendingWrite;
+    final result = previous == null
+        ? operation()
+        : previous.then((_) => operation());
+    final barrier = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    _pendingWrite = barrier;
+    barrier.then((_) {
+      if (identical(_pendingWrite, barrier)) _pendingWrite = null;
+    });
     return result;
   }
 

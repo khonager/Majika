@@ -2,17 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:majika/core/firebase/firebase_bootstrap.dart';
+import 'package:majika/core/app_startup.dart';
 import 'package:majika/ui/home/home_screen.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  await FirebaseBootstrap.initialize();
-  await FlutterGemma.initialize();
-  runApp(const MajikaApp());
+  final initialization = initializeOptionalServices([
+    () async {
+      await FirebaseBootstrap.initialize();
+    },
+    () async {
+      await FlutterGemma.initialize();
+    },
+  ]);
+  runApp(MajikaApp(initialization: initialization));
 }
 
 class MajikaApp extends StatelessWidget {
-  const MajikaApp({super.key});
+  final Future<void>? initialization;
+  const MajikaApp({super.key, this.initialization});
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +39,36 @@ class MajikaApp extends StatelessWidget {
         textTheme: GoogleFonts.outfitTextTheme(ThemeData.dark().textTheme),
         useMaterial3: true,
       ),
-      home: const HomeScreen(),
+      home: FutureBuilder<void>(
+        future: initialization,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Majika',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(height: 20),
+                    CircularProgressIndicator(
+                      semanticsLabel: 'Starting Majika',
+                    ),
+                    SizedBox(height: 16),
+                    Text('Getting your space ready…'),
+                  ],
+                ),
+              ),
+            );
+          }
+          return const HomeScreen();
+        },
+      ),
     );
   }
 }

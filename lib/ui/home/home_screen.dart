@@ -213,6 +213,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _activeRecommendationProgressToast?.forceDismiss();
     _activeHomeProgressToast?.forceDismiss();
     _library.removeListener(_libraryChanged);
+    _library.dispose();
     _userNameController.dispose();
     super.dispose();
   }
@@ -348,16 +349,21 @@ class _HomeScreenState extends State<HomeScreen> {
         ? workspace.profile?.userName ?? _userNameController.text.trim()
         : '';
     setState(() {
+      _activeHomeSearchRunId = null;
+      _isRefreshingHome = false;
       workspace.clear(draft: draft);
       _userNameController.text = draft;
     });
+    _activeRecommendationProgressToast?.forceDismiss();
+    _activeHomeProgressToast?.forceDismiss();
     unawaited(
       _profileStore.removeSession(workspace.service.id).catchError((Object _) {
-        if (mounted)
+        if (mounted) {
           showErrorToast(
             context,
             'Could not remove the saved profile. Please try again.',
           );
+        }
       }),
     );
     _rebuildHomeRecommendationsSync();
@@ -395,10 +401,29 @@ class _HomeScreenState extends State<HomeScreen> {
           workspace.service.supportsAdultContent && !allowExplicitContent,
     );
     if (!mounted) return;
+    if (!requestQuery.isActive) {
+      _activeRecommendationProgressToast?.forceDismiss();
+      setState(() {
+        workspace.activeRecommendationSearchRunId = null;
+        workspace.isRefreshingRecommendations = false;
+        workspace.error = null;
+        workspace.query = requestQuery;
+        workspace.candidates = workspace.baseCandidates;
+        workspace.recommendations = _tasteEngine.rankCandidates(
+          profile,
+          workspace.baseCandidates,
+          query: requestQuery,
+        );
+      });
+      await _persistWorkspace(workspace);
+      _rebuildHomeRecommendationsSync();
+      return;
+    }
     final searchRunId = ++_nextSearchRunId;
 
     setState(() {
       workspace.query = requestQuery;
+      workspace.error = null;
       workspace.isRefreshingRecommendations = true;
       workspace.activeRecommendationSearchRunId = searchRunId;
     });
@@ -656,6 +681,17 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() => _homeQuery = homeRequestQuery);
       return;
     }
+    if (!homeRequestQuery.isActive) {
+      _activeHomeProgressToast?.forceDismiss();
+      setState(() {
+        _homeQuery = homeRequestQuery;
+        _homeError = null;
+        _activeHomeSearchRunId = null;
+        _isRefreshingHome = false;
+      });
+      _rebuildHomeRecommendationsSync();
+      return;
+    }
     final searchRunId = ++_nextSearchRunId;
 
     setState(() {
@@ -800,6 +836,7 @@ class _HomeScreenState extends State<HomeScreen> {
             );
             if (recommendations.isEmpty) continue;
 
+            if (!mounted || _activeHomeSearchRunId != searchRunId) return;
             workspace.baseCandidates = baseCandidates;
             workspace.candidates = candidates;
             workspace.adultCandidatesLoaded =
@@ -810,6 +847,7 @@ class _HomeScreenState extends State<HomeScreen> {
             merged.addAll(recommendations);
           }
 
+          if (!mounted || _activeHomeSearchRunId != searchRunId) return;
           merged.sort((a, b) => b.matchScore.compareTo(a.matchScore));
           progressToast.update('Choosing the best Home recommendation...');
           final profiles = importedWorkspaces
@@ -836,6 +874,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 query: chooserQuery,
                 suggestion: suggestion,
               );
+              if (!mounted || _activeHomeSearchRunId != searchRunId) return;
               chosen = resolved.recommendation;
               if (chosen != null) {
                 final directChosen = chosen;
@@ -1880,11 +1919,12 @@ class _HomeScreenState extends State<HomeScreen> {
       _userNameController.text = workspace.userNameDraft;
       _rebuildHomeRecommendationsSync();
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         showErrorToast(
           context,
           'Could not restore your saved profiles. You can try connecting again.',
         );
+      }
     } finally {
       if (mounted) setState(() => _isRestoring = false);
     }
@@ -1901,11 +1941,12 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await _profileStore.saveSession(session);
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         showErrorToast(
           context,
           'Your profile is available now, but could not be saved. Refresh to try again.',
         );
+      }
     }
   }
 
@@ -2310,8 +2351,9 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 String _friendlyError(Object error, {required String serviceName}) {
-  if (error is TimeoutException)
+  if (error is TimeoutException) {
     return '$serviceName took too long to respond. Check your connection and try again.';
+  }
   if (error is FormatException) return error.message;
   final message = error.toString().replaceFirst(
     RegExp(r'^\w+(?:Exception|Error):\s*'),
@@ -2458,6 +2500,9 @@ class _HomeContentShell extends StatelessWidget {
                                     padding: readableInset,
                                     child: _EmptyHomeRecommendations(
                                       query: query,
+                                      onReset: () => onQueryChanged(
+                                        const RecommendationQuery(),
+                                      ),
                                     ),
                                   )
                                 : _TopRecommendationCard(
@@ -2817,7 +2862,8 @@ class _HomeServiceSection extends StatelessWidget {
 class _EmptyHomeRecommendations extends StatelessWidget {
   final RecommendationQuery query;
 
-  const _EmptyHomeRecommendations({required this.query});
+  final VoidCallback onReset;
+  const _EmptyHomeRecommendations({required this.query, required this.onReset});
 
   @override
   Widget build(BuildContext context) {
@@ -2840,6 +2886,12 @@ class _EmptyHomeRecommendations extends StatelessWidget {
               color: Colors.white.withValues(alpha: 0.72),
             ),
           ),
+          if (query.isActive)
+            TextButton.icon(
+              onPressed: onReset,
+              icon: const Icon(Icons.restart_alt),
+              label: const Text('Reset search'),
+            ),
         ],
       ),
     );
@@ -3092,8 +3144,9 @@ class _ShellHeader extends StatelessWidget {
             ),
           ],
         );
-        final actions = Row(
-          mainAxisSize: MainAxisSize.min,
+        final actions = Wrap(
+          spacing: 4,
+          runSpacing: 4,
           children: [
             _AiChatPill(
               icon: Icons.auto_awesome_rounded,
@@ -3323,6 +3376,8 @@ class _RecommendationState extends StatelessWidget {
                       child: _EmptyRecommendations(
                         profile: profile,
                         query: query,
+                        onReset: () =>
+                            onQueryChanged(const RecommendationQuery()),
                       ),
                     )
                   else
@@ -4502,7 +4557,12 @@ class _EmptyRecommendations extends StatelessWidget {
   final TasteProfile profile;
   final RecommendationQuery query;
 
-  const _EmptyRecommendations({required this.profile, required this.query});
+  final VoidCallback onReset;
+  const _EmptyRecommendations({
+    required this.profile,
+    required this.query,
+    required this.onReset,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -4525,6 +4585,12 @@ class _EmptyRecommendations extends StatelessWidget {
               color: Colors.white.withValues(alpha: 0.72),
             ),
           ),
+          if (query.isActive)
+            TextButton.icon(
+              onPressed: onReset,
+              icon: const Icon(Icons.restart_alt),
+              label: const Text('Reset search'),
+            ),
         ],
       ),
     );
@@ -4603,7 +4669,7 @@ class _MobileLiquidRail extends StatelessWidget {
 
     return SizedBox(
       key: const ValueKey('mobile-liquid-rail'),
-      width: 50,
+      width: 58,
       child: LayoutBuilder(
         builder: (context, constraints) {
           const compactRailHeight = 372.0;
@@ -4728,8 +4794,8 @@ class _LiquidRailButton extends StatelessWidget {
             backgroundColor: isActive
                 ? activeColor.withValues(alpha: 0.84)
                 : Colors.white.withValues(alpha: 0.015),
-            fixedSize: const Size(40, 40),
-            minimumSize: const Size(40, 40),
+            fixedSize: const Size(48, 48),
+            minimumSize: const Size(48, 48),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             shape: const CircleBorder(),
             side: BorderSide(

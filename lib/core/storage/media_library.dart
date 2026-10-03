@@ -10,6 +10,13 @@ class MediaLibrary extends ChangeNotifier {
   Map<String, MediaItem> _saved = {};
   Map<String, MediaItem> _hidden = {};
   Future<void> _pendingWrite = Future<void>.value();
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
 
   List<MediaItem> get saved => _saved.values.toList().reversed.toList();
   List<MediaItem> get hidden => _hidden.values.toList().reversed.toList();
@@ -67,8 +74,9 @@ class MediaLibrary extends ChangeNotifier {
       final oldSaved = Map<String, MediaItem>.of(_saved);
       final oldHidden = Map<String, MediaItem>.of(_hidden);
       change();
+      SharedPreferences? prefs;
       try {
-        final prefs = await SharedPreferences.getInstance();
+        prefs = await SharedPreferences.getInstance();
         final saved = await prefs.setString(
           storageKey,
           jsonEncode({
@@ -76,14 +84,20 @@ class MediaLibrary extends ChangeNotifier {
             'hidden': _hidden.values.map((item) => item.toJson()).toList(),
           }),
         );
-        if (!saved)
+        if (!saved) {
           throw StateError('Could not save your list on this device.');
+        }
       } catch (_) {
         _saved = oldSaved;
         _hidden = oldHidden;
+        try {
+          await prefs?.reload();
+        } catch (_) {
+          /* Preserve the original write error. */
+        }
         rethrow;
       }
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     });
     _pendingWrite = result.catchError((Object _) {});
     return result;

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation_query.dart';
@@ -93,6 +95,65 @@ void main() {
 
     expect(restored.containsKey('one'), isFalse);
     expect(restored.containsKey('two'), isTrue);
+  });
+
+  test(
+    'concurrent service saves and removals preserve unrelated profiles',
+    () async {
+      LocalProfileSession session(String id) => LocalProfileSession(
+        serviceId: id,
+        profile: _profile(serviceId: id),
+        candidates: const [],
+        serviceTags: const [],
+        query: const RecommendationQuery(),
+        adultCandidatesLoaded: false,
+        userNameDraft: id,
+      );
+      const store = LocalProfileStore();
+      await Future.wait([
+        store.saveSession(session('one')),
+        const LocalProfileStore().saveSession(session('two')),
+      ]);
+      expect(
+        (await store.loadSessions()).keys,
+        unorderedEquals(['one', 'two']),
+      );
+      await Future.wait([
+        store.removeSession('one'),
+        store.saveSession(session('three')),
+      ]);
+      expect(
+        (await store.loadSessions()).keys,
+        unorderedEquals(['two', 'three']),
+      );
+    },
+  );
+
+  test('one corrupt profile does not discard healthy service caches', () async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      LocalProfileStore.sessionsKey,
+      jsonEncode({
+        'healthy': LocalProfileSession(
+          serviceId: 'healthy',
+          profile: _profile(serviceId: 'healthy'),
+          candidates: const [],
+          serviceTags: const [],
+          query: const RecommendationQuery(),
+          adultCandidatesLoaded: false,
+          userNameDraft: 'tester',
+        ).toJson(),
+        'damaged': {
+          'serviceId': 'damaged',
+          'profile': {
+            'library': [
+              {'id': 123},
+            ],
+          },
+        },
+      }),
+    );
+    expect((await const LocalProfileStore().loadSessions()).keys, ['healthy']);
   });
 }
 

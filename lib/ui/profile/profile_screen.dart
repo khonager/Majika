@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:majika/core/firebase/firebase_bootstrap.dart';
 import 'package:majika/core/firebase/firebase_profile_service.dart';
@@ -5,14 +7,87 @@ import 'package:majika/ui/shared/app_feedback.dart';
 import 'package:majika/ui/shared/glass_panel.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  final FirebaseProfileService? service;
+  const ProfileScreen({super.key, this.service});
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  final _service = const FirebaseProfileService();
+  late final FirebaseProfileService _service;
+  StreamSubscription<AppAuthUser?>? _authSubscription;
+  AppAuthUser? _user;
+  AppUserProfile? _profile;
+  bool _loadingAuth = true;
+  bool _loadingProfile = false;
+  String? _profileError;
+  int _profileRevision = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _service = widget.service ?? const FirebaseProfileService();
+    _authSubscription = _service.authStateChanges().listen(
+      _onAuthChanged,
+      onError: (Object _) {
+        if (mounted) {
+          setState(() {
+            _loadingAuth = false;
+            _profileError =
+                'Could not restore your account. Please sign in again.';
+          });
+        }
+      },
+    );
+  }
+
+  void _onAuthChanged(AppAuthUser? user) {
+    if (!mounted) return;
+    if (!_loadingAuth && user?.uid == _user?.uid) return;
+    _profileRevision++;
+    setState(() {
+      _loadingAuth = false;
+      _user = user;
+      _profile = null;
+      _profileError = null;
+      _loadingProfile = false;
+      _displayNameController.text = user?.fallbackDisplayName ?? '';
+      _steamProfileController.clear();
+    });
+    if (user != null) unawaited(_loadProfile(user));
+  }
+
+  Future<void> _loadProfile(AppAuthUser user) async {
+    final revision = ++_profileRevision;
+    setState(() {
+      _loadingProfile = true;
+      _profileError = null;
+    });
+    try {
+      final profile = await _service.fetchProfile().timeout(
+        const Duration(seconds: 20),
+      );
+      if (!mounted || revision != _profileRevision) return;
+      setState(() {
+        _profile = profile;
+        _displayNameController.text =
+            profile?.displayName ?? user.fallbackDisplayName;
+        _steamProfileController.text = profile?.steamProfile ?? '';
+      });
+    } catch (_) {
+      if (!mounted || revision != _profileRevision) return;
+      setState(
+        () => _profileError =
+            'Could not load your profile. Check your connection and retry.',
+      );
+    } finally {
+      if (mounted && revision == _profileRevision) {
+        setState(() => _loadingProfile = false);
+      }
+    }
+  }
+
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _displayNameController = TextEditingController();
@@ -22,6 +97,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   void dispose() {
+    _authSubscription?.cancel();
     _emailController.dispose();
     _passwordController.dispose();
     _displayNameController.dispose();
@@ -30,6 +106,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _submitAuth() async {
+    if (_isSaving) return;
     final email = _emailController.text.trim();
     final password = _passwordController.text;
     final displayName = _displayNameController.text.trim();
@@ -68,6 +145,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _saveProfile() async {
+    if (_isSaving || _loadingProfile || _profileError != null) return;
     final displayName = _displayNameController.text.trim();
     if (displayName.isEmpty) {
       showErrorToast(context, 'Display name cannot be empty.');
@@ -80,6 +158,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         displayName: displayName,
         steamProfile: _steamProfileController.text,
       );
+      if (!mounted) return;
+      if (_user != null) await _loadProfile(_user!);
       if (!mounted) return;
       showInfoToast(context, 'Profile saved.');
     } catch (error) {
@@ -125,7 +205,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Sign in to use Firebase-backed features. Steam imports use your signed-in session to call a Cloud Function, so the Steam Web API key stays on the server.',
+                    'Sign in to connect Steam and keep your account settings across devices. AniList and your saved picks work without an account.',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: Colors.white70,
                       height: 1.45,
@@ -137,28 +217,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 18),
             if (!_service.isConfigured)
               _SetupRequiredCard(error: FirebaseBootstrap.lastError)
-            else
-              StreamBuilder<AppAuthUser?>(
-                stream: _service.authStateChanges(),
-                builder: (context, snapshot) {
-                  final user = snapshot.data;
-                  if (user == null) return _buildAuthCard();
-                  return FutureBuilder<AppUserProfile?>(
-                    future: _service.fetchProfile(),
-                    builder: (context, profileSnapshot) {
-                      final profile = profileSnapshot.data;
-                      if (profile != null) {
-                        _displayNameController.text = profile.displayName;
-                        _steamProfileController.text =
-                            profile.steamProfile ?? '';
-                      } else {
-                        _displayNameController.text = user.fallbackDisplayName;
-                      }
-                      return _buildSignedInCard(user: user, profile: profile);
-                    },
-                  );
-                },
+            else if (_loadingAuth)
+              const Center(
+                child: CircularProgressIndicator(
+                  semanticsLabel: 'Loading account',
+                ),
+              )
+            else if (_user == null)
+              _buildAuthCard()
+            else ...[
+              if (_loadingProfile)
+                const LinearProgressIndicator(
+                  semanticsLabel: 'Loading profile',
+                ),
+              if (_profileError != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Column(
+                    children: [
+                      Text(_profileError!),
+                      TextButton(
+                        onPressed: () => _loadProfile(_user!),
+                        child: const Text('Retry profile'),
+                      ),
+                    ],
+                  ),
+                ),
+              AbsorbPointer(
+                absorbing: _isSaving || _loadingProfile,
+                child: _buildSignedInCard(user: _user!, profile: _profile),
               ),
+            ],
           ],
         ),
       ),
@@ -201,7 +290,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ],
           const SizedBox(height: 14),
-          Row(
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
             children: [
               FilledButton.icon(
                 onPressed: _isSaving ? null : _submitAuth,
@@ -302,7 +393,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 10),
           Text(
-            'Steam OpenID account linking is a bigger custom-auth step. For now, saving your public Steam profile here gives Majika a safe profile link while the actual Web API key remains in Firebase Functions.',
+            'Use a public Steam profile and make your game details public. Majika reads your library without changing it.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: Colors.white60,
               height: 1.4,
@@ -321,7 +412,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
             runSpacing: 8,
             children: [
               FilledButton.icon(
-                onPressed: _isSaving ? null : _saveProfile,
+                onPressed: _isSaving || _loadingProfile || _profileError != null
+                    ? null
+                    : _saveProfile,
                 icon: const Icon(Icons.save_rounded),
                 label: const Text('Save profile'),
               ),
@@ -329,9 +422,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 onPressed: _isSaving
                     ? null
                     : () async {
-                        await _service.signOut();
-                        if (!mounted) return;
-                        showInfoToast(context, 'Signed out.');
+                        try {
+                          await _service.signOut();
+                          if (mounted) showInfoToast(context, 'Signed out.');
+                        } catch (_) {
+                          if (mounted) {
+                            showErrorToast(
+                              context,
+                              'Could not sign out. Please try again.',
+                            );
+                          }
+                        }
                       },
                 icon: const Icon(Icons.logout_rounded),
                 label: const Text('Sign out'),

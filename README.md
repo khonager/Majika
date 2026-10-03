@@ -2,7 +2,18 @@
 
 Majika is a local-first Flutter prototype for building taste profiles from the services a person already uses, then recommending new things to watch, read, play, or listen to. The long-term idea is to connect services such as AniList, Spotify, Steam, movie/TV libraries, and reading apps, normalize their signals, and let local AI plus recommendation systems explain what the user might enjoy next.
 
-The current first working slice is intentionally narrow: AniList public username import, local profile generation, local-AI-assisted recommendations when a model is configured, deterministic fallback behavior when it is not, and a redesigned glass UI based on the sketch in this session.
+Majika currently supports AniList public username imports and Steam public libraries, with recommendations, optional AI search, and a device-local saved list. Steam imports require a signed-in Majika account and the Firebase Steam backend; AniList and rules-only recommendations do not require AI setup.
+
+## Everyday use
+
+1. Connect AniList with a public username, or connect a public Steam profile after signing in from Profile.
+2. Browse recommendations or search for a mood, tag, or format. On phones, expand **Filters** for more controls.
+3. Use **Why this pick?** for the full explanation and description, and **Save for later** to keep a title.
+4. Open **Saved** from the navigation rail or dock. Saved titles and hidden picks survive restarting the app and remain available offline; external catalog pages still require a connection.
+5. Hide unwanted recommendations, undo the action, or restore them from **Hidden picks**.
+6. Use **Refresh library** to import recent activity and update candidates. A failed refresh keeps the last imported profile. Resetting a service search uses its cached candidates without requiring the network.
+
+See the [usability review and verification report](docs/qa/2026-10-03/review.md) for screenshots, coverage, and remaining limitations.
 
 ## Current Scope
 
@@ -12,7 +23,7 @@ The current first working slice is intentionally narrow: AniList public username
 - **Top-pick path:** when local AI is available, it chooses the lead result from the ranked candidate set and the UI labels it as an AI recommendation. Without a model, the deterministic ranker still picks a top recommendation.
 - **Search path:** after import, the user can steer recommendations with tags, anime/manga type chips, every AniList format chip, an adult-content opt-in, and a plain search request. This is not a chat UI; the request should be interpreted into recommendation filters, AniList search constraints, and ranking boosts.
 - **Tag ownership:** tags picked by the user are pinned/self-selected. Tags inferred from the text request are AI-selected and shown differently in the UI. Starting a new text search should clear stale AI-selected tags while preserving user-pinned tags.
-- **Storage:** local/session-first prototype with no backend. Firebase sync is a future option, so service and repository boundaries should stay clean.
+- **Storage:** imported profiles, candidate caches, saved picks, and hidden picks persist locally. Firebase supports optional accounts and the protected Steam connector; saved picks are not synchronized between devices.
 - **AI:** no remote AI API by default. The app can download or use a local model with `flutter_gemma`, tries the active local model for search interpretation and top-pick selection, and falls back to deterministic local rules when no model is configured or inference fails.
 - **Extensions:** the Lua extension runner and `extensions/anilist_template.lua` are experimental extension work. The main app uses the typed Dart AniList connector for reliability.
 
@@ -161,17 +172,16 @@ flutter pub run scripts/local_ai_benchmark.dart
 ## Known Limitations
 
 - AniList OAuth is not implemented yet.
-- Data is not persisted across devices yet.
-- Firebase is not configured yet.
+- Saved picks and imported library caches are not synchronized across devices.
+- Steam requires a configured Firebase backend and public game details. See [Firebase setup](docs/firebase_setup.md).
 - Local model execution is currently used for search interpretation and top-pick selection. Profile summaries and broader recommendation explanations still fall back if inference is unavailable or fails.
-- Steam, Spotify, movies/TV, and other services are placeholders.
+- Spotify and movies/TV are not implemented; unfinished service buttons are not shown in navigation.
 - Recommendation scoring is deterministic and intentionally simple while the product loop is being proven.
 
 ## Roadmap
 
-1. Persist imported profiles and the last used AniList username locally.
-2. Add AniList OAuth for private lists.
-3. Add model status persistence, delete/re-download controls, and richer model health checks.
-4. Add Firebase sync as an optional account layer.
-5. Add a second service, likely Steam or Spotify.
-6. Improve recommendations with embeddings, cross-service clustering, and better freshness signals.
+1. Add AniList OAuth for private lists.
+2. Improve model health checks and benchmark recommendation quality on real devices.
+3. Add optional synchronization for saved picks and recommendation feedback.
+4. Add freshness-aware discovery and richer signals from saved and hidden picks.
+5. Validate authenticated service flows and accessibility on Android and iOS devices.

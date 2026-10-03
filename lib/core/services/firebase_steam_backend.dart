@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_functions/cloud_functions.dart';
@@ -9,8 +10,18 @@ import 'package:majika/core/services/steam_service.dart';
 import 'package:majika/firebase_options.dart';
 
 class FirebaseSteamProtectedApi implements SteamProtectedApi {
-  FirebaseSteamProtectedApi({FirebaseFunctions? functions})
-    : _functions = functions;
+  FirebaseSteamProtectedApi({
+    FirebaseFunctions? functions,
+    http.Client? restClient,
+    Future<String?> Function()? idTokenProvider,
+    this.requestTimeout = const Duration(seconds: 20),
+  }) : _functions = functions,
+       _restClient = restClient,
+       _idTokenProvider = idTokenProvider;
+
+  final http.Client? _restClient;
+  final Future<String?> Function()? _idTokenProvider;
+  final Duration requestTimeout;
 
   final FirebaseFunctions? _functions;
 
@@ -41,7 +52,9 @@ class FirebaseSteamProtectedApi implements SteamProtectedApi {
     String action,
     Map<String, Object?> payload,
   ) async {
-    if (FirebaseBootstrap.useRestFallback) {
+    if (_restClient != null ||
+        _idTokenProvider != null ||
+        FirebaseBootstrap.useRestFallback) {
       return _callRest(action, payload);
     }
 
@@ -56,7 +69,10 @@ class FirebaseSteamProtectedApi implements SteamProtectedApi {
       );
     }
 
-    final callable = _client.httpsCallable('steamApi');
+    final callable = _client.httpsCallable(
+      'steamApi',
+      options: HttpsCallableOptions(timeout: requestTimeout),
+    );
     final result = await callable.call<Map<String, dynamic>>({
       'action': action,
       ...payload,
@@ -68,14 +84,17 @@ class FirebaseSteamProtectedApi implements SteamProtectedApi {
     String action,
     Map<String, Object?> payload,
   ) async {
-    final idToken = await const FirebaseProfileService().currentIdToken();
+    final idToken =
+        await (_idTokenProvider?.call() ??
+                const FirebaseProfileService().currentIdToken())
+            .timeout(requestTimeout);
     if (idToken == null || idToken.isEmpty) {
       throw const SteamException(
         'Sign in on the Profile page before importing a Steam library.',
       );
     }
 
-    final response = await http.post(
+    final response = await (_restClient?.post ?? http.post)(
       Uri.https(
         'us-central1-${DefaultFirebaseOptions.linux.projectId}.cloudfunctions.net',
         '/steamApi',
@@ -87,18 +106,26 @@ class FirebaseSteamProtectedApi implements SteamProtectedApi {
       body: jsonEncode({
         'data': {'action': action, ...payload},
       }),
-    );
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw SteamException(
-        'Steam backend returned HTTP ${response.statusCode}: ${response.body}',
+    ).timeout(requestTimeout);
+    Object? decoded;
+    try {
+      decoded = jsonDecode(response.body);
+    } catch (_) {
+      throw const SteamException(
+        'Steam connection is unavailable. Please try again shortly.',
       );
     }
-
-    final decoded = jsonDecode(response.body);
     if (decoded is Map && decoded['error'] != null) {
       final error = decoded['error'];
       final message = error is Map ? error['message']?.toString() : null;
       throw SteamException(message ?? 'Steam backend rejected the request.');
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw SteamException(
+        response.statusCode == 401
+            ? 'Sign in on the Profile page before importing a Steam library.'
+            : 'Steam connection is unavailable (HTTP ${response.statusCode}). Please try again shortly.',
+      );
     }
     final result = decoded is Map ? decoded['result'] : null;
     return _deepStringMap(result);

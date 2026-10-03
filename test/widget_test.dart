@@ -1002,7 +1002,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.text('One local feed across your imported services.'),
+      find.text('Find your next favorite. Keep it for later.'),
       findsOneWidget,
     );
     expect(find.text('Best Match'), findsWidgets);
@@ -1516,7 +1516,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Cloud API key'), findsOneWidget);
-    expect(find.textContaining('Google Gemini · gemini-2.5-flash-lite'), findsOneWidget);
+    expect(
+      find.textContaining('Google Gemini · gemini-2.5-flash-lite'),
+      findsOneWidget,
+    );
     expect(find.text('Cloud endpoint'), findsOneWidget);
     expect(find.text('Free cloud model'), findsOneWidget);
     expect(find.text('gemini-2.5-flash-lite'), findsWidgets);
@@ -1550,7 +1553,9 @@ void main() {
       'gemini_test_key',
     );
 
-    await tester.tap(find.textContaining('Google Gemini · gemini-2.5-flash-lite'));
+    await tester.tap(
+      find.textContaining('Google Gemini · gemini-2.5-flash-lite'),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.textContaining('OpenRouter · openrouter/free').last);
     await tester.pumpAndSettle();
@@ -1770,7 +1775,7 @@ void main() {
     expect(find.textContaining('32K tokens'), findsOneWidget);
   });
 
-  testWidgets('settings points Steam API key storage to Firebase Functions', (
+  testWidgets('settings explains Steam connection requirements', (
     WidgetTester tester,
   ) async {
     await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
@@ -1783,7 +1788,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('public Steam profile'), findsOneWidget);
+    expect(find.textContaining('Steam import requires'), findsOneWidget);
     expect(find.byKey(const ValueKey('steam-api-key')), findsNothing);
   });
 }

@@ -37,17 +37,19 @@ Future<void> openMediaPage(BuildContext context, MediaItem item) async {
   }
   try {
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!launched && context.mounted)
+    if (!launched && context.mounted) {
       showErrorToast(
         context,
         'Could not open ${item.serviceLabel}. Please try again.',
       );
+    }
   } catch (_) {
-    if (context.mounted)
+    if (context.mounted) {
       showErrorToast(
         context,
         'Could not open ${item.serviceLabel}. Please try again.',
       );
+    }
   }
 }
 
@@ -58,16 +60,18 @@ Future<void> _save(
 ) async {
   try {
     await library.toggleSaved(item);
-    if (context.mounted)
+    if (context.mounted) {
       showInfoToast(
         context,
         library.isSaved(item)
             ? 'Saved for later on this device.'
             : 'Removed from saved items.',
       );
+    }
   } catch (_) {
-    if (context.mounted)
+    if (context.mounted) {
       showErrorToast(context, 'Could not save this change. Please try again.');
+    }
   }
 }
 
@@ -95,8 +99,9 @@ Future<void> _hide(
       ),
     );
   } catch (_) {
-    if (context.mounted)
+    if (context.mounted) {
       showErrorToast(context, 'Could not save this change. Please try again.');
+    }
   }
 }
 
@@ -275,7 +280,7 @@ class SavedLibraryScreen extends StatelessWidget {
         .toList();
     if (visible.isEmpty) {
       return Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisSize: MainAxisSize.min,

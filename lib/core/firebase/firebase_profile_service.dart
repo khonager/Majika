@@ -80,11 +80,23 @@ class AppUserProfile {
 }
 
 class FirebaseProfileService {
-  const FirebaseProfileService();
+  const FirebaseProfileService() : _restOverride = null;
+
+  FirebaseProfileService.rest({
+    required http.Client client,
+    Duration timeout = const Duration(seconds: 20),
+  }) : _restOverride = _FirebaseRestProfileClient(
+         client: client,
+         timeout: timeout,
+       );
+
+  final _FirebaseRestProfileClient? _restOverride;
+  _FirebaseRestProfileClient get _rest => _restOverride ?? _restClient;
 
   static final _restClient = _FirebaseRestProfileClient();
 
-  bool get _useRest => FirebaseBootstrap.useRestFallback;
+  bool get _useRest =>
+      _restOverride != null || FirebaseBootstrap.useRestFallback;
 
   bool get isConfigured => _useRest || FirebaseBootstrap.isConfigured;
 
@@ -93,7 +105,7 @@ class FirebaseProfileService {
   FirebaseFirestore get _db => FirebaseFirestore.instance;
 
   Stream<AppAuthUser?> authStateChanges() {
-    if (_useRest) return _restClient.authStateChanges();
+    if (_useRest) return _rest.authStateChanges();
     if (!isConfigured) return Stream<AppAuthUser?>.value(null);
     return _auth.authStateChanges().map(
       (user) => user == null ? null : AppAuthUser.fromFirebaseUser(user),
@@ -101,7 +113,7 @@ class FirebaseProfileService {
   }
 
   Future<AppUserProfile?> fetchProfile() async {
-    if (_useRest) return _restClient.fetchProfile();
+    if (_useRest) return _rest.fetchProfile();
     if (!isConfigured) return null;
     final firebaseUser = _auth.currentUser;
     if (firebaseUser == null) return null;
@@ -113,7 +125,7 @@ class FirebaseProfileService {
 
   Future<void> signIn({required String email, required String password}) async {
     if (_useRest) {
-      await _restClient.signIn(email: email, password: password);
+      await _rest.signIn(email: email, password: password);
       return;
     }
     await _auth.signInWithEmailAndPassword(email: email, password: password);
@@ -125,7 +137,7 @@ class FirebaseProfileService {
     required String displayName,
   }) async {
     if (_useRest) {
-      await _restClient.createAccount(
+      await _rest.createAccount(
         email: email,
         password: password,
         displayName: displayName,
@@ -149,7 +161,7 @@ class FirebaseProfileService {
     String? steamProfile,
   }) async {
     if (_useRest) {
-      await _restClient.saveProfile(
+      await _rest.saveProfile(
         displayName: displayName,
         steamProfile: steamProfile,
       );
@@ -163,12 +175,8 @@ class FirebaseProfileService {
     await _profileDoc(user.uid).set({
       'email': user.email,
       'displayName': displayName.trim(),
-      'linkedAccounts': {
-        if (trimmedSteam != null && trimmedSteam.isNotEmpty)
-          'steam': trimmedSteam,
-      },
+      if (steamProfile != null) 'linkedAccounts': {'steam': trimmedSteam ?? ''},
       'updatedAt': FieldValue.serverTimestamp(),
-      'createdAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
 
     if (displayName.trim().isNotEmpty) {
@@ -179,7 +187,7 @@ class FirebaseProfileService {
   Future<bool> saveHuggingFaceTokenIfSignedIn(String token) async {
     final trimmed = token.trim();
     if (_useRest) {
-      return _restClient.saveHuggingFaceTokenIfSignedIn(trimmed);
+      return _rest.saveHuggingFaceTokenIfSignedIn(trimmed);
     }
     if (!isConfigured) return false;
     final user = _auth.currentUser;
@@ -194,7 +202,7 @@ class FirebaseProfileService {
 
   Future<bool> saveCloudApiKeysIfSignedIn(Map<String, String> keys) async {
     if (_useRest) {
-      return _restClient.saveCloudApiKeysIfSignedIn(keys);
+      return _rest.saveCloudApiKeysIfSignedIn(keys);
     }
     if (!isConfigured) return false;
     final user = _auth.currentUser;
@@ -209,14 +217,14 @@ class FirebaseProfileService {
 
   Future<void> signOut() async {
     if (_useRest) {
-      await _restClient.signOut();
+      await _rest.signOut();
       return;
     }
     await _auth.signOut();
   }
 
   Future<String?> currentIdToken() async {
-    if (_useRest) return _restClient.currentIdToken();
+    if (_useRest) return _rest.currentIdToken();
     if (!FirebaseBootstrap.isConfigured) return null;
     return _auth.currentUser?.getIdToken();
   }
@@ -227,26 +235,46 @@ class FirebaseProfileService {
 }
 
 class _FirebaseRestProfileClient {
+  _FirebaseRestProfileClient({
+    http.Client? client,
+    this.timeout = const Duration(seconds: 20),
+  }) : _client = client ?? http.Client();
+  final http.Client _client;
+  final Duration timeout;
+  Future<void>? _loading;
+  Future<String?>? _refreshing;
+  int _authRevision = 0;
+
   static const _sessionKey = 'firebase.restSession';
 
   final _authController = StreamController<AppAuthUser?>.broadcast();
   _RestSession? _session;
   bool _loaded = false;
 
-  Stream<AppAuthUser?> authStateChanges() {
-    _ensureLoaded();
-    return _authController.stream;
-  }
+  Stream<AppAuthUser?> authStateChanges() =>
+      Stream<AppAuthUser?>.multi((controller) {
+        final subscription = _authController.stream.listen(
+          controller.add,
+          onError: controller.addError,
+        );
+        controller.onCancel = subscription.cancel;
+        _ensureLoaded().then(
+          (_) => controller.add(_session?.user),
+          onError: controller.addError,
+        );
+      });
 
   Future<AppUserProfile?> fetchProfile() async {
     final session = await _requireSessionOrNull();
     if (session == null) return null;
 
     final uri = _firestoreDocumentUri(session.uid);
-    final response = await http.get(
-      uri,
-      headers: {'Authorization': 'Bearer ${await currentIdToken()}'},
-    );
+    final response = await _client
+        .get(
+          uri,
+          headers: {'Authorization': 'Bearer ${await currentIdToken()}'},
+        )
+        .timeout(timeout);
     if (response.statusCode == 404) {
       return AppUserProfile.fromAuthUser(session.user, null);
     }
@@ -259,6 +287,7 @@ class _FirebaseRestProfileClient {
   }
 
   Future<void> signIn({required String email, required String password}) async {
+    _authRevision++;
     final decoded = await _identityPost('accounts:signInWithPassword', {
       'email': email,
       'password': password,
@@ -272,6 +301,7 @@ class _FirebaseRestProfileClient {
     required String password,
     required String displayName,
   }) async {
+    _authRevision++;
     final decoded = await _identityPost('accounts:signUp', {
       'email': email,
       'password': password,
@@ -290,35 +320,35 @@ class _FirebaseRestProfileClient {
     String? steamProfile,
   }) async {
     final session = await _requireSession();
+    final revision = _authRevision;
     final now = DateTime.now().toUtc();
     final trimmedSteam = steamProfile?.trim();
     final fields = {
       'email': _firestoreString(session.email),
       'displayName': _firestoreString(displayName.trim()),
-      'linkedAccounts': {
-        'mapValue': {
-          'fields': {
-            if (trimmedSteam != null && trimmedSteam.isNotEmpty)
-              'steam': _firestoreString(trimmedSteam),
+      if (steamProfile != null)
+        'linkedAccounts': {
+          'mapValue': {
+            'fields': {'steam': _firestoreString(trimmedSteam ?? '')},
           },
         },
-      },
       'updatedAt': {'timestampValue': now.toIso8601String()},
     };
 
-    final response = await http.patch(
-      _firestoreDocumentUri(session.uid),
-      headers: {
-        'Authorization': 'Bearer ${await currentIdToken()}',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({'fields': fields}),
-    );
+    final response = await _client
+        .patch(
+          _firestoreDocumentUri(session.uid, updateFields: fields.keys),
+          headers: {
+            'Authorization': 'Bearer ${await currentIdToken()}',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'fields': fields}),
+        )
+        .timeout(timeout);
     _throwForFirebaseError(response);
 
-    await _saveSession(
-      session.copyWith(displayName: displayName.trim(), idToken: _sessionToken),
-    );
+    if (revision != _authRevision || _session == null) return;
+    await _saveSession(_session!.copyWith(displayName: displayName.trim()));
   }
 
   Future<bool> saveHuggingFaceTokenIfSignedIn(String token) async {
@@ -334,14 +364,16 @@ class _FirebaseRestProfileClient {
       'updatedAt': {'timestampValue': now.toIso8601String()},
     };
 
-    final response = await http.patch(
-      _firestoreDocumentUri(session.uid),
-      headers: {
-        'Authorization': 'Bearer ${await currentIdToken()}',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({'fields': fields}),
-    );
+    final response = await _client
+        .patch(
+          _firestoreDocumentUri(session.uid, updateFields: fields.keys),
+          headers: {
+            'Authorization': 'Bearer ${await currentIdToken()}',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'fields': fields}),
+        )
+        .timeout(timeout);
     _throwForFirebaseError(response);
     return true;
   }
@@ -355,19 +387,22 @@ class _FirebaseRestProfileClient {
       'updatedAt': {'timestampValue': now.toIso8601String()},
     };
 
-    final response = await http.patch(
-      _firestoreDocumentUri(session.uid),
-      headers: {
-        'Authorization': 'Bearer ${await currentIdToken()}',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({'fields': fields}),
-    );
+    final response = await _client
+        .patch(
+          _firestoreDocumentUri(session.uid, updateFields: fields.keys),
+          headers: {
+            'Authorization': 'Bearer ${await currentIdToken()}',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'fields': fields}),
+        )
+        .timeout(timeout);
     _throwForFirebaseError(response);
     return true;
   }
 
   Future<void> signOut() async {
+    _authRevision++;
     _session = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_sessionKey);
@@ -375,21 +410,30 @@ class _FirebaseRestProfileClient {
   }
 
   Future<String?> currentIdToken() async {
-    var session = await _requireSessionOrNull();
+    final session = await _requireSessionOrNull();
     if (session == null) return null;
     if (!session.needsRefresh) return session.idToken;
+    return _refreshing ??= _refreshSession(
+      session,
+    ).whenComplete(() => _refreshing = null);
+  }
 
-    final response = await http.post(
-      Uri.https('securetoken.googleapis.com', '/v1/token', {
-        'key': DefaultFirebaseOptions.linux.apiKey,
-      }),
-      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-      body: {
-        'grant_type': 'refresh_token',
-        'refresh_token': session.refreshToken,
-      },
-    );
+  Future<String?> _refreshSession(_RestSession session) async {
+    final revision = _authRevision;
+    final response = await _client
+        .post(
+          Uri.https('securetoken.googleapis.com', '/v1/token', {
+            'key': DefaultFirebaseOptions.linux.apiKey,
+          }),
+          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+          body: {
+            'grant_type': 'refresh_token',
+            'refresh_token': session.refreshToken,
+          },
+        )
+        .timeout(timeout);
     _throwForFirebaseError(response);
+    if (revision != _authRevision) return null;
     final decoded = jsonDecode(response.body);
     session = session.copyWith(
       idToken: decoded['id_token']?.toString(),
@@ -398,14 +442,6 @@ class _FirebaseRestProfileClient {
     );
     await _saveSession(session);
     return session.idToken;
-  }
-
-  String get _sessionToken {
-    final token = _session?.idToken;
-    if (token == null || token.isEmpty) {
-      throw StateError('Sign in before saving your profile.');
-    }
-    return token;
   }
 
   Future<_RestSession> _requireSession() async {
@@ -421,15 +457,29 @@ class _FirebaseRestProfileClient {
     return _session;
   }
 
-  Future<void> _ensureLoaded() async {
-    if (_loaded) return;
-    _loaded = true;
+  Future<void> _ensureLoaded() {
+    if (_loaded) return Future<void>.value();
+    return _loading ??= _loadSession().whenComplete(() => _loading = null);
+  }
+
+  Future<void> _loadSession() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_sessionKey);
-    if (raw != null) {
-      _session = _RestSession.fromJson(jsonDecode(raw));
+    try {
+      if (raw != null) {
+        final session = _RestSession.fromJson(
+          jsonDecode(raw) as Map<String, dynamic>,
+        );
+        if (session.uid.isNotEmpty &&
+            session.idToken.isNotEmpty &&
+            session.refreshToken.isNotEmpty) {
+          _session = session;
+        }
+      }
+    } catch (_) {
+      _session = null;
     }
-    _authController.add(_session?.user);
+    _loaded = true;
   }
 
   Future<void> _saveSession(_RestSession session) async {
@@ -443,21 +493,26 @@ class _FirebaseRestProfileClient {
     String method,
     Map<String, Object?> body,
   ) async {
-    final response = await http.post(
-      Uri.https('identitytoolkit.googleapis.com', '/v1/$method', {
-        'key': DefaultFirebaseOptions.linux.apiKey,
-      }),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(body),
-    );
+    final response = await _client
+        .post(
+          Uri.https('identitytoolkit.googleapis.com', '/v1/$method', {
+            'key': DefaultFirebaseOptions.linux.apiKey,
+          }),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        )
+        .timeout(timeout);
     _throwForFirebaseError(response);
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  Uri _firestoreDocumentUri(String uid) {
+  Uri _firestoreDocumentUri(String uid, {Iterable<String>? updateFields}) {
     return Uri.https(
       'firestore.googleapis.com',
       '/v1/projects/${DefaultFirebaseOptions.linux.projectId}/databases/(default)/documents/users/$uid',
+      updateFields == null
+          ? null
+          : {'updateMask.fieldPaths': updateFields.toList()},
     );
   }
 
