@@ -70,11 +70,14 @@
             gtk3
             glib
             pcre2
+            unzip
+            vulkan-loader
           ];
 
           ANDROID_HOME = "${androidSdk}/libexec/android-sdk";
           ANDROID_SDK_ROOT = "${androidSdk}/libexec/android-sdk";
           JAVA_HOME = pkgs.jdk17.home;
+          MAJIKA_VULKAN_LIBRARY_DIR = "${pkgs.vulkan-loader}/lib";
           CHROME_EXECUTABLE = "${pkgs.google-chrome}/bin/google-chrome-stable";
 
           shellHook = ''

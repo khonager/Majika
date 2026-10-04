@@ -15,6 +15,21 @@ Majika currently supports AniList public username imports and Steam public libra
 
 See the [usability review and verification report](docs/qa/2026-10-03/review.md) for screenshots, coverage, and remaining limitations.
 
+## Use AI without a server
+
+Open **Settings → Local AI → Download**. Majika suggests a public model using the
+platform and detected memory. No FLM, Ollama, API key or Hugging Face account is
+needed for these models. The model size and device guidance appear before the
+download. You can leave Settings while it downloads; the app shows progress,
+checks that the model can generate text, then activates it automatically.
+
+Android supports a background download notification with progress. Desktop
+transfers continue while the app is running. Installed models are restored when
+the app restarts. Cloud fallback is optional and off by default.
+
+See the [AI setup and hands-on test guide](docs/qa/2026-10-04/ai-setup.md) for
+platform limits, cancellation/retry checks and the Gemini model migration.
+
 ## Current Scope
 
 - **First service:** AniList.
@@ -82,10 +97,10 @@ The desired search flow is:
 4. Local AI can then choose the lead recommendation from the ranked candidate set and rewrite the reason for that pick.
 5. If no local model is configured, Majika falls back to small deterministic hints and the local ranker so the prototype still returns useful results. These hints are not meant to replace the AI interpreter.
 
-- Settings offers a single AI mode choice: Automatic on-device, External local server, or Rules only. On-device mode exposes platform-supported public no-token text model downloads; external mode exposes OpenAI-compatible endpoint fields and Gemma/Ollama model presets.
-- The default on-device model should be chosen only after the benchmark harness validates initialization, JSON reliability, latency, and prompt quality for the current candidate set. Current public on-device candidates include Qwen3 0.6B, FunctionGemma 270M, DeepSeek R1 Distill Qwen 1.5B, Qwen 2.5 1.5B Instruct, SmolLM 135M, and Phi-4 Mini where supported by the current platform.
+- Settings exposes public downloads directly, alongside optional on-device, external server, cloud, manual, and rules-only modes. Download management is independent of the Settings screen. A basic generation check must pass before activation.
+- Public setup choices are Qwen 2.5 1.5B Instruct (mobile/desktop) and Qwen3 0.6B (desktop). Device suggestions use conservative RAM guidance; they are not benchmark scores. Models requiring Hugging Face license access and experimental alternatives are advanced choices.
 - FunctionGemma is a tiny function-calling foundation model, not a general JSON chat model. Keep it advanced unless Majika adds real tool declarations or task-specific fine-tuning for recommendation filters.
-- Do not add Hugging Face token UX for standard users. Advanced users can import a model file they downloaded themselves once custom import is wired.
+- Standard public models do not require a Hugging Face token. Gated models expose license and token controls only as advanced choices; custom file import remains unfinished.
 - Vision models such as FastVLM are intentionally excluded until Majika has an image-understanding workflow.
 - Keep deterministic summaries as fallback when no model is configured.
 - Use local AI to turn natural-language searches like `romance movie about time travel` into structured tags/formats such as `Romance`, `Time Manipulation`, and `MOVIE`. Do not rely on a large synonym table as the main product path; deterministic parsing is only the no-model safety net.

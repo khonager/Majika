@@ -1359,65 +1359,58 @@ void main() {
     },
   );
 
-  test(
-    'on-device AI falls back to configured cloud model when unavailable',
-    () async {
-      Object? requestBody;
-      Uri? requestUrl;
-      final service = FlutterGemmaLocalAiService(
-        settingsLoader: () async => const LocalAiRuntimeSettings(
-          useLocalAi: true,
-          useAiForSearch: true,
-          mode: localAiModeOnDevice,
-          provider: 'unsupported local model',
-          endpoint: defaultLocalAiEndpoint,
-          serverModel: defaultLocalAiModel,
-          deviceModelName: 'Unsupported Tiny Model',
-          cloudProvider: 'Google Gemini',
-          cloudEndpoint: defaultCloudAiEndpoint,
-          cloudModel: defaultCloudAiModel,
-          cloudApiKey: 'cloud-test-key',
-          contextItems: 8,
-        ),
-        httpPost: (url, {headers, body}) async {
-          requestUrl = url;
-          requestBody = jsonDecode(body.toString());
-          return http.Response(
-            jsonEncode({
-              'choices': [
-                {
-                  'message': {
-                    'role': 'assistant',
-                    'content':
-                        '{"tags":["Simulation"],"formats":["SINGLE_PLAYER"],"searchText":"operating a big crane"}',
-                  },
+  test('on-device AI uses cloud fallback only when explicitly enabled', () async {
+    Object? requestBody;
+    Uri? requestUrl;
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        mode: localAiModeOnDevice,
+        allowCloudFallback: true,
+        provider: 'unsupported local model',
+        endpoint: defaultLocalAiEndpoint,
+        serverModel: defaultLocalAiModel,
+        deviceModelName: 'Unsupported Tiny Model',
+        cloudProvider: 'Google Gemini',
+        cloudEndpoint: defaultCloudAiEndpoint,
+        cloudModel: defaultCloudAiModel,
+        cloudApiKey: 'cloud-test-key',
+        contextItems: 8,
+      ),
+      httpPost: (url, {headers, body}) async {
+        requestUrl = url;
+        requestBody = jsonDecode(body.toString());
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {
+                  'role': 'assistant',
+                  'content':
+                      '{"tags":["Simulation"],"formats":["SINGLE_PLAYER"],"searchText":"operating a big crane"}',
                 },
-              ],
-            }),
-            200,
-          );
-        },
-      );
+              },
+            ],
+          }),
+          200,
+        );
+      },
+    );
 
-      final interpreted = await service.interpretRecommendationRequest(
-        const RecommendationQuery(
-          request: 'a game about operating a big crane',
-        ),
-        availableTags: const ['Simulation', 'Puzzle'],
-        serviceName: 'Steam',
-        allowedMediaTypes: RecommendationQuery.steamMediaTypes,
-        allowedFormats: RecommendationQuery.steamFormats,
-      );
+    final interpreted = await service.interpretRecommendationRequest(
+      const RecommendationQuery(request: 'a game about operating a big crane'),
+      availableTags: const ['Simulation', 'Puzzle'],
+      serviceName: 'Steam',
+      allowedMediaTypes: RecommendationQuery.steamMediaTypes,
+      allowedFormats: RecommendationQuery.steamFormats,
+    );
 
-      expect(requestUrl.toString(), defaultCloudAiEndpoint);
-      expect(
-        (requestBody as Map<String, dynamic>)['model'],
-        defaultCloudAiModel,
-      );
-      expect(interpreted.aiSelectedTags, contains('Simulation'));
-      expect(interpreted.formats, contains('SINGLE_PLAYER'));
-    },
-  );
+    expect(requestUrl.toString(), defaultCloudAiEndpoint);
+    expect((requestBody as Map<String, dynamic>)['model'], defaultCloudAiModel);
+    expect(interpreted.aiSelectedTags, contains('Simulation'));
+    expect(interpreted.formats, contains('SINGLE_PLAYER'));
+  });
 
   test('local AI service sends bearer auth for cloud providers', () async {
     Object? requestBody;
@@ -1434,7 +1427,7 @@ void main() {
         cloudProvider: 'Google Gemini',
         cloudEndpoint:
             'https://generativelanguage.googleapis.com/v1beta/openai',
-        cloudModel: 'gemini-2.5-flash-lite',
+        cloudModel: 'gemini-3.5-flash-lite',
         cloudApiKey: 'gemini_test_key',
         contextItems: 24,
       ),
@@ -1472,7 +1465,7 @@ void main() {
     expect(requestBody, isA<Map<String, dynamic>>());
     expect(
       (requestBody as Map<String, dynamic>)['model'],
-      'gemini-2.5-flash-lite',
+      'gemini-3.5-flash-lite',
     );
     expect(interpreted.aiSelectedTags, contains('Mystery'));
     expect(interpreted.formats, contains('SERIES'));
@@ -1568,7 +1561,8 @@ void main() {
     expect(interpreted.aiSelectedTags, contains('Mystery'));
     expect(log.value, contains('AI request failed'));
     expect(log.value, contains('HTTP 404'));
-    expect(log.value, contains('gemini-3.1-flash-lite'));
+    expect(log.value, contains(defaultCloudAiModel));
+    expect(log.value, contains('Choose a current cloud model'));
   });
 
   test('local AI service logs response shape when text is missing', () async {
@@ -1929,7 +1923,7 @@ void main() {
     expect(
       resolveAiContextWindowTokens(
         mode: localAiModeExternalCloud,
-        modelName: 'gemini-2.5-flash-lite',
+        modelName: 'gemini-3.5-flash-lite',
         cloudProvider: 'Google Gemini',
       ),
       1048576,
@@ -1973,7 +1967,7 @@ void main() {
       resolveAiContextWindowOverrideTokens(
         overrideTokens: 131072,
         mode: localAiModeExternalCloud,
-        modelName: 'gemini-2.5-flash-lite',
+        modelName: 'gemini-3.5-flash-lite',
         cloudProvider: 'Google Gemini',
       ),
       isNull,
@@ -2003,7 +1997,7 @@ void main() {
       );
       await prefs.setString(
         LocalAiSettingsKeys.cloudModel,
-        'gemini-2.5-flash-lite',
+        'gemini-3.5-flash-lite',
       );
       await prefs.setInt(LocalAiSettingsKeys.aiContextWindowTokens, 131072);
 
@@ -2488,7 +2482,7 @@ void main() {
         endpoint: defaultLocalAiEndpoint,
         serverModel: defaultLocalAiModel,
         cloudProvider: 'Google Gemini',
-        cloudModel: 'gemini-2.5-flash-lite',
+        cloudModel: 'gemini-3.5-flash-lite',
         contextItems: 24,
       ),
       textGenerator: (prompt, maxTokens) async {
@@ -2571,7 +2565,7 @@ void main() {
           endpoint: defaultLocalAiEndpoint,
           serverModel: defaultLocalAiModel,
           cloudProvider: 'Google Gemini',
-          cloudModel: 'gemini-2.5-flash-lite',
+          cloudModel: 'gemini-3.5-flash-lite',
           contextItems: 24,
         ),
         textGenerator: (prompt, maxTokens) async {

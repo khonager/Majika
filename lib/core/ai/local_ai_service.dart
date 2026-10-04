@@ -8,6 +8,7 @@ import 'package:majika/core/ai/ai_console_log.dart';
 import 'package:majika/core/ai/ai_search_tools.dart';
 import 'package:http/http.dart' as http;
 import 'package:majika/core/ai/local_ai_settings.dart';
+import 'package:majika/core/ai/model_download_manager.dart';
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation.dart';
 import 'package:majika/core/models/recommendation_query.dart';
@@ -761,6 +762,11 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     required int responseTokens,
     required PreferredBackend? preferredBackend,
   }) async {
+    if (ModelDownloadManager.instance.busy) {
+      throw StateError(
+        'The downloaded model is being prepared. Please wait for the ready notification.',
+      );
+    }
     final model = await FlutterGemma.getActiveModel(
       maxTokens: contextWindowTokens,
       preferredBackend: preferredBackend,
@@ -813,6 +819,10 @@ class FlutterGemmaLocalAiService implements LocalAiService {
           tools: tools,
         );
       } catch (error) {
+        if (error is AiProviderException &&
+            [401, 403, 404, 429].contains(error.statusCode)) {
+          rethrow;
+        }
         _currentConsoleLog?.addDetail(
           'AI search tools failed, retrying text-only: $error',
         );
@@ -837,7 +847,12 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     final endpoint = isCloud
         ? settings.cloudChatCompletionsUri
         : settings.localChatCompletionsUri;
-    final model = isCloud ? settings.cloudModel : settings.serverModel;
+    final model = isCloud
+        ? normalizedFreeCloudAiModel(
+            provider: settings.cloudProvider,
+            model: settings.cloudModel,
+          )
+        : settings.serverModel;
     final providerName = isCloud ? settings.cloudProvider : 'local server';
     log?.addDetail(
       'AI request: provider=$providerName, model=$model, mode=${settings.mode}, maxTokens=$maxTokens, tools=off.',
@@ -857,8 +872,10 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     ).timeout(const Duration(seconds: 60));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError(
-        '${isCloud ? settings.cloudProvider : 'Local AI server'} returned HTTP ${response.statusCode}: ${response.body}',
+      throw AiProviderException.fromResponse(
+        response,
+        provider: providerName,
+        model: model,
       );
     }
     log?.addDetail('Received HTTP ${response.statusCode}.');
@@ -964,7 +981,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
         'temperature': 0.1,
         'max_tokens': max(1024, min(maxTokens * 2, 2048)),
         'response_format': {'type': 'json_object'},
-        'reasoning_effort': 'none',
+        'reasoning_effort': model.startsWith('gemini-3') ? 'low' : 'none',
         'think': false,
         'stream': false,
       }),
@@ -1024,7 +1041,12 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     final endpoint = isCloud
         ? settings.cloudChatCompletionsUri
         : settings.localChatCompletionsUri;
-    final model = isCloud ? settings.cloudModel : settings.serverModel;
+    final model = isCloud
+        ? normalizedFreeCloudAiModel(
+            provider: settings.cloudProvider,
+            model: settings.cloudModel,
+          )
+        : settings.serverModel;
     final messages = <Map<String, Object?>>[
       {'role': 'user', 'content': prompt},
     ];
@@ -1052,8 +1074,10 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       ).timeout(const Duration(seconds: 60));
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw StateError(
-          '${isCloud ? settings.cloudProvider : 'Local AI server'} returned HTTP ${response.statusCode}: ${response.body}',
+        throw AiProviderException.fromResponse(
+          response,
+          provider: providerName,
+          model: model,
         );
       }
       log?.addDetail('Received HTTP ${response.statusCode}.');
@@ -4375,4 +4399,34 @@ Options: ${jsonEncode(options)}
     }
     return 'Grounded Steam match from store search.';
   }
+}
+
+class AiProviderException implements Exception {
+  final int statusCode;
+  final String message;
+  const AiProviderException(this.statusCode, this.message);
+
+  factory AiProviderException.fromResponse(
+    http.Response response, {
+    required String provider,
+    required String model,
+  }) {
+    final code = response.statusCode;
+    final guidance = switch (code) {
+      404 =>
+        'The model is unavailable for this account. Choose a current cloud model in Settings, or download an on-device model.',
+      401 || 403 => 'Check the API key and model access in Settings.',
+      429 =>
+        'The provider has reached its usage limit. Retry later or use on-device AI.',
+      _ =>
+        'The provider could not complete this request. Retry or choose another AI mode.',
+    };
+    return AiProviderException(
+      code,
+      '$provider ($model) returned HTTP $code. $guidance',
+    );
+  }
+
+  @override
+  String toString() => message;
 }

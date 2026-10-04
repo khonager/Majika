@@ -20,10 +20,10 @@ const defaultLocalAiModel = 'qwen3:4b-instruct';
 const defaultCloudAiProvider = 'Google Gemini';
 const defaultCloudAiEndpoint =
     'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
-const defaultCloudAiModel = 'gemini-2.5-flash-lite';
+const defaultCloudAiModel = 'gemini-3.5-flash-lite';
 const legacyGeminiCloudAiModel = 'gemini-3.1-flash-lite';
 const freeCloudAiModelsByProvider = {
-  'Google Gemini': ['gemini-2.5-flash-lite', 'gemini-2.5-flash'],
+  'Google Gemini': ['gemini-3.5-flash-lite', 'gemini-3.5-flash'],
   'Groq': [
     'llama-3.1-8b-instant',
     'llama-3.3-70b-versatile',
@@ -39,8 +39,8 @@ const freeCloudAiModelsByProvider = {
   ],
 };
 const cloudAiModelContextWindowTokens = {
-  'gemini-2.5-flash-lite': 1048576,
-  'gemini-2.5-flash': 1048576,
+  'gemini-3.5-flash-lite': 1048576,
+  'gemini-3.5-flash': 1048576,
   'llama-3.1-8b-instant': 131072,
   'llama-3.3-70b-versatile': 131072,
   'meta-llama/llama-4-scout-17b-16e-instruct': 131072,
@@ -67,6 +67,7 @@ class LocalAiSettingsKeys {
   static const enableMotionEffects = 'settings.enableMotionEffects';
   static const useLocalAi = 'settings.useLocalAi';
   static const useAiForSearch = 'settings.useAiForSearch';
+  static const allowCloudFallback = 'settings.allowCloudFallback';
   static const localAiMode = 'settings.localAiMode';
   static const localBackend = 'settings.localBackend';
   static const localAiProvider = 'settings.localAiProvider';
@@ -91,6 +92,7 @@ class LocalAiSettingsKeys {
 class LocalAiRuntimeSettings {
   final bool useLocalAi;
   final bool useAiForSearch;
+  final bool allowCloudFallback;
   final String mode;
   final String provider;
   final String endpoint;
@@ -108,6 +110,7 @@ class LocalAiRuntimeSettings {
   const LocalAiRuntimeSettings({
     required this.useLocalAi,
     required this.useAiForSearch,
+    this.allowCloudFallback = false,
     this.mode = localAiModeRulesOnly,
     required this.provider,
     required this.endpoint,
@@ -126,6 +129,7 @@ class LocalAiRuntimeSettings {
   const LocalAiRuntimeSettings.defaults({bool enabled = false})
     : useLocalAi = enabled,
       useAiForSearch = true,
+      allowCloudFallback = false,
       mode = enabled ? localAiModeOnDevice : localAiModeRulesOnly,
       provider = fallbackRulesProvider,
       endpoint = defaultLocalAiEndpoint,
@@ -212,12 +216,15 @@ class LocalAiRuntimeSettings {
       );
 
   bool get hasCloudFallback =>
-      cloudApiKey.trim().isNotEmpty && cloudEndpoint.trim().isNotEmpty;
+      allowCloudFallback &&
+      cloudApiKey.trim().isNotEmpty &&
+      cloudEndpoint.trim().isNotEmpty;
 
   LocalAiRuntimeSettings asCloudFallback() {
     return LocalAiRuntimeSettings(
       useLocalAi: useLocalAi,
       useAiForSearch: useAiForSearch,
+      allowCloudFallback: allowCloudFallback,
       mode: localAiModeExternalCloud,
       provider: provider,
       endpoint: endpoint,
@@ -288,6 +295,10 @@ class LocalAiRuntimeSettings {
           prefs.getString(LocalAiSettingsKeys.cloudModel) ??
           defaultCloudAiModel,
     );
+    if (prefs.getString(LocalAiSettingsKeys.cloudModel) != null &&
+        prefs.getString(LocalAiSettingsKeys.cloudModel) != cloudModel) {
+      await prefs.setString(LocalAiSettingsKeys.cloudModel, cloudModel);
+    }
     final cloudApiKeys = cloudApiKeysFromJson(
       prefs.getString(LocalAiSettingsKeys.cloudApiKeys),
     );
@@ -300,6 +311,8 @@ class LocalAiRuntimeSettings {
     return LocalAiRuntimeSettings(
       useLocalAi: mode == localAiModeRulesOnly ? false : useLocalAi,
       useAiForSearch: prefs.getBool(LocalAiSettingsKeys.useAiForSearch) ?? true,
+      allowCloudFallback:
+          prefs.getBool(LocalAiSettingsKeys.allowCloudFallback) ?? false,
       mode: mode,
       provider: legacyProvider ?? fallbackRulesProvider,
       endpoint:
@@ -315,8 +328,8 @@ class LocalAiRuntimeSettings {
       cloudModel: cloudModel,
       cloudApiKey: cloudApiKey,
       deviceModelName:
-          prefs.getString(LocalAiSettingsKeys.selectedModelName) ??
           prefs.getString(LocalAiSettingsKeys.downloadedModelName) ??
+          prefs.getString(LocalAiSettingsKeys.selectedModelName) ??
           '',
       backend:
           prefs.getString(LocalAiSettingsKeys.localBackend) ??
@@ -348,8 +361,15 @@ String normalizedFreeCloudAiModel({
 }) {
   var normalizedModel = model.trim();
   if (provider == defaultCloudAiProvider &&
-      normalizedModel == legacyGeminiCloudAiModel) {
+      const {
+        'gemini-2.5-flash-lite',
+        legacyGeminiCloudAiModel,
+      }.contains(normalizedModel)) {
     normalizedModel = defaultCloudAiModel;
+  }
+  if (provider == defaultCloudAiProvider &&
+      normalizedModel == 'gemini-2.5-flash') {
+    normalizedModel = 'gemini-3.5-flash';
   }
   final freeModels = freeCloudAiModelsByProvider[provider];
   if (freeModels == null || freeModels.isEmpty) return normalizedModel;
@@ -531,8 +551,8 @@ AiModelTrustTier resolveAiModelTrustTier({
   if (task == 'search_interpretation') {
     if (mode == localAiModeExternalCloud) {
       if (_matchesAny(combined, const [
-        'google gemini gemini-2.5-flash-lite',
-        'google gemini gemini-2.5-flash',
+        'google gemini gemini-3.5-flash-lite',
+        'google gemini gemini-3.5-flash',
         'groq llama-3.3-70b-versatile',
         'groq openai/gpt-oss-20b',
         'groq qwen/qwen3-32b',
@@ -562,8 +582,8 @@ AiModelTrustTier resolveAiModelTrustTier({
   if (task == 'steam_discovery') {
     if (mode == localAiModeExternalCloud &&
         _matchesAny(combined, const [
-          'google gemini gemini-2.5-flash-lite',
-          'google gemini gemini-2.5-flash',
+          'google gemini gemini-3.5-flash-lite',
+          'google gemini gemini-3.5-flash',
           'groq llama-3.3-70b-versatile',
           'groq openai/gpt-oss-20b',
           'groq qwen/qwen3-32b',
@@ -592,8 +612,8 @@ AiModelTrustTier resolveAiModelTrustTier({
   if (task == 'recommendation_selection') {
     if (mode == localAiModeExternalCloud &&
         _matchesAny(combined, const [
-          'google gemini gemini-2.5-flash-lite',
-          'google gemini gemini-2.5-flash',
+          'google gemini gemini-3.5-flash-lite',
+          'google gemini gemini-3.5-flash',
           'groq llama-3.3-70b-versatile',
           'groq openai/gpt-oss-20b',
           'groq qwen/qwen3-32b',
@@ -607,9 +627,9 @@ AiModelTrustTier resolveAiModelTrustTier({
           'openrouter meta-llama/llama-3.2-3b-instruct:free',
           'openrouter qwen/qwen3-coder:free',
           'openrouter openrouter/free',
-      ])) {
-        return AiModelTrustTier.constrained;
-      }
+        ])) {
+      return AiModelTrustTier.constrained;
+    }
 
     if (mode == localAiModeExternalServer &&
         _looksLikeToolCapableModel(modelName)) {

@@ -7,34 +7,15 @@ import 'package:flutter/services.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:http/http.dart' as http;
 import 'package:majika/core/ai/local_ai_settings.dart';
+import 'package:majika/core/ai/on_device_models.dart';
+import 'package:majika/core/ai/model_download_manager.dart';
+import 'package:majika/core/ai/device_capacity.dart';
 import 'package:majika/core/firebase/firebase_profile_service.dart';
 import 'package:majika/ui/profile/profile_screen.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
 import 'package:majika/ui/shared/glass_panel.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-
-const _desktopOnDevicePlatforms = {
-  TargetPlatform.linux,
-  TargetPlatform.macOS,
-  TargetPlatform.windows,
-};
-const _mobileOnDevicePlatforms = {TargetPlatform.android, TargetPlatform.iOS};
-const _onDevicePlatforms = {
-  ..._mobileOnDevicePlatforms,
-  ..._desktopOnDevicePlatforms,
-};
-
-enum _AiModelTier {
-  low('Experimental small', Icons.science_rounded),
-  recommended('Benchmark candidate', Icons.auto_awesome_rounded),
-  high('High-context candidate', Icons.workspace_premium_rounded);
-
-  final String label;
-  final IconData icon;
-
-  const _AiModelTier(this.label, this.icon);
-}
 
 enum _ServerRuntime {
   ollama('Ollama', defaultLocalAiEndpoint, Icons.terminal_rounded),
@@ -47,125 +28,9 @@ enum _ServerRuntime {
   const _ServerRuntime(this.label, this.endpoint, this.icon);
 }
 
-const _downloadableLocalAiModels = [
-  _DownloadableModel(
-    id: 'gemma3_1b_it',
-    name: 'Gemma 3 1B IT',
-    sizeLabel: '586 MB',
-    providerLabel: 'Gemma',
-    tier: _AiModelTier.low,
-    resourceLabel: 'Small Google text model',
-    mobileUrl:
-        'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task',
-    desktopUrl:
-        'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/Gemma3-1B-IT_multi-prefill-seq_q4_ekv4096.litertlm',
-    accessUrl: 'https://huggingface.co/litert-community/Gemma3-1B-IT',
-    description:
-        'Smallest supported local option. Uses compact prompts and needs benchmark results before it should be treated as a quality default.',
-    modelType: ModelType.gemmaIt,
-    fileType: ModelFileType.task,
-    needsHuggingFaceToken: true,
-    supportedPlatforms: _onDevicePlatforms,
-  ),
-  _DownloadableModel(
-    id: 'gemma3n_e2b_it',
-    name: 'Gemma 3n E2B IT',
-    sizeLabel: '3.1 GB',
-    providerLabel: 'Gemma',
-    tier: _AiModelTier.recommended,
-    resourceLabel: 'Advanced Google multimodal model',
-    mobileUrl:
-        'https://huggingface.co/google/gemma-3n-E2B-it-litert-preview/resolve/main/gemma-3n-E2B-it-int4.task',
-    desktopUrl:
-        'https://huggingface.co/google/gemma-3n-E2B-it-litert-lm/resolve/main/gemma-3n-E2B-it-int4.litertlm',
-    accessUrl: 'https://huggingface.co/google/gemma-3n-E2B-it-litert-preview',
-    description:
-        'Higher-capability Google model for newer devices with enough memory; candidate default once prompt benchmarks are green.',
-    modelType: ModelType.gemmaIt,
-    fileType: ModelFileType.task,
-    isAdvanced: true,
-    needsHuggingFaceToken: true,
-    supportedPlatforms: _onDevicePlatforms,
-  ),
-  _DownloadableModel(
-    id: 'gemma3n_e4b_it',
-    name: 'Gemma 3n E4B IT',
-    sizeLabel: '6.5 GB',
-    providerLabel: 'Gemma',
-    tier: _AiModelTier.high,
-    resourceLabel: 'Large Google multimodal model',
-    mobileUrl:
-        'https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-3n-E4B-it-int4.task',
-    desktopUrl:
-        'https://huggingface.co/google/gemma-3n-E4B-it-litert-lm/resolve/main/gemma-3n-E4B-it-int4.litertlm',
-    accessUrl: 'https://huggingface.co/google/gemma-3n-E4B-it-litert-preview',
-    description:
-        'Large model option for powerful devices; benchmark before making it your daily default.',
-    modelType: ModelType.gemmaIt,
-    fileType: ModelFileType.task,
-    isAdvanced: true,
-    needsHuggingFaceToken: true,
-    supportedPlatforms: _onDevicePlatforms,
-  ),
-  _DownloadableModel(
-    id: 'qwen3_0_6b',
-    name: 'Qwen3 0.6B',
-    sizeLabel: '586 MB',
-    providerLabel: 'Qwen',
-    tier: _AiModelTier.low,
-    resourceLabel: 'Balanced public text model',
-    mobileUrl:
-        'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
-    desktopUrl:
-        'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
-    description:
-        'Tiny public alternative. Keep experimental until benchmarks show it can follow Majika recommendation prompts.',
-    modelType: ModelType.qwen,
-    fileType: ModelFileType.task,
-    isAdvanced: true,
-    supportedPlatforms: _desktopOnDevicePlatforms,
-  ),
-  _DownloadableModel(
-    id: 'deepseek_r1_qwen_1_5b',
-    name: 'DeepSeek R1 Distill Qwen 1.5B',
-    sizeLabel: '1.7 GB',
-    providerLabel: 'DeepSeek',
-    tier: _AiModelTier.high,
-    resourceLabel: 'Advanced reasoning model',
-    mobileUrl:
-        'https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv1280.task',
-    desktopUrl:
-        'https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv4096.litertlm',
-    description:
-        'Reasoning-oriented candidate; benchmark before recommending because thinking output may add noise.',
-    modelType: ModelType.deepSeek,
-    fileType: ModelFileType.task,
-    isAdvanced: true,
-    supportedPlatforms: _desktopOnDevicePlatforms,
-  ),
-  _DownloadableModel(
-    id: 'qwen25_1_5b_instruct',
-    name: 'Qwen 2.5 1.5B Instruct',
-    sizeLabel: '1.6 GB',
-    providerLabel: 'Qwen',
-    tier: _AiModelTier.recommended,
-    resourceLabel: 'Advanced public text model',
-    mobileUrl:
-        'https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
-    desktopUrl:
-        'https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm',
-    description:
-        'Larger candidate to benchmark against Qwen3 before recommending.',
-    modelType: ModelType.qwen,
-    fileType: ModelFileType.task,
-    isAdvanced: true,
-    supportedPlatforms: _desktopOnDevicePlatforms,
-  ),
-];
-
-final _defaultLocalAiModel = _downloadableLocalAiModels.firstWhere(
-  (model) => model.tier == _AiModelTier.recommended,
-  orElse: () => _downloadableLocalAiModels.first,
+final _defaultLocalAiModel = downloadableAiModels.firstWhere(
+  (model) => model.id == 'qwen25_1_5b_instruct',
+  orElse: () => downloadableAiModels.first,
 );
 const _flmLocalAiEndpoint = 'http://127.0.0.1:52625/v1/chat/completions';
 const _flmDefaultModel = 'llama3.2:1b';
@@ -173,7 +38,7 @@ const _externalLocalServerModelPresets = [
   _ServerModelPreset(
     name: 'llama3.2:1b',
     runtime: _ServerRuntime.ollama,
-    tier: _AiModelTier.low,
+    tier: AiModelTier.low,
     sizeLabel: '1.3 GB',
     description:
         'Smallest useful Ollama fallback for modest laptops. It uses compact prompts and is best when speed matters more than rich explanations.',
@@ -181,7 +46,7 @@ const _externalLocalServerModelPresets = [
   _ServerModelPreset(
     name: 'llama3.2:3b',
     runtime: _ServerRuntime.ollama,
-    tier: _AiModelTier.recommended,
+    tier: AiModelTier.recommended,
     sizeLabel: '2.0 GB',
     description:
         'Good starter model for Majika on everyday machines: stronger than 1B while still light enough to run locally.',
@@ -189,7 +54,7 @@ const _externalLocalServerModelPresets = [
   _ServerModelPreset(
     name: 'qwen2.5:3b-instruct',
     runtime: _ServerRuntime.ollama,
-    tier: _AiModelTier.recommended,
+    tier: AiModelTier.recommended,
     sizeLabel: '1.9 GB',
     description:
         'Compact instruction-following model that tends to handle structured recommendation prompts cleanly.',
@@ -197,7 +62,7 @@ const _externalLocalServerModelPresets = [
   _ServerModelPreset(
     name: 'qwen2.5:7b-instruct',
     runtime: _ServerRuntime.ollama,
-    tier: _AiModelTier.high,
+    tier: AiModelTier.high,
     sizeLabel: '4.7 GB',
     description:
         'Higher-quality local choice for ranking, tag filtering, and explanation quality when RAM is available.',
@@ -205,7 +70,7 @@ const _externalLocalServerModelPresets = [
   _ServerModelPreset(
     name: 'qwen3:4b-instruct',
     runtime: _ServerRuntime.ollama,
-    tier: _AiModelTier.recommended,
+    tier: AiModelTier.recommended,
     sizeLabel: '2.5 GB',
     description:
         'Majika default local-server model: strong instruction following without being too heavy.',
@@ -213,7 +78,7 @@ const _externalLocalServerModelPresets = [
   _ServerModelPreset(
     name: 'gemma3:1b',
     runtime: _ServerRuntime.ollama,
-    tier: _AiModelTier.low,
+    tier: AiModelTier.low,
     sizeLabel: '815 MB',
     description:
         'Experimental compact-prompt fallback; keep larger models preferred when recommendation quality matters.',
@@ -221,14 +86,14 @@ const _externalLocalServerModelPresets = [
   _ServerModelPreset(
     name: 'gemma3:4b',
     runtime: _ServerRuntime.ollama,
-    tier: _AiModelTier.recommended,
+    tier: AiModelTier.recommended,
     sizeLabel: '3.3 GB',
     description: 'Balanced Gemma option for local server users.',
   ),
   _ServerModelPreset(
     name: 'llama3.1:8b',
     runtime: _ServerRuntime.ollama,
-    tier: _AiModelTier.high,
+    tier: AiModelTier.high,
     sizeLabel: '4.9 GB',
     description:
         'Reliable installed-friendly generalist for fuller recommendation reasoning on larger local machines.',
@@ -236,7 +101,7 @@ const _externalLocalServerModelPresets = [
   _ServerModelPreset(
     name: 'qwen3:0.6b',
     runtime: _ServerRuntime.fastFlowLm,
-    tier: _AiModelTier.low,
+    tier: AiModelTier.low,
     sizeLabel: 'FLM',
     description:
         'FastFlowLM compact model for Ryzen AI NPU setups. Use when FLM is installed and you want the lightest server option.',
@@ -244,7 +109,7 @@ const _externalLocalServerModelPresets = [
   _ServerModelPreset(
     name: 'qwen3:4b',
     runtime: _ServerRuntime.fastFlowLm,
-    tier: _AiModelTier.recommended,
+    tier: AiModelTier.recommended,
     sizeLabel: 'FLM',
     description:
         'FastFlowLM balanced NPU option for Majika-style structured prompts on supported Ryzen AI devices.',
@@ -252,7 +117,7 @@ const _externalLocalServerModelPresets = [
   _ServerModelPreset(
     name: _flmDefaultModel,
     runtime: _ServerRuntime.fastFlowLm,
-    tier: _AiModelTier.low,
+    tier: AiModelTier.low,
     sizeLabel: 'FastFlowLM',
     description: 'FastFlowLM starter model for AMD NPU-oriented setups.',
   ),
@@ -264,7 +129,7 @@ const _externalCloudAiPresets = [
     endpoint:
         'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
     model: defaultCloudAiModel,
-    tier: _AiModelTier.recommended,
+    tier: AiModelTier.recommended,
     freeLabel: 'Free Gemini API tier',
     keyUrl: 'https://aistudio.google.com/app/apikey',
     description:
@@ -274,7 +139,7 @@ const _externalCloudAiPresets = [
     provider: 'Groq',
     endpoint: 'https://api.groq.com/openai/v1',
     model: 'llama-3.1-8b-instant',
-    tier: _AiModelTier.low,
+    tier: AiModelTier.low,
     freeLabel: 'Free developer limits',
     keyUrl: 'https://console.groq.com/keys',
     description:
@@ -284,7 +149,7 @@ const _externalCloudAiPresets = [
     provider: 'OpenRouter',
     endpoint: 'https://openrouter.ai/api/v1',
     model: 'openrouter/free',
-    tier: _AiModelTier.low,
+    tier: AiModelTier.low,
     freeLabel: 'Free :free model variants',
     keyUrl: 'https://openrouter.ai/settings/keys',
     description:
@@ -294,7 +159,7 @@ const _externalCloudAiPresets = [
     provider: 'Custom OpenAI-compatible',
     endpoint: 'https://api.example.com/v1',
     model: 'model-id',
-    tier: _AiModelTier.low,
+    tier: AiModelTier.low,
     freeLabel: 'Custom provider',
     keyUrl: '',
     description:
@@ -305,14 +170,14 @@ const _externalCloudAiPresets = [
 const _freeCloudAiModelPresets = [
   _CloudAiModelPreset(
     provider: 'Google Gemini',
-    model: 'gemini-2.5-flash-lite',
-    label: 'Gemini 2.5 Flash-Lite',
+    model: 'gemini-3.5-flash-lite',
+    label: 'Gemini 3.5 Flash-Lite',
     description: 'Smallest free-tier Gemini text option; best default.',
   ),
   _CloudAiModelPreset(
     provider: 'Google Gemini',
-    model: 'gemini-2.5-flash',
-    label: 'Gemini 2.5 Flash',
+    model: 'gemini-3.5-flash',
+    label: 'Gemini 3.5 Flash',
     description: 'Free-tier Gemini option with stronger reasoning.',
   ),
   _CloudAiModelPreset(
@@ -375,23 +240,29 @@ const _freeCloudAiModelPresets = [
 ];
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  final ModelDownloadManager? downloadManager;
+  final DeviceCapacity? deviceCapacity;
+  const SettingsScreen({super.key, this.downloadManager, this.deviceCapacity});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  late final ModelDownloadManager _downloads;
+  DeviceCapacity? _deviceCapacity;
+  ModelDownloadPhase _lastDownloadPhase = ModelDownloadPhase.idle;
   bool _allowExplicitContent = false;
   bool _useLocalAi = false;
   bool _useAiForSearch = true;
+  bool _allowCloudFallback = false;
   bool _isDownloadingModel = false;
   bool _isDeletingModel = false;
   bool _showAdvancedLocalAi = false;
   String _localAiMode = localAiModeRulesOnly;
   String _localBackend = localAiBackendAuto;
   String _localAiProvider = _defaultLocalAiModel.providerLabel;
-  _DownloadableModel _selectedModel = _defaultLocalAiModel;
+  DownloadableAiModel _selectedModel = _defaultLocalAiModel;
   String? _downloadedModelId;
   String? _downloadedModelName;
   bool _isLoadingServerModels = false;
@@ -399,7 +270,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Set<String> _installedOllamaModels = const {};
   Set<String> _installedFlmModels = const {};
   double? _downloadProgress;
-  CancelToken? _downloadCancelToken;
+
   final _localEndpointController = TextEditingController(
     text: defaultLocalAiEndpoint,
   );
@@ -429,7 +300,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool get _usesExternalCloud => _localAiMode == localAiModeExternalCloud;
 
   bool get _supportsOnDeviceAi =>
-      !kIsWeb && _onDevicePlatforms.contains(defaultTargetPlatform);
+      !kIsWeb && onDevicePlatforms.contains(defaultTargetPlatform);
 
   List<String> get _localAiModeOptions => [
     if (_supportsOnDeviceAi) localAiModeOnDevice,
@@ -439,18 +310,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     localAiModeRulesOnly,
   ];
 
-  List<_DownloadableModel> get _availableLocalAiModels =>
-      _downloadableLocalAiModels
-          .where((model) => model.supportsCurrentPlatform)
-          .toList();
+  List<DownloadableAiModel> get _availableLocalAiModels => downloadableAiModels
+      .where((model) => model.supportsCurrentPlatform)
+      .toList();
 
-  List<_DownloadableModel> get _visibleLocalAiModels {
-    return _availableLocalAiModels.isEmpty
-        ? [_defaultLocalAiModel]
-        : _availableLocalAiModels;
+  List<DownloadableAiModel> get _visibleLocalAiModels {
+    final models = _availableLocalAiModels
+        .where(
+          (model) =>
+              _showAdvancedLocalAi ||
+              (!model.isAdvanced && !model.needsHuggingFaceToken) ||
+              model.id == _downloadedModelId ||
+              model == _downloads.model,
+        )
+        .toList();
+    return models.isEmpty ? [_defaultLocalAiModel] : models;
   }
 
-  _DownloadableModel get _effectiveSelectedModel {
+  DownloadableAiModel get _effectiveSelectedModel {
     final models = _visibleLocalAiModels;
     return models.contains(_selectedModel) ? _selectedModel : models.first;
   }
@@ -475,7 +352,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _ServerModelPreset(
             name: name,
             runtime: entry.key,
-            tier: _AiModelTier.recommended,
+            tier: AiModelTier.recommended,
             sizeLabel: 'Installed',
             description:
                 'Installed ${entry.key.label} model found on this device. Majika can use it immediately; benchmark quality before making it your default.',
@@ -578,7 +455,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    _downloads = widget.downloadManager ?? ModelDownloadManager.instance;
+    _deviceCapacity = widget.deviceCapacity;
+    _downloads.addListener(_onDownloadChanged);
+    _onDownloadChanged();
     _loadSettings();
+    if (_deviceCapacity == null) unawaited(_detectDevice());
+  }
+
+  Future<void> _detectDevice() async {
+    final capacity = await DeviceCapacity.detect();
+    if (!mounted) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _deviceCapacity = capacity;
+      if (prefs.getString(LocalAiSettingsKeys.selectedModelId) == null &&
+          !_downloads.busy) {
+        _selectedModel = capacity.recommended ?? _selectedModel;
+      }
+    });
+  }
+
+  void _onDownloadChanged() {
+    if (!mounted) return;
+    final previous = _lastDownloadPhase;
+    setState(() {
+      _lastDownloadPhase = _downloads.phase;
+      _isDownloadingModel = _downloads.busy;
+      _downloadProgress = _downloads.progress;
+      if (_downloads.busy && _downloads.model != null) {
+        _selectedModel = _downloads.model!;
+      }
+    });
+    if (previous != _downloads.phase &&
+        _downloads.phase == ModelDownloadPhase.ready) {
+      unawaited(_loadSettings());
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -594,8 +507,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final selectedModelName = prefs.getString(
       LocalAiSettingsKeys.selectedModelName,
     );
-    _DownloadableModel? selectedModel;
-    for (final model in _downloadableLocalAiModels) {
+    DownloadableAiModel? selectedModel;
+    for (final model in downloadableAiModels) {
       if (model.id == selectedModelId || model.name == selectedModelName) {
         selectedModel = model;
         break;
@@ -635,6 +548,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               normalizedMode == localAiModeManual);
       _useAiForSearch =
           prefs.getBool(LocalAiSettingsKeys.useAiForSearch) ?? _useAiForSearch;
+      _allowCloudFallback =
+          prefs.getBool(LocalAiSettingsKeys.allowCloudFallback) ?? false;
       _localAiMode = normalizedMode;
       _localBackend =
           prefs.getString(LocalAiSettingsKeys.localBackend) ??
@@ -643,7 +558,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _useLocalAi = false;
       }
       _localAiProvider = cloudProvider;
-      _selectedModel = selectedModel ?? _selectedModel;
+      _selectedModel = _downloads.busy
+          ? (_downloads.model ?? _selectedModel)
+          : (selectedModel ?? _deviceCapacity?.recommended ?? _selectedModel);
       _downloadedModelId = prefs.getString(
         LocalAiSettingsKeys.downloadedModelId,
       );
@@ -908,20 +825,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _saveString(LocalAiSettingsKeys.cloudModel, model.trim());
   }
 
-  Future<void> _saveDownloadedModel(_DownloadableModel model) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(LocalAiSettingsKeys.downloadedModelId, model.id);
-    await prefs.setString(LocalAiSettingsKeys.downloadedModelName, model.name);
-    await prefs.setString(LocalAiSettingsKeys.selectedModelId, model.id);
-    await prefs.setString(LocalAiSettingsKeys.selectedModelName, model.name);
-    await prefs.setBool(LocalAiSettingsKeys.useLocalAi, true);
-    await prefs.setString(LocalAiSettingsKeys.localAiMode, localAiModeOnDevice);
-    await prefs.setString(
-      LocalAiSettingsKeys.localAiProvider,
-      model.providerLabel,
-    );
-  }
-
   Future<void> _clearDownloadedModelSettings() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(LocalAiSettingsKeys.downloadedModelId);
@@ -1027,90 +930,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _downloadRecommendedModel() async {
-    if (_isDownloadingModel) return;
-
-    final cancelToken = CancelToken();
-    setState(() {
-      _isDownloadingModel = true;
-      _downloadProgress = null;
-      _downloadCancelToken = cancelToken;
-    });
-
-    final modelToDownload = _effectiveSelectedModel;
-    try {
-      final huggingFaceToken = _huggingFaceTokenController.text.trim();
-      if (modelToDownload.needsHuggingFaceToken && huggingFaceToken.isEmpty) {
-        throw const _HuggingFaceTokenRequiredException();
-      }
-
-      await FlutterGemma.initialize(
-        huggingFaceToken: huggingFaceToken.isEmpty ? null : huggingFaceToken,
-      );
-      final installation =
-          await FlutterGemma.installModel(
-                modelType: modelToDownload.modelType,
-                fileType: modelToDownload.fileType,
-              )
-              .fromNetwork(
-                modelToDownload.url,
-                token: modelToDownload.needsHuggingFaceToken
-                    ? huggingFaceToken
-                    : null,
-                foreground: true,
-              )
-              .withCancelToken(cancelToken)
-              .withProgress((progress) {
-                if (mounted && !cancelToken.isCancelled) {
-                  setState(() => _downloadProgress = progress / 100);
-                }
-              })
-              .install();
-
-      if (!mounted ||
-          cancelToken.isCancelled ||
-          _downloadCancelToken != cancelToken) {
-        return;
-      }
-      setState(() {
-        _downloadedModelId = modelToDownload.id;
-        _downloadedModelName = modelToDownload.name;
-        _useLocalAi = true;
-        _localAiMode = localAiModeOnDevice;
-        _localAiProvider = modelToDownload.providerLabel;
-        _downloadProgress = 1;
-      });
-      await _saveDownloadedModel(modelToDownload);
-      if (!mounted) return;
-      showInfoToast(
-        context,
-        '${installation.modelId} downloaded and activated.',
-      );
-    } catch (error) {
-      if (!mounted) return;
-      if (CancelToken.isCancel(error) || cancelToken.isCancelled) return;
-      final message = _downloadModelErrorMessage(error, modelToDownload);
-      showErrorToast(context, message);
-    } finally {
-      if (mounted && _downloadCancelToken == cancelToken) {
-        setState(() {
-          _isDownloadingModel = false;
-          _downloadCancelToken = null;
-          if (cancelToken.isCancelled) _downloadProgress = null;
-        });
-      }
-    }
+    await _downloads.download(
+      _effectiveSelectedModel,
+      token: _huggingFaceTokenController.text.trim(),
+    );
   }
 
-  void _cancelModelDownload() {
-    final cancelToken = _downloadCancelToken;
-    if (cancelToken == null || cancelToken.isCancelled) return;
-    cancelToken.cancel('Model download canceled by user.');
-    setState(() {
-      _isDownloadingModel = false;
-      _downloadProgress = null;
-    });
-    showInfoToast(context, 'Model download canceled.');
-  }
+  void _cancelModelDownload() => _downloads.cancel();
 
   Future<void> _deleteDownloadedModel() async {
     if (_isDownloadingModel || _isDeletingModel) return;
@@ -1181,6 +1007,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    _downloads.removeListener(_onDownloadChanged);
     _huggingFaceTokenSyncTimer?.cancel();
     _cloudApiKeySyncTimer?.cancel();
     _localEndpointController.dispose();
@@ -1335,12 +1162,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _SettingsSection(
               title: 'Local AI',
               subtitle:
-                  'Rules only works without setup. Enable AI for more flexible searches and explanations.',
+                  'Download AI here for private searches on this device. No server or account needed for public models.',
               children: [
                 _OptionRow(
                   icon: Icons.route_rounded,
                   title: 'AI mode',
-                  subtitle: 'Choose how Majika handles local reasoning.',
+                  subtitle:
+                      'On-device AI needs only a model download. Other providers are optional.',
                   value: _localAiMode,
                   options: _localAiModeOptions,
                   onChanged: (value) {
@@ -1377,22 +1205,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   },
                 ),
                 if (_supportsOnDeviceAi &&
-                    (_usesOnDeviceAi || _hasDownloadedModel))
+                    (_usesOnDeviceAi ||
+                        _hasDownloadedModel ||
+                        _localAiMode == localAiModeRulesOnly ||
+                        _downloads.busy))
                   _ModelDownloadCard(
                     models: _visibleLocalAiModels,
                     selectedModel: _effectiveSelectedModel,
                     isDownloading: _isDownloadingModel,
                     isDeleting: _isDeletingModel,
                     progress: _downloadProgress,
+                    status: _downloads.model == _effectiveSelectedModel
+                        ? _downloads.status
+                        : null,
+                    guidance:
+                        _deviceCapacity?.guidance(_effectiveSelectedModel) ??
+                        'Checking device memory…',
+                    blockedReason: _deviceCapacity?.blockingReason(
+                      _effectiveSelectedModel,
+                    ),
+                    isChecking: _downloads.phase == ModelDownloadPhase.checking,
                     downloadedId: _downloadedModelId,
                     downloadedName: _downloadedModelName,
                     onModelSelected: (model) {
-                      setState(() {
-                        _selectedModel = model;
-                        _localAiProvider = model.providerLabel;
-                        _localAiMode = localAiModeOnDevice;
-                        _useLocalAi = true;
-                      });
+                      setState(() => _selectedModel = model);
                       _saveString(
                         LocalAiSettingsKeys.selectedModelId,
                         model.id,
@@ -1401,14 +1237,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         LocalAiSettingsKeys.selectedModelName,
                         model.name,
                       );
-                      _saveString(
-                        LocalAiSettingsKeys.localAiMode,
-                        localAiModeOnDevice,
-                      );
-                      _saveString(
-                        LocalAiSettingsKeys.localAiProvider,
-                        model.providerLabel,
-                      );
                     },
                     huggingFaceTokenController: _huggingFaceTokenController,
                     onHuggingFaceTokenChanged: _saveHuggingFaceToken,
@@ -1416,7 +1244,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onCancel: _cancelModelDownload,
                     onDelete: _deleteDownloadedModel,
                   ),
-                if (_usesOnDeviceAi && _supportsOnDeviceAi)
+                if (_usesOnDeviceAi)
+                  _SwitchRow(
+                    icon: Icons.cloud_outlined,
+                    title: 'Use cloud AI if needed',
+                    subtitle:
+                        'Optional. Sends requests to your configured cloud provider when on-device AI cannot answer.',
+                    value: _allowCloudFallback,
+                    onChanged: (value) {
+                      setState(() => _allowCloudFallback = value);
+                      _saveBool(LocalAiSettingsKeys.allowCloudFallback, value);
+                    },
+                  ),
+                if (_usesOnDeviceAi &&
+                    _supportsOnDeviceAi &&
+                    _showAdvancedLocalAi)
                   _OptionRow(
                     icon: Icons.speed_rounded,
                     title: 'On-device backend',
@@ -1440,7 +1282,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _SwitchRow(
                     icon: Icons.tune_rounded,
                     title: 'Advanced model choice',
-                    subtitle: 'Show custom import controls.',
+                    subtitle:
+                        'Show models requiring license access and hardware controls.',
                     value: _showAdvancedLocalAi,
                     onChanged: (value) =>
                         setState(() => _showAdvancedLocalAi = value),
@@ -1736,86 +1579,10 @@ class _SettingsSection extends StatelessWidget {
   }
 }
 
-class _DownloadableModel {
-  final String id;
-  final String name;
-  final String sizeLabel;
-  final String providerLabel;
-  final _AiModelTier tier;
-  final String resourceLabel;
-  final String mobileUrl;
-  final String? desktopUrl;
-  final String? accessUrl;
-  final String description;
-  final ModelType modelType;
-  final ModelFileType fileType;
-  final bool isAdvanced;
-  final bool needsHuggingFaceToken;
-  final Set<TargetPlatform> supportedPlatforms;
-
-  const _DownloadableModel({
-    required this.id,
-    required this.name,
-    required this.sizeLabel,
-    required this.providerLabel,
-    required this.tier,
-    required this.resourceLabel,
-    required this.mobileUrl,
-    this.desktopUrl,
-    this.accessUrl,
-    required this.description,
-    required this.modelType,
-    this.fileType = ModelFileType.task,
-    this.isAdvanced = false,
-    this.needsHuggingFaceToken = false,
-    required this.supportedPlatforms,
-  });
-
-  String get url {
-    final desktop = desktopUrl;
-    if (isDesktop && desktop != null) return desktop;
-    return mobileUrl;
-  }
-
-  String get storageFileName {
-    final path = Uri.parse(url).pathSegments.last;
-    return path.isEmpty ? url.split('/').last : path;
-  }
-
-  String get accessPageUrl {
-    final explicitUrl = accessUrl;
-    if (explicitUrl != null) return explicitUrl;
-    final uri = Uri.parse(url);
-    if (uri.host != 'huggingface.co' || uri.pathSegments.length < 2) {
-      return url;
-    }
-    return Uri.https(
-      uri.host,
-      '/${uri.pathSegments[0]}/${uri.pathSegments[1]}',
-    ).toString();
-  }
-
-  bool get isDesktop =>
-      !kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.linux ||
-          defaultTargetPlatform == TargetPlatform.macOS ||
-          defaultTargetPlatform == TargetPlatform.windows);
-
-  bool get supportsCurrentPlatform =>
-      !kIsWeb && supportedPlatforms.contains(defaultTargetPlatform);
-
-  bool get supportsSearchTools => false;
-
-  String get platformNote {
-    if (supportsCurrentPlatform) return description;
-    return '$description This model is not available for this platform.';
-  }
-}
-
 class _ServerModelPreset {
   final String name;
   final _ServerRuntime runtime;
-  final _AiModelTier tier;
+  final AiModelTier tier;
   final String sizeLabel;
   final String description;
 
@@ -1855,7 +1622,7 @@ class _CloudAiProviderPreset {
   final String provider;
   final String endpoint;
   final String model;
-  final _AiModelTier tier;
+  final AiModelTier tier;
   final String freeLabel;
   final String keyUrl;
   final String description;
@@ -1889,76 +1656,6 @@ class _CloudAiModelPreset {
     required this.label,
     required this.description,
   });
-}
-
-class _HuggingFaceTokenRequiredException implements Exception {
-  const _HuggingFaceTokenRequiredException();
-}
-
-String _downloadModelErrorMessage(Object error, _DownloadableModel model) {
-  if (error is _HuggingFaceTokenRequiredException) {
-    return 'Add a Hugging Face read token before downloading ${model.name}.';
-  }
-
-  final normalizedError = error.toString().toLowerCase();
-  final looksLikeHuggingFaceAccessError =
-      model.needsHuggingFaceToken &&
-      (normalizedError.contains('http 403') ||
-          normalizedError.contains('access forbidden') ||
-          normalizedError.contains('does not have access') ||
-          normalizedError.contains('for gated models'));
-
-  if (looksLikeHuggingFaceAccessError) {
-    return 'Hugging Face blocked ${model.name}. Open Access model, accept or request access with the same account as your token, then retry.';
-  }
-
-  return 'Could not download ${model.name}: $error';
-}
-
-bool _looksLikeOllamaEndpoint(String endpoint) {
-  final uri = Uri.tryParse(endpoint);
-  if (uri == null) return true;
-  if (uri.port == 52625) return false;
-  if (uri.path.contains('/v1') || uri.path.contains('/chat/completions')) {
-    return uri.port == 11434;
-  }
-  return endpoint.contains('11434') || !endpoint.contains('52625');
-}
-
-bool _looksLikeEmbeddingModel(String modelName) {
-  final normalized = modelName.toLowerCase();
-  return normalized.contains('embed') || normalized.contains('nomic-embed');
-}
-
-Uri _ollamaTagsUri(String endpoint) {
-  final uri = Uri.parse(endpoint);
-  var path = uri.path;
-  for (final suffix in ['/v1/chat/completions', '/chat/completions', '/v1']) {
-    if (path.endsWith(suffix)) {
-      path = path.substring(0, path.length - suffix.length);
-      break;
-    }
-  }
-  return uri.replace(path: '$path/api/tags', query: '');
-}
-
-Uri _openAiModelsUri(String endpoint) {
-  final uri = Uri.parse(endpoint);
-  var path = uri.path;
-  for (final suffix in ['/v1/chat/completions', '/chat/completions']) {
-    if (path.endsWith(suffix)) {
-      path = path.substring(0, path.length - suffix.length);
-      break;
-    }
-  }
-  if (!path.endsWith('/v1')) {
-    if (path.isEmpty || path == '/') {
-      path = '/v1';
-    } else if (!path.endsWith('/models')) {
-      path = '$path/v1';
-    }
-  }
-  return uri.replace(path: '$path/models', query: '');
 }
 
 class _CloudAiProviderCard extends StatelessWidget {
@@ -2575,14 +2272,18 @@ class _ServerCommandRow extends StatelessWidget {
 }
 
 class _ModelDownloadCard extends StatelessWidget {
-  final List<_DownloadableModel> models;
-  final _DownloadableModel selectedModel;
+  final String? status;
+  final String guidance;
+  final String? blockedReason;
+  final bool isChecking;
+  final List<DownloadableAiModel> models;
+  final DownloadableAiModel selectedModel;
   final bool isDownloading;
   final bool isDeleting;
   final double? progress;
   final String? downloadedId;
   final String? downloadedName;
-  final ValueChanged<_DownloadableModel> onModelSelected;
+  final ValueChanged<DownloadableAiModel> onModelSelected;
   final TextEditingController huggingFaceTokenController;
   final ValueChanged<String> onHuggingFaceTokenChanged;
   final VoidCallback onDownload;
@@ -2590,6 +2291,10 @@ class _ModelDownloadCard extends StatelessWidget {
   final VoidCallback onDelete;
 
   const _ModelDownloadCard({
+    required this.status,
+    required this.guidance,
+    required this.blockedReason,
+    required this.isChecking,
     required this.models,
     required this.selectedModel,
     required this.isDownloading,
@@ -2631,7 +2336,7 @@ class _ModelDownloadCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           DropdownButtonHideUnderline(
-            child: DropdownButton<_DownloadableModel>(
+            child: DropdownButton<DownloadableAiModel>(
               value: selectedModel,
               isExpanded: true,
               padding: EdgeInsets.zero,
@@ -2673,7 +2378,13 @@ class _ModelDownloadCard extends StatelessWidget {
     Widget downloadButton() {
       return FilledButton.icon(
         key: const ValueKey('download-recommended-ai-model'),
-        onPressed: isDeleting ? null : (isDownloading ? onCancel : onDownload),
+        onPressed:
+            isDeleting ||
+                isChecking ||
+                isDownloaded ||
+                (!isDownloading && blockedReason != null)
+            ? null
+            : (isDownloading ? onCancel : onDownload),
         icon: isDownloading
             ? const Icon(Icons.cancel_rounded)
             : Icon(
@@ -2682,7 +2393,11 @@ class _ModelDownloadCard extends StatelessWidget {
                     : Icons.download_rounded,
               ),
         label: Text(
-          isDownloading ? 'Cancel' : (isDownloaded ? 'Downloaded' : 'Download'),
+          isChecking
+              ? 'Checking…'
+              : isDownloading
+              ? 'Cancel'
+              : (isDownloaded ? 'Ready' : 'Download'),
         ),
       );
     }
@@ -2757,7 +2472,7 @@ class _ModelDownloadCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            selectedModel.description,
+            '$guidance\n${selectedModel.description}',
             style: const TextStyle(color: Colors.white70, height: 1.35),
           ),
           const SizedBox(height: 10),
@@ -2786,6 +2501,10 @@ class _ModelDownloadCard extends StatelessWidget {
               onChanged: onHuggingFaceTokenChanged,
             ),
           ],
+          if (status != null && status!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(status!, key: const ValueKey('model-download-status')),
+          ],
           if (isDownloading || progress != null) ...[
             const SizedBox(height: 12),
             LinearProgressIndicator(value: progress),
@@ -2797,7 +2516,7 @@ class _ModelDownloadCard extends StatelessWidget {
 }
 
 class _HuggingFaceTokenPanel extends StatelessWidget {
-  final _DownloadableModel model;
+  final DownloadableAiModel model;
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
 
@@ -2887,7 +2606,7 @@ class _HuggingFaceTokenPanel extends StatelessWidget {
   }
 }
 
-Future<void> _openHuggingFaceModelAccess(_DownloadableModel model) async {
+Future<void> _openHuggingFaceModelAccess(DownloadableAiModel model) async {
   final uri = Uri.parse(model.accessPageUrl);
   await launchUrl(uri, mode: LaunchMode.externalApplication);
 }
@@ -3134,4 +2853,50 @@ class _InfoRow extends StatelessWidget {
       ),
     );
   }
+}
+
+bool _looksLikeOllamaEndpoint(String endpoint) {
+  final uri = Uri.tryParse(endpoint);
+  if (uri == null) return true;
+  if (uri.port == 52625) return false;
+  if (uri.path.contains('/v1') || uri.path.contains('/chat/completions')) {
+    return uri.port == 11434;
+  }
+  return endpoint.contains('11434') || !endpoint.contains('52625');
+}
+
+bool _looksLikeEmbeddingModel(String modelName) {
+  final normalized = modelName.toLowerCase();
+  return normalized.contains('embed') || normalized.contains('nomic-embed');
+}
+
+Uri _ollamaTagsUri(String endpoint) {
+  final uri = Uri.parse(endpoint);
+  var path = uri.path;
+  for (final suffix in ['/v1/chat/completions', '/chat/completions', '/v1']) {
+    if (path.endsWith(suffix)) {
+      path = path.substring(0, path.length - suffix.length);
+      break;
+    }
+  }
+  return uri.replace(path: '$path/api/tags', query: '');
+}
+
+Uri _openAiModelsUri(String endpoint) {
+  final uri = Uri.parse(endpoint);
+  var path = uri.path;
+  for (final suffix in ['/v1/chat/completions', '/chat/completions']) {
+    if (path.endsWith(suffix)) {
+      path = path.substring(0, path.length - suffix.length);
+      break;
+    }
+  }
+  if (!path.endsWith('/v1')) {
+    if (path.isEmpty || path == '/') {
+      path = '/v1';
+    } else if (!path.endsWith('/models')) {
+      path = '$path/v1';
+    }
+  }
+  return uri.replace(path: '$path/models', query: '');
 }

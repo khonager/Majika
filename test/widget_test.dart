@@ -1198,106 +1198,38 @@ void main() {
     expect(find.text('@tester · Mystery + Drama'), findsNothing);
   });
 
-  testWidgets('settings exposes local AI management controls', (
-    WidgetTester tester,
+  testWidgets('settings offers public AI without server or account setup', (
+    tester,
   ) async {
     await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
-
     await tester.scrollUntilVisible(
-      find.text('Local AI'),
-      500,
+      find.text('AI mode'),
+      400,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
-
-    expect(find.text('Local AI'), findsOneWidget);
-    expect(find.text('AI mode'), findsOneWidget);
-    expect(find.text('Provider'), findsNothing);
-    expect(find.text('FastVLM 0.5B'), findsNothing);
-    expect(find.text('Hugging Face token'), findsNothing);
-    expect(find.text('Resolved AI context window'), findsOneWidget);
-    expect(find.text('Local server endpoint'), findsNothing);
-    expect(find.text('Local server model'), findsNothing);
-
-    await tester.tap(find.text('Fallback rules only'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Automatic on-device').last);
-    await tester.pumpAndSettle();
-
-    expect(find.text('Gemma 3n E2B IT'), findsOneWidget);
-    expect(
-      find.text(
-        '3.1 GB · Benchmark candidate · Advanced Google multimodal model',
-      ),
-      findsOneWidget,
-    );
-    expect(find.text('FunctionGemma 270M'), findsNothing);
-    expect(find.text('Hugging Face token'), findsOneWidget);
-    expect(find.byKey(const ValueKey('hugging-face-token')), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('hugging-face-access-model')),
-      findsOneWidget,
-    );
-
-    expect(find.text('Use local model when available'), findsNothing);
-    expect(find.text('AI search interpretation'), findsOneWidget);
-    expect(find.text('Advanced model choice'), findsOneWidget);
-    expect(find.text('On-device backend'), findsOneWidget);
-
-    await tester.scrollUntilVisible(
-      find.text('AI context window override'),
-      500,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('AI context window override'), findsOneWidget);
-    expect(find.text('Resolved AI context window'), findsOneWidget);
-    await tester.scrollUntilVisible(
-      find.text('Gemma 3n E2B IT'),
-      500,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Gemma 3n E2B IT'));
-    await tester.pumpAndSettle();
-    expect(find.text('Gemma 3 1B IT'), findsOneWidget);
-    expect(find.text('Gemma 3n E4B IT'), findsOneWidget);
-    expect(find.text('DeepSeek R1 Distill Qwen 1.5B'), findsNothing);
-    expect(find.text('Qwen 2.5 1.5B Instruct'), findsNothing);
-    await tester.tap(find.text('Gemma 3n E2B IT').last);
-    await tester.pumpAndSettle();
-    expect(
-      find.text(
-        '3.1 GB · Benchmark candidate · Advanced Google multimodal model',
-      ),
-      findsOneWidget,
-    );
-    expect(find.text('Hugging Face token'), findsOneWidget);
-    expect(
-      find.textContaining('Before downloading Gemma 3n E2B IT'),
-      findsOneWidget,
-    );
-
-    await tester.scrollUntilVisible(
-      find.text('Advanced model choice'),
-      500,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.pumpAndSettle();
-    final advancedTile = find.widgetWithText(ListTile, 'Advanced model choice');
-    await tester.tap(
-      find.descendant(of: advancedTile, matching: find.byType(Switch)).first,
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('Import custom model file'), findsOneWidget);
-    expect(find.text('Download'), findsOneWidget);
+    expect(find.text('Qwen 2.5 1.5B Instruct'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('download-recommended-ai-model')),
       findsOneWidget,
     );
-    expect(find.text('Current AI path'), findsOneWidget);
+    expect(find.text('Hugging Face token'), findsNothing);
+    expect(find.text('Local server endpoint'), findsNothing);
+    await tester.tap(find.text('Fallback rules only'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Automatic on-device').last);
+    await tester.pumpAndSettle();
+    expect(find.text('On-device backend'), findsNothing);
+    await tester.scrollUntilVisible(
+      find.text('Advanced model choice'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    final tile = find.widgetWithText(ListTile, 'Advanced model choice');
+    await tester.tap(find.descendant(of: tile, matching: find.byType(Switch)));
+    await tester.pumpAndSettle();
+    expect(find.text('On-device backend'), findsOneWidget);
   });
 
   testWidgets('settings local model card fits on phone widths', (
@@ -1321,7 +1253,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Gemma 3n E2B IT'), findsOneWidget);
+    expect(find.text('Qwen 2.5 1.5B Instruct'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('download-recommended-ai-model')),
       findsOneWidget,
@@ -1350,7 +1282,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Downloaded'), findsOneWidget);
+    expect(find.text('Ready'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('delete-downloaded-ai-model')),
       findsOneWidget,
@@ -1360,6 +1292,10 @@ void main() {
   testWidgets('settings persists Hugging Face token locally', (
     WidgetTester tester,
   ) async {
+    SharedPreferences.setMockInitialValues({
+      LocalAiSettingsKeys.selectedModelId: 'gemma3_1b_it',
+      LocalAiSettingsKeys.downloadedModelId: 'gemma3_1b_it',
+    });
     await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
 
     await tester.scrollUntilVisible(
@@ -1517,12 +1453,12 @@ void main() {
 
     expect(find.text('Cloud API key'), findsOneWidget);
     expect(
-      find.textContaining('Google Gemini · gemini-2.5-flash-lite'),
+      find.textContaining('Google Gemini · gemini-3.5-flash-lite'),
       findsOneWidget,
     );
     expect(find.text('Cloud endpoint'), findsOneWidget);
     expect(find.text('Free cloud model'), findsOneWidget);
-    expect(find.text('gemini-2.5-flash-lite'), findsWidgets);
+    expect(find.text('gemini-3.5-flash-lite'), findsWidgets);
     expect(find.textContaining('Cloud privacy note'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('Resolved AI context window'),
@@ -1532,7 +1468,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('1M tokens'), findsOneWidget);
     await tester.scrollUntilVisible(
-      find.textContaining('Google Gemini · gemini-2.5-flash-lite'),
+      find.textContaining('Google Gemini · gemini-3.5-flash-lite'),
       -500,
       scrollable: find.byType(Scrollable).first,
     );
@@ -1554,7 +1490,7 @@ void main() {
     );
 
     await tester.tap(
-      find.textContaining('Google Gemini · gemini-2.5-flash-lite'),
+      find.textContaining('Google Gemini · gemini-3.5-flash-lite'),
     );
     await tester.pumpAndSettle();
     await tester.tap(find.textContaining('OpenRouter · openrouter/free').last);
@@ -1716,14 +1652,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Automatic on-device'), findsWidgets);
-      expect(find.text('Gemma 3n E2B IT'), findsOneWidget);
+      expect(find.text('Qwen 2.5 1.5B Instruct'), findsOneWidget);
       expect(find.text('Gemma 3 1B IT'), findsNothing);
 
-      await tester.tap(find.text('Gemma 3n E2B IT'));
+      await tester.tap(find.text('Qwen 2.5 1.5B Instruct'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Gemma 3 1B IT'), findsOneWidget);
-      expect(find.text('Gemma 3n E4B IT'), findsOneWidget);
+      expect(find.text('Gemma 3 1B IT'), findsNothing);
+      expect(find.text('Gemma 3n E4B IT'), findsNothing);
       expect(find.text('Qwen3 0.6B'), findsOneWidget);
     } finally {
       debugDefaultTargetPlatformOverride = null;

@@ -128,3 +128,6 @@ if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
   install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 endif()
+
+# Bundle and validate the native on-device AI runtime as part of every build.
+install(SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/bundle_ai_runtime.cmake" COMPONENT Runtime)

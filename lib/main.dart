@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:majika/core/firebase/firebase_bootstrap.dart';
 import 'package:majika/core/app_startup.dart';
+import 'package:majika/core/ai/model_download_manager.dart';
+import 'package:majika/ui/shared/model_download_notice.dart';
 import 'package:majika/ui/home/home_screen.dart';
 
 void main() {
@@ -13,8 +17,16 @@ void main() {
     },
     () async {
       await FlutterGemma.initialize();
+      await ModelDownloadManager.instance.restoreInstalledModel();
     },
   ]);
+  unawaited(
+    initialization
+        .then((_) => ModelDownloadManager.instance.restorePendingDownload())
+        .catchError((Object error) {
+          debugPrint('Model recovery unavailable: ${error.runtimeType}');
+        }),
+  );
   runApp(MajikaApp(initialization: initialization));
 }
 
@@ -26,6 +38,7 @@ class MajikaApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Majika',
+      builder: (context, child) => ModelDownloadNotice(child: child!),
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
