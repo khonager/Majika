@@ -123,6 +123,16 @@ flutter build linux --debug
 flutter build apk --debug
 ```
 
+Public catalog smoke tests are opt-in because they require network access and
+live AniList/Steam availability:
+
+```bash
+flutter test test/live_catalog_test.dart --dart-define=RUN_LIVE_CATALOG=true
+```
+
+These checks fetch public recommendations without creating an account or writing
+to either service. The default test suite uses deterministic fixtures.
+
 ## Android Releases
 
 Majika publishes rolling Android builds from two GitHub release channels:

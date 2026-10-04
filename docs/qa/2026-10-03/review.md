@@ -53,18 +53,25 @@ The compiled app opens successfully on Linux with a clean local profile:
 - An import revision prevents a late refresh from restoring a profile after sign-out. Canceled Home searches are checked before persisting results.
 - Required library requests and optional metadata requests have bounded waits. AniList HTTP failures use readable messages, including rate limiting.
 - Optional AI initialization cannot permanently prevent the local app from starting.
+- Startup paints immediately, initializes optional services concurrently, and continues after a bounded wait even when an integration hangs.
+- The Linux account stream restores the session on every subscription. Expired-token requests share a refresh, and a late refresh cannot undo sign-out. Corrupt cached authentication falls back to signed out.
+- REST profile writes now use Firestore update masks so saving a name, model token, or cloud key preserves unrelated document fields. This follows the [Firestore PATCH contract](https://firebase.google.com/docs/firestore/reference/rest/v1/projects.databases.documents/patch).
+- Profile drafts survive rebuilds and repeated authentication events. Failed profile loads show a retry action and disable saving until existing data has loaded.
+- Steam backend requests have bounded waits and expose readable backend errors. Failed saved-list writes also reload the preferences cache so reopening the list does not resurrect an unsuccessful save.
 - Ranking accepts existing structured tag/description evidence when the request uses different wording, while preserving tests that reject generic matches for specific requests. No title, franchise, or creator mappings were added.
 - Test expectations for inferred tags, cloud model labels, and condensed AI logs were corrected to match the implemented contracts.
 
 ## Verification and limits
 
-- `flutter test --no-pub`: 184 tests passed, including new storage, offline restart, partial import, refresh retry, late-result, content-preference, and navigation tests.
-- `flutter analyze --no-pub`: no issues.
+- `flutter test --no-pub`: 198 tests passed; two opt-in live tests skipped. Coverage includes storage, offline restart, partial import, refresh retry, late results, content preferences, navigation, startup, profile editing, REST account lifecycle, and Steam backend errors.
+- `flutter analyze`: no issues.
 - `flutter build linux --debug --no-pub`: successful. Native first launch rendered successfully with a fresh application data directory.
+- `flutter build apk --debug --no-pub`: successful. This establishes compilation and packaging, not Android device behavior.
+- Opt-in live tests fetched and normalized public AniList and Steam recommendations successfully (two tests). They use the actual Dart service implementations without authenticated library access.
 - Main flows checked at 320 × 568, 844 × 390, and 1280 × 800 with 1.8× text scaling. The saved-list empty state was made scrollable after these tests found overflow.
 - The baseline had nine failing tests. One was stale generated shader data left from an older Flutter SDK; regenerating the test asset directory resolved the toolchain issue.
 - Screenshots and widget tests do not establish screen-reader compliance, real-device touch behavior, or performance with large live libraries.
-- Authenticated Steam/Firebase calls, real model inference/downloads, and Android/iOS builds were not exercised in this pass. Live catalog availability and recommendation relevance still need real-account testing.
+- Authenticated Steam/Firebase behavior has simulated HTTP coverage, but live authenticated calls and real model inference/downloads were not exercised. iOS was not built. Recommendation relevance and mobile behavior still need real-account and device testing.
 - Saved and hidden lists are local to the device. Hidden picks are excluded from feeds, but are not yet used to retrain or adapt the taste model.
 
 To recapture the phone flow, run:
