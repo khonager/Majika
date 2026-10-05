@@ -318,6 +318,39 @@ void main() {
   });
 
   test(
+    'suggested title lookup uses one page and skips tag discovery',
+    () async {
+      final requests = <Map<String, dynamic>>[];
+      final service = AniListService(
+        client: MockClient((request) async {
+          final payload = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(payload['query'], isNot(contains('GenreCollection')));
+          requests.add(Map<String, dynamic>.from(payload['variables'] as Map));
+          return _json({
+            'data': {
+              'Page': {'media': <Object>[]},
+            },
+          });
+        }),
+      );
+
+      final results = await service.searchSuggestedTitle(
+        const RecommendationQuery(
+          request: 'Missing Title',
+          mediaTypes: {'ANIME'},
+        ),
+      );
+
+      expect(results, isEmpty);
+      expect(requests, hasLength(1));
+      expect(requests.single['type'], 'ANIME');
+      expect(requests.single['search'], 'Missing Title');
+      expect(requests.single['perPage'], 10);
+      expect(requests.single['page'], 1);
+    },
+  );
+
+  test(
     'descriptive AniList title-search miss falls back to broader candidates',
     () async {
       final requests = <Map<String, dynamic>>[];

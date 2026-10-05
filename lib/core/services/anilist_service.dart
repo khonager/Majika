@@ -7,7 +7,7 @@ import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/user_taste_signals.dart';
 import 'package:majika/core/services/media_service.dart';
 
-class AniListService implements MediaService {
+class AniListService implements MediaService, SuggestedTitleSearch {
   AniListService({http.Client? client}) : _client = client ?? http.Client();
 
   static const endpoint = 'https://graphql.anilist.co';
@@ -107,6 +107,32 @@ class AniListService implements MediaService {
     }
 
     return _rankSearchResults(_dedupe(results), query);
+  }
+
+  @override
+  Future<List<MediaItem>> searchSuggestedTitle(
+    RecommendationQuery query,
+  ) async {
+    final title = query.searchRequest.trim();
+    if (title.isEmpty) return [];
+    final requestedTypes = query.mediaTypes;
+    final types = requestedTypes.isEmpty
+        ? RecommendationQuery.aniListMediaTypes
+        : requestedTypes
+              .where(RecommendationQuery.aniListMediaTypes.contains)
+              .toList();
+    final results = <MediaItem>[];
+    for (final type in types) {
+      results.addAll(
+        await _searchPages({
+          'type': type,
+          'perPage': 10,
+          'isAdult': query.allowsAdult,
+          'search': title,
+        }, pageCount: 1),
+      );
+    }
+    return _dedupe(results);
   }
 
   @override

@@ -47,6 +47,10 @@ abstract class MediaService {
   Future<List<String>> fetchAvailableTags();
 }
 
+abstract class SuggestedTitleSearch {
+  Future<List<MediaItem>> searchSuggestedTitle(RecommendationQuery query);
+}
+
 abstract class ServiceAuthStrategy {
   String get serviceId;
   bool get supportsOAuth;

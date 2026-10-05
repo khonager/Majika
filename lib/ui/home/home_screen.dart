@@ -1763,13 +1763,15 @@ class _HomeScreenState extends State<HomeScreen> {
     final titleKey = _normalizedTitle(suggestion.title);
     if (titleKey.isEmpty) return null;
 
-    final searchResults = await service.searchRecommendationCandidates(
-      RecommendationQuery(
-        request: suggestion.title,
-        includeAdult: query.allowsAdult,
-        excludeAdult: query.excludeAdult,
-      ),
+    final titleQuery = RecommendationQuery(
+      request: suggestion.title,
+      mediaTypes: query.effectiveMediaTypes().toSet(),
+      includeAdult: query.allowsAdult,
+      excludeAdult: query.excludeAdult,
     );
+    final searchResults = service is SuggestedTitleSearch
+        ? await (service as SuggestedTitleSearch).searchSuggestedTitle(titleQuery)
+        : await service.searchRecommendationCandidates(titleQuery);
     MediaItem? item;
     for (final result in searchResults) {
       if (_itemTitleKeys(result).contains(titleKey)) {
