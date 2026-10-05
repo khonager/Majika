@@ -90,7 +90,7 @@ const downloadableAiModels = [
     sizeLabel: '586 MB',
     providerLabel: 'Qwen',
     tier: AiModelTier.low,
-    resourceLabel: 'Balanced public text model',
+    resourceLabel: 'Small public text model',
     mobileUrl:
         'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
     desktopUrl:
@@ -126,7 +126,7 @@ const downloadableAiModels = [
     sizeLabel: '1.6 GB',
     providerLabel: 'Qwen',
     tier: AiModelTier.recommended,
-    resourceLabel: 'Advanced public text model',
+    resourceLabel: 'Balanced public text model',
     mobileUrl:
         'https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.task',
     desktopUrl:
@@ -231,3 +231,8 @@ class DownloadableAiModel {
     return '$description This model is not available for this platform.';
   }
 }
+
+// Qwen3's documented soft switch avoids spending short search-response budgets
+// on an internal reasoning trace. This is a model protocol, not media knowledge.
+String onDevicePrompt(String modelName, String prompt) =>
+    modelName.toLowerCase().contains('qwen3') ? '$prompt\n/no_think' : prompt;

@@ -9,6 +9,7 @@ import 'package:majika/core/ai/ai_search_tools.dart';
 import 'package:http/http.dart' as http;
 import 'package:majika/core/ai/local_ai_settings.dart';
 import 'package:majika/core/ai/model_download_manager.dart';
+import 'package:majika/core/ai/on_device_models.dart';
 import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation.dart';
 import 'package:majika/core/models/recommendation_query.dart';
@@ -771,14 +772,19 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       maxTokens: contextWindowTokens,
       preferredBackend: preferredBackend,
     );
+    final name =
+        FlutterGemmaPlugin.instance.modelManager.activeInferenceModel?.name ??
+        '';
+    final qwen3 = name.toLowerCase().contains('qwen3');
+    final runtimePrompt = onDevicePrompt(name, prompt);
     try {
       final chat = await model.createChat(
-        temperature: 0.1,
-        topK: 1,
+        temperature: qwen3 ? 0.7 : 0.1,
+        topK: qwen3 ? 20 : 1,
         tokenBuffer: responseTokens,
         modelType: _activeModelType(),
       );
-      final exactPromptTokens = await chat.session.sizeInTokens(prompt);
+      final exactPromptTokens = await chat.session.sizeInTokens(runtimePrompt);
       if (exactPromptTokens + responseTokens > contextWindowTokens) {
         throw StateError(
           'Prompt requires $exactPromptTokens tokens plus a '
@@ -786,8 +792,10 @@ class FlutterGemmaLocalAiService implements LocalAiService {
           '$contextWindowTokens-token model context.',
         );
       }
-      await chat.addQueryChunk(Message.text(text: prompt, isUser: true));
-      final response = await chat.generateChatResponse();
+      await chat.addQueryChunk(Message.text(text: runtimePrompt, isUser: true));
+      final response = await chat.generateChatResponse().timeout(
+        const Duration(minutes: 2),
+      );
       return switch (response) {
         TextResponse(:final token) => token,
         _ => response.toString(),

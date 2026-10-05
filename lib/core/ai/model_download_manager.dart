@@ -242,7 +242,9 @@ class ModelDownloadManager extends ChangeNotifier {
       return 'The device check took too long. Try a smaller model.';
     }
     if (message.contains('SocketException') ||
-        message.contains('HandshakeException')) {
+        message.contains('HandshakeException') ||
+        message.contains('ClientException') ||
+        message.contains('Network error')) {
       return 'Check your connection and retry.';
     }
     return message.replaceFirst('Bad state: ', '');
@@ -296,13 +298,19 @@ class ModelDownloadManager extends ChangeNotifier {
     );
     try {
       final chat = await model.createChat(
-        temperature: 0.1,
-        topK: 1,
+        temperature: choice.id == 'qwen3_0_6b' ? 0.7 : 0.1,
+        topK: choice.id == 'qwen3_0_6b' ? 20 : 1,
         tokenBuffer: 64,
         modelType: choice.modelType,
       );
       await chat.addQueryChunk(
-        Message.text(text: 'Reply with the single word Ready.', isUser: true),
+        Message.text(
+          text: onDevicePrompt(
+            choice.name,
+            'Reply with the single word Ready.',
+          ),
+          isUser: true,
+        ),
       );
       final response = await chat.generateChatResponse().timeout(
         const Duration(minutes: 2),

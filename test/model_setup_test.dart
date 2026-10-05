@@ -24,6 +24,17 @@ void main() {
   );
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  test('Qwen3 uses its documented short-response protocol', () {
+    expect(
+      onDevicePrompt('Qwen3-0.6B', 'Return JSON'),
+      'Return JSON\n/no_think',
+    );
+    expect(
+      onDevicePrompt('Qwen 2.5 1.5B Instruct', 'Return JSON'),
+      'Return JSON',
+    );
+  });
+
   test('public recommendations use platform, RAM and available storage', () {
     expect(capacity.recommended, balanced);
     const modestDesktop = DeviceCapacity(
@@ -144,6 +155,31 @@ void main() {
       );
       expect(prefs.getString(LocalAiSettingsKeys.downloadedModelId), isNull);
       fail = false;
+      await manager.download(balanced);
+      expect(manager.phase, ModelDownloadPhase.ready);
+      manager.dispose();
+    },
+  );
+
+  test(
+    'interrupted network transfer offers a readable error and retry',
+    () async {
+      var attempts = 0;
+      final manager = ModelDownloadManager(
+        capacityLoader: () async => capacity,
+        installer: (_, cancellation, progress, token) async {
+          if (attempts++ == 0) {
+            throw StateError(
+              'DownloadException: Network error: Existing download failed',
+            );
+          }
+        },
+        validator: (_) async {},
+      );
+      await manager.download(balanced);
+      expect(manager.phase, ModelDownloadPhase.failed);
+      expect(manager.error, contains('Check your connection and retry.'));
+      expect(manager.error, isNot(contains('DownloadException')));
       await manager.download(balanced);
       expect(manager.phase, ModelDownloadPhase.ready);
       manager.dispose();

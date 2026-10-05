@@ -14,7 +14,7 @@ The Gemini defaults and older saved IDs migrate to Gemini 3.5 Flash-Lite / Flash
 
 ## Try it as a user
 
-1. Rebuild and launch the updated app (`flutter run -d linux`, or install the new debug APK on Android). Hot reload alone does not install new native plugins.
+1. Rebuild and launch the updated app (`nix develop` then `flutter run -d linux` on NixOS, or install the new debug APK on Android). Hot reload alone does not install new native plugins.
 2. Open **Settings → Local AI**. Leave the server/cloud fields alone. Check the suggested model's size and device guidance, then press **Download**.
 3. Leave Settings and browse recommendations. The application-wide notice should keep showing progress. On Android, allow notifications, put Majika in the background, and check the download notification and progress bar.
 4. Wait for **Checking…**, then **ready to use**. Majika activates the model automatically. Its first load may take longer than later requests.
@@ -46,4 +46,35 @@ flutter build apk --debug --no-pub
 flutter run -d linux -t tool/on_device_smoke.dart
 ```
 
-The smoke entrypoint downloads a real public Qwen3 model, loads it through the bundled runtime, requires generated text, and exits with success/failure. It can use `--dart-define=MODEL_ID=qwen25_1_5b_instruct` for the larger model. Use separate application data directories when running it against a development machine with an existing Majika profile. It does not require FLM or Ollama.
+The smoke entrypoint downloads a real public Qwen3 model, loads it through the bundled runtime, requires generated text, then checks a short search's tags, format and adult-content flag. It exits with success/failure. It can use `--dart-define=MODEL_ID=qwen25_1_5b_instruct` for the larger model, or `--dart-define=RESTORE_ONLY=true` to check a previous installation after restart. Use separate application data directories when running it against a development machine with an existing Majika profile. Model files may still use the platform Documents directory. It does not require FLM or Ollama.
+
+### Verification results
+
+- `flutter analyze --no-pub`: no issues.
+- `flutter test --no-pub`: 210 passed; two live integration tests skipped.
+- Linux debug bundle and Android debug APK built successfully with the normal
+  application entrypoint. The Linux bundle includes JNI, Vulkan and its license.
+- Real Linux Qwen3 download, native load and text generation passed.
+- Restart restored that model without another download. A production search for
+  “romance movie about time travel” returned Romance, Time Manipulation and Movie
+  in 11.5 seconds. Existing output validation rejected the model's incorrect
+  adult-content flag. This is a smoke check, not a broad quality benchmark.
+- The larger Qwen 2.5 transfer failed after a network connection closed. The app
+  reported failure without activating it. Its real load and search quality remain
+  unverified on this machine; automated tests cover failure/retry and activation.
+- Physical-device background notification tests and live Gemini account tests
+  remain outstanding.
+
+## Native Linux finding
+
+A real download/load check found two packaging failures: the SDK build script
+silently skipped JNI extraction when `unzip` was absent, and the JNI library
+requires the Vulkan loader even for CPU inference. The Linux build now extracts
+the JNI library with CMake, bundles the loader, and fails the build if either is
+missing. The Vulkan loader license is included in the bundle. A real Qwen3
+installation then loaded and generated text using the bundled runtime.
+
+Qwen3's default thinking output consumed too much of short search responses in a
+benchmark. Majika now uses its documented `/no_think` protocol for that model;
+this is a runtime-specific instruction, not a media alias or title rule. Sampling
+also follows the [Qwen model's non-thinking guidance](https://huggingface.co/Qwen/Qwen3-0.6B).

@@ -123,6 +123,11 @@ flutter pub get
 flutter run -d linux
 ```
 
+Linux builds bundle the native AI runtime and its Vulkan loader dependency.
+Use `nix develop` on NixOS; other Linux development machines need the Vulkan
+loader development package. End users launch the built bundle without installing
+an AI server. Keep the bundle's `lib/` and `data/` directories with the executable.
+
 The project also includes a Nix flake for a Flutter/Android-oriented development shell:
 
 ```bash

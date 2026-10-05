@@ -1,9 +1,9 @@
 import 'dart:io';
-import 'dart:ffi';
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:majika/core/ai/on_device_models.dart';
+import 'package:majika/core/ai/runtime_architecture.dart';
 
 /// Hardware guidance is conservative. Successful model loading is checked
 /// separately; RAM alone cannot establish inference speed or answer quality.
@@ -55,7 +55,7 @@ class DeviceCapacity {
         return DeviceCapacity(
           platform: platform,
           ramMb: d.systemMemoryInMegabytes,
-          supportedArchitecture: Abi.current() == Abi.windowsX64,
+          supportedArchitecture: supportsBundledAiArchitecture,
         );
       }
       if (platform == TargetPlatform.linux && Platform.isLinux) {
@@ -66,7 +66,7 @@ class DeviceCapacity {
         return DeviceCapacity(
           platform: platform,
           ramMb: kb == null ? null : kb ~/ 1024,
-          supportedArchitecture: Abi.current() == Abi.linuxX64 || Abi.current() == Abi.linuxArm64,
+          supportedArchitecture: supportsBundledAiArchitecture,
         );
       }
     } catch (_) {
