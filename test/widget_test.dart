@@ -1433,6 +1433,41 @@ void main() {
     expect(find.text(changedEndpoint), findsOneWidget);
   });
 
+  testWidgets(
+    'free cloud shortcut fills endpoint and model without a download',
+    (tester) async {
+      await _pumpApp(tester, const MaterialApp(home: SettingsScreen()));
+      await tester.scrollUntilVisible(
+        find.text('Set up free cloud AI'),
+        400,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Set up free cloud AI'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Set up free cloud AI'));
+      await tester.pumpAndSettle();
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.getString(LocalAiSettingsKeys.localAiMode),
+        localAiModeExternalCloud,
+      );
+      expect(
+        prefs.getString(LocalAiSettingsKeys.cloudAiProvider),
+        'OpenRouter',
+      );
+      expect(
+        prefs.getString(LocalAiSettingsKeys.cloudModel),
+        'openrouter/free',
+      );
+      expect(
+        prefs.getString(LocalAiSettingsKeys.cloudEndpoint),
+        'https://openrouter.ai/api/v1',
+      );
+      expect(find.text('Test AI capabilities'), findsOneWidget);
+    },
+  );
+
   testWidgets('settings can configure cloud AI providers', (
     WidgetTester tester,
   ) async {
@@ -1456,8 +1491,10 @@ void main() {
       find.textContaining('Google Gemini · gemini-3.5-flash-lite'),
       findsOneWidget,
     );
-    expect(find.text('Cloud endpoint'), findsOneWidget);
-    expect(find.text('Free cloud model'), findsOneWidget);
+    expect(find.text('Advanced connection settings'), findsOneWidget);
+    expect(find.text('Cloud endpoint'), findsNothing);
+    expect(find.text('Test AI capabilities'), findsOneWidget);
+    expect(find.text('Cloud model with free-tier access'), findsOneWidget);
     expect(find.text('gemini-3.5-flash-lite'), findsWidgets);
     expect(find.textContaining('Cloud privacy note'), findsOneWidget);
     await tester.scrollUntilVisible(
@@ -1489,6 +1526,10 @@ void main() {
       'gemini_test_key',
     );
 
+    await tester.ensureVisible(
+      find.textContaining('Google Gemini · gemini-3.5-flash-lite'),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(
       find.textContaining('Google Gemini · gemini-3.5-flash-lite'),
     );

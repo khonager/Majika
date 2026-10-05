@@ -12,6 +12,7 @@ import 'package:majika/core/ai/model_download_manager.dart';
 import 'package:majika/core/ai/device_capacity.dart';
 import 'package:majika/core/firebase/firebase_profile_service.dart';
 import 'package:majika/ui/profile/profile_screen.dart';
+import 'package:majika/ui/settings/cloud_ai_test_card.dart';
 import 'package:majika/ui/shared/app_feedback.dart';
 import 'package:majika/ui/shared/glass_panel.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -133,7 +134,7 @@ const _externalCloudAiPresets = [
     freeLabel: 'Free Gemini API tier',
     keyUrl: 'https://aistudio.google.com/app/apikey',
     description:
-        'Best default cloud fallback for Majika: low-cost search interpretation and recommendation explanations through Google AI Studio.',
+        'Simple setup through Google AI Studio. Free-tier availability depends on the model, account and region.',
   ),
   _CloudAiProviderPreset(
     provider: 'Groq',
@@ -153,7 +154,7 @@ const _externalCloudAiPresets = [
     freeLabel: 'Free :free model variants',
     keyUrl: 'https://openrouter.ai/settings/keys',
     description:
-        'Aggregator option for users who want a rotating catalog of free models. Use model IDs ending in :free to avoid paid routing.',
+        'Free-first option: routes to available free models. The selected model can change between requests.',
   ),
   _CloudAiProviderPreset(
     provider: 'Custom OpenAI-compatible',
@@ -1162,7 +1163,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _SettingsSection(
               title: 'Local AI',
               subtitle:
-                  'Download AI here for private searches on this device. No server or account needed for public models.',
+                  'Use a private on-device model, a free cloud API, or manual copy/paste with an AI chat service.',
               children: [
                 _OptionRow(
                   icon: Icons.route_rounded,
@@ -1204,6 +1205,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     showInfoToast(context, 'Local AI mode set to $value.');
                   },
                 ),
+                if (!_usesExternalCloud)
+                  _ActionRow(
+                    icon: Icons.cloud_outlined,
+                    title: 'Set up free cloud AI',
+                    subtitle:
+                        'No download needed. Start with OpenRouter’s free router, paste a key, then test compatibility.',
+                    onTap: () => _useCloudProvider(
+                      _externalCloudAiPresets.firstWhere(
+                        (preset) => preset.provider == 'OpenRouter',
+                      ),
+                    ),
+                  ),
                 if (_supportsOnDeviceAi &&
                     (_usesOnDeviceAi ||
                         _hasDownloadedModel ||
@@ -1400,23 +1413,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onChanged: (value) => _saveCloudApiKey(value),
                   ),
                 if (_usesExternalCloud)
-                  _TextFieldRow(
-                    fieldKey: const ValueKey('cloud-ai-endpoint'),
-                    icon: Icons.cloud_queue_rounded,
-                    title: 'Cloud endpoint',
-                    subtitle:
-                        'OpenAI-compatible /chat/completions endpoint for the selected provider.',
-                    controller: _cloudEndpointController,
-                    hintText: _effectiveCloudProviderPreset.endpoint,
-                    onChanged: (value) =>
-                        _saveString(LocalAiSettingsKeys.cloudEndpoint, value),
+                  ExpansionTile(
+                    key: ValueKey('cloud-connection-$_localAiProvider'),
+                    tilePadding: EdgeInsets.zero,
+                    title: const Text('Advanced connection settings'),
+                    initiallyExpanded: !_usesCuratedCloudModels,
+                    children: [
+                      _TextFieldRow(
+                        fieldKey: const ValueKey('cloud-ai-endpoint'),
+                        icon: Icons.cloud_queue_rounded,
+                        title: 'Cloud endpoint',
+                        subtitle:
+                            'OpenAI-compatible /chat/completions endpoint for the selected provider.',
+                        controller: _cloudEndpointController,
+                        hintText: _effectiveCloudProviderPreset.endpoint,
+                        onChanged: (value) => _saveString(
+                          LocalAiSettingsKeys.cloudEndpoint,
+                          value,
+                        ),
+                      ),
+                    ],
                   ),
                 if (_usesExternalCloud && _usesCuratedCloudModels)
                   _OptionRow(
                     icon: Icons.smart_toy_rounded,
-                    title: 'Free cloud model',
+                    title: 'Cloud model with free-tier access',
                     subtitle:
-                        'Only free-tier models for $_localAiProvider are listed.',
+                        'Free-tier options; billing depends on your provider account. Test compatibility after choosing.',
                     value: _effectiveFreeCloudModel,
                     options: [
                       for (final preset in _freeCloudModelPresets) preset.model,
@@ -1441,6 +1464,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       setState(() {});
                       _saveString(LocalAiSettingsKeys.cloudModel, value);
                     },
+                  ),
+                if (_usesExternalCloud)
+                  CloudAiTestCard(
+                    provider: _localAiProvider,
+                    endpoint: _cloudEndpointController,
+                    model: _cloudModelController,
+                    apiKey: _cloudApiKeyController,
                   ),
                 if (_usesExternalCloud)
                   const _InfoRow(
@@ -1637,6 +1667,23 @@ class _CloudAiProviderPreset {
     required this.description,
   });
 
+  String get setupGuide => switch (provider) {
+    'Google Gemini' =>
+      'Create a key in Google AI Studio for a project on the Free tier. Leave billing disabled to stay free. Paste the key below; endpoint and model are already filled in. Paid projects are billed at their model rate, even for models with free-tier access.',
+    'Groq' =>
+      'Create a Groq account on the Free plan, then create an API key and paste it below. No local installation needed. If you upgrade, set a monthly limit in Settings → Billing → Limits. Spend tracking can lag by 10–15 minutes, so limits can be exceeded.',
+    'OpenRouter' =>
+      'Create an OpenRouter API key and paste it below. Keep Free Models Router for zero-price routing; no credits are needed for the limited free allowance. Majika sends a zero-price ceiling on this preset. Availability and rate limits vary. For paid custom setups, set a per-key credit limit and leave automatic top-ups off.',
+    _ =>
+      'Copy the chat-completions base URL, model ID and API key from your provider. Start with its free plan or a small prepaid balance, disable automatic top-ups, and set a provider-side spending limit. Majika cannot determine custom-provider prices. Test the model below.',
+  };
+
+  String get costGuideUrl => switch (provider) {
+    'Google Gemini' => 'https://ai.google.dev/gemini-api/docs/billing',
+    'Groq' => 'https://console.groq.com/docs/spend-limits',
+    _ => 'https://openrouter.ai/docs/guides/routing/provider-selection',
+  };
+
   bool get supportsSearchTools => supportsAiSearchTools(
     mode: localAiModeExternalCloud,
     modelName: model,
@@ -1711,7 +1758,7 @@ class _CloudAiProviderCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Bring your own free-tier API key.',
+                      '1. Choose a provider · 2. Create and paste an API key',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: Colors.white70,
                       ),
@@ -1737,9 +1784,7 @@ class _CloudAiProviderCard extends StatelessWidget {
                   DropdownMenuItem(
                     value: preset,
                     child: Text(
-                      preset.supportsSearchTools
-                          ? '${preset.provider} · ${preset.model} · search tools'
-                          : '${preset.provider} · ${preset.model}',
+                      '${preset.provider} · ${preset.model}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1765,8 +1810,8 @@ class _CloudAiProviderCard extends StatelessWidget {
                     ? Icons.travel_explore_rounded
                     : Icons.notes_rounded,
                 label: selectedPreset.supportsSearchTools
-                    ? 'Steam + web tools'
-                    : 'Text only',
+                    ? 'Search tools: test required'
+                    : 'Capabilities: test required',
                 color: selectedPreset.supportsSearchTools
                     ? theme.colorScheme.secondary
                     : Colors.white70,
@@ -1778,12 +1823,26 @@ class _CloudAiProviderCard extends StatelessWidget {
             selectedPreset.description,
             style: const TextStyle(color: Colors.white70, height: 1.35),
           ),
+          const SizedBox(height: 8),
+          Text(
+            selectedPreset.setupGuide,
+            style: const TextStyle(color: Colors.white70, height: 1.4),
+          ),
+          if (selectedPreset.keyUrl.isNotEmpty)
+            TextButton.icon(
+              onPressed: () => launchUrl(
+                Uri.parse(selectedPreset.costGuideUrl),
+                mode: LaunchMode.externalApplication,
+              ),
+              icon: const Icon(Icons.savings_outlined, size: 16),
+              label: const Text('Free limits and spending controls'),
+            ),
           if (selectedPreset.keyUrl.trim().isNotEmpty) ...[
             const SizedBox(height: 10),
             TextButton.icon(
               onPressed: () => _openCloudProviderKeys(selectedPreset),
               icon: const Icon(Icons.open_in_new_rounded, size: 16),
-              label: const Text('Get API key'),
+              label: const Text('1. Create API key'),
             ),
           ],
         ],
@@ -1934,8 +1993,8 @@ class _ServerModelPresetCard extends StatelessWidget {
                     ? Icons.travel_explore_rounded
                     : Icons.notes_rounded,
                 label: selectedPreset.supportsSearchTools
-                    ? 'Steam + web tools'
-                    : 'Text only',
+                    ? 'Search tools: test required'
+                    : 'Capabilities: test required',
                 color: selectedPreset.supportsSearchTools
                     ? theme.colorScheme.secondary
                     : Colors.white70,
@@ -2485,8 +2544,8 @@ class _ModelDownloadCard extends StatelessWidget {
                     ? Icons.travel_explore_rounded
                     : Icons.notes_rounded,
                 label: selectedModel.supportsSearchTools
-                    ? 'Steam + web tools'
-                    : 'Text only',
+                    ? 'Search tools: test required'
+                    : 'Capabilities: test required',
                 color: selectedModel.supportsSearchTools
                     ? theme.colorScheme.secondary
                     : Colors.white70,

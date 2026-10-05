@@ -1412,6 +1412,54 @@ void main() {
     expect(interpreted.formats, contains('SINGLE_PLAYER'));
   });
 
+  test('OpenRouter inference retains a zero-price ceiling', () async {
+    final requests = <Map<String, dynamic>>[];
+    final service = FlutterGemmaLocalAiService(
+      settingsLoader: () async => const LocalAiRuntimeSettings(
+        useLocalAi: true,
+        useAiForSearch: true,
+        mode: localAiModeExternalCloud,
+        provider: externalCloudAiProvider,
+        endpoint: defaultLocalAiEndpoint,
+        serverModel: defaultLocalAiModel,
+        cloudProvider: 'OpenRouter',
+        cloudEndpoint: 'https://openrouter.ai/api/v1',
+        cloudModel: 'openrouter/free',
+        cloudApiKey: 'test-key',
+        contextItems: 24,
+      ),
+      httpPost: (url, {headers, body}) async {
+        requests.add(jsonDecode(body.toString()) as Map<String, dynamic>);
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {
+                  'role': 'assistant',
+                  'content':
+                      '{"tags":["Mystery"],"formats":["TV"],"mediaTypes":["ANIME"],"includeAdult":false}',
+                },
+              },
+            ],
+          }),
+          200,
+        );
+      },
+    );
+    await service.interpretRecommendationRequest(
+      const RecommendationQuery(request: 'mystery tv'),
+      availableTags: const ['Mystery'],
+    );
+    expect(requests, isNotEmpty);
+    for (final request in requests) {
+      expect(request['provider'], {
+        'require_parameters': true,
+        'max_price': {'prompt': 0, 'completion': 0, 'request': 0},
+      });
+      expect(request['model'], 'openrouter/free');
+    }
+  });
+
   test('local AI service sends bearer auth for cloud providers', () async {
     Object? requestBody;
     Uri? requestUrl;

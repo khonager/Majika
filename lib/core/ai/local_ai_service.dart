@@ -870,6 +870,8 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       headers: headers,
       body: jsonEncode({
         'model': model,
+        if (settings.usesExternalCloud)
+          ...cloudAiRoutingOptions(settings.cloudProvider),
         'messages': [
           {'role': 'user', 'content': prompt},
         ],
@@ -973,6 +975,8 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       headers: headers,
       body: jsonEncode({
         'model': model,
+        if (settings.usesExternalCloud)
+          ...cloudAiRoutingOptions(settings.cloudProvider),
         'messages': [
           {'role': 'user', 'content': originalPrompt},
           {
@@ -1072,6 +1076,8 @@ class FlutterGemmaLocalAiService implements LocalAiService {
         headers: headers,
         body: jsonEncode({
           'model': model,
+          if (settings.usesExternalCloud)
+            ...cloudAiRoutingOptions(settings.cloudProvider),
           'messages': messages,
           'tools': [for (final tool in tools) tool.toJson()],
           'tool_choice': 'auto',

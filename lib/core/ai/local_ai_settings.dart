@@ -656,3 +656,15 @@ String formatAiTokenCount(int tokens) {
   if (tokens >= 1024 && tokens % 1024 == 0) return '${tokens ~/ 1024}K';
   return tokens.toString();
 }
+
+/// Keep the built-in OpenRouter route free, including retries and tool rounds.
+/// Custom endpoints retain their own provider's billing policy.
+Map<String, Object?> cloudAiRoutingOptions(String provider) =>
+    provider == 'OpenRouter'
+    ? {
+        'provider': {
+          'require_parameters': true,
+          'max_price': {'prompt': 0, 'completion': 0, 'request': 0},
+        },
+      }
+    : const {};
