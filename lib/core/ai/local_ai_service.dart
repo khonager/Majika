@@ -3626,11 +3626,17 @@ Known API result hints, optional and non-exhaustive: ${jsonEncode(knownResultHin
           ? _candidateDiscoveryTools(profile.serviceName)
           : const [],
     );
-    return _suggestionsFromResponse(
+    final suggestions = _suggestionsFromResponse(
       response,
       fallbackServiceName: profile.serviceName,
       limit: limit,
     );
+    _currentConsoleLog?.addUserLine(
+      suggestions.isEmpty
+          ? 'AI response contained no usable candidate titles.'
+          : 'Read ${suggestions.length} AI candidate titles: ${suggestions.map((item) => item.title).join(', ')}.',
+    );
+    return suggestions;
   }
 
   List<_ExternalAiTool> _candidateDiscoveryTools(String serviceName) {
@@ -3666,10 +3672,16 @@ Known API result hints, optional and non-exhaustive: ${jsonEncode(knownResultHin
       settings: settings,
       externalTools: allowSearchTools ? _steamExternalTools() : const [],
     );
-    return _suggestionFromResponse(
+    final suggestion = _suggestionFromResponse(
       response,
       fallbackServiceName: profile.serviceName,
     );
+    _currentConsoleLog?.addUserLine(
+      suggestion == null
+          ? 'AI response contained no usable lead recommendation title.'
+          : 'Read AI lead recommendation: ${suggestion.title}.',
+    );
+    return suggestion;
   }
 
   @override

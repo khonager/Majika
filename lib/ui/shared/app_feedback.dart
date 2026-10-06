@@ -25,12 +25,20 @@ class AppProgressToast {
     _consoleLog?.addUserLine(message);
   }
 
-  void dismiss() {
+  void dismiss({String? completionMessage}) {
     if (_isDismissed) return;
+    if (completionMessage != null) {
+      _consoleLog?.addUserLine(completionMessage);
+    }
     if (_isExpanded.value) {
       _isComplete.value = true;
-      _message.value = 'AI log complete. Swipe to dismiss.';
-      _consoleLog?.addUserLine('Complete. Swipe the expanded log to dismiss.');
+      _message.value =
+          completionMessage ?? 'AI log complete. Swipe to dismiss.';
+      if (completionMessage == null) {
+        _consoleLog?.addUserLine(
+          'Complete. Swipe the expanded log to dismiss.',
+        );
+      }
       return;
     }
     forceDismiss();

@@ -618,6 +618,181 @@ void main() {
     expect(find.text('Manual pick.'), findsOneWidget);
   });
 
+  testWidgets('manual AI explains unresolved title and reports no matches', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      LocalAiSettingsKeys.localAiMode: localAiModeManual,
+      LocalAiSettingsKeys.useLocalAi: true,
+    });
+
+    await _pumpApp(
+      tester,
+      MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'tester');
+    await tester.tap(find.text('Build profile'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search a vibe, tag, format, or request'),
+      'female character experiencing severe chronic pain and rare illness',
+    );
+    await tester.tap(find.byTooltip('Search recommendations'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('Manual AI response'), findsOneWidget);
+    expect(find.textContaining('Return JSON only'), findsOneWidget);
+    await tester.enterText(find.byKey(const ValueKey('manual-ai-response')), '''
+{"tags":[],"formats":[],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"female character experiencing severe chronic pain and rare illness"}
+''');
+    await tester.tap(find.text('Use response'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('Manual AI response'), findsOneWidget);
+    expect(find.textContaining('Suggest up to'), findsOneWidget);
+    final toastGesture = tester.widget<GestureDetector>(
+      find
+          .descendant(
+            of: find.byKey(const ValueKey('app-progress-toast')),
+            matching: find.byWidgetPredicate(
+              (widget) => widget is GestureDetector && widget.onTap != null,
+            ),
+          )
+          .first,
+    );
+    toastGesture.onTap!();
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.enterText(
+      find.byKey(const ValueKey('manual-ai-response')),
+      '{"titles":["Missing Catalog Title"]}',
+    );
+    await tester.tap(find.text('Use response'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('Manual AI response'), findsOneWidget);
+    expect(
+      find.textContaining('Personally recommend exactly one real anime'),
+      findsOneWidget,
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('manual-ai-response')),
+      '{"title":"Missing Catalog Title","reason":"Manual pick."}',
+    );
+    await tester.tap(find.text('Use response'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.text('Manual pick.'), findsNothing);
+    expect(find.textContaining('No matches for this'), findsOneWidget);
+    expect(
+      find.text('Search finished: no verified matches. Swipe to dismiss.'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('no exact title or alias match in AniList.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'manual AI explains insufficient catalog evidence and reports no matches',
+    (WidgetTester tester) async {
+      SharedPreferences.setMockInitialValues({
+        LocalAiSettingsKeys.localAiMode: localAiModeManual,
+        LocalAiSettingsKeys.useLocalAi: true,
+      });
+
+      await _pumpApp(
+        tester,
+        MaterialApp(home: HomeScreen(mediaService: _FakeMediaService())),
+      );
+
+      await tester.enterText(find.byType(TextField).first, 'tester');
+      await tester.tap(find.text('Build profile'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.widgetWithText(
+          TextField,
+          'Search a vibe, tag, format, or request',
+        ),
+        'female character experiencing severe chronic pain and rare illness',
+      );
+      await tester.tap(find.byTooltip('Search recommendations'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+
+      expect(find.text('Manual AI response'), findsOneWidget);
+      expect(find.textContaining('Return JSON only'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('manual-ai-response')),
+        '''
+{"tags":[],"formats":[],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"female character experiencing severe chronic pain and rare illness"}
+''',
+      );
+      await tester.tap(find.text('Use response'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+
+      expect(find.text('Manual AI response'), findsOneWidget);
+      expect(find.textContaining('Suggest up to'), findsOneWidget);
+      final toastGesture = tester.widget<GestureDetector>(
+        find
+            .descendant(
+              of: find.byKey(const ValueKey('app-progress-toast')),
+              matching: find.byWidgetPredicate(
+                (widget) => widget is GestureDetector && widget.onTap != null,
+              ),
+            )
+            .first,
+      );
+      toastGesture.onTap!();
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.enterText(
+        find.byKey(const ValueKey('manual-ai-response')),
+        '{"titles":["Time Travel Movie"]}',
+      );
+      await tester.tap(find.text('Use response'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+
+      expect(find.text('Manual AI response'), findsOneWidget);
+      expect(
+        find.textContaining('Personally recommend exactly one real anime'),
+        findsOneWidget,
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('manual-ai-response')),
+        '{"title":"Time Travel Movie","reason":"Manual pick."}',
+      );
+      await tester.tap(find.text('Use response'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(find.text('Manual pick.'), findsNothing);
+      expect(find.textContaining('No matches for this'), findsOneWidget);
+      expect(
+        find.text('Search finished: no verified matches. Swipe to dismiss.'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining(
+          'catalog metadata does not provide enough evidence for the specific request.',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
   testWidgets('unsent recommendation search edits survive rebuilds', (
     WidgetTester tester,
   ) async {

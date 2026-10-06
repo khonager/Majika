@@ -435,6 +435,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     _activeRecommendationProgressToast = progressToast;
 
+    var completionMessage = 'Search stopped. Swipe to dismiss.';
     try {
       await runZoned(
         () async {
@@ -608,6 +609,9 @@ class _HomeScreenState extends State<HomeScreen> {
             _logFinalSelection(aiLog, selection.recommendations.first);
           }
           final orderedRecommendations = selection.recommendations;
+          completionMessage = orderedRecommendations.isEmpty
+              ? 'Search finished: no verified matches. Swipe to dismiss.'
+              : 'Search finished: ${orderedRecommendations.length} recommendations. Swipe to dismiss.';
           if (selection.discoveredItem != null) {
             candidates = _dedupeCandidates([
               ...candidates,
@@ -647,6 +651,9 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
       final wasCanceled = error is AiFallbackCanceledException;
+      completionMessage = wasCanceled
+          ? 'Search canceled. Swipe to dismiss.'
+          : 'Search failed. Swipe to dismiss.';
       setState(() {
         workspace.error = wasCanceled
             ? null
@@ -663,7 +670,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (_activeRecommendationProgressToast == progressToast) {
         _activeRecommendationProgressToast = null;
       }
-      progressToast.dismiss();
+      progressToast.dismiss(completionMessage: completionMessage);
     }
   }
 
@@ -1760,8 +1767,14 @@ class _HomeScreenState extends State<HomeScreen> {
     required RecommendationQuery query,
     required AiRecommendationSuggestion suggestion,
   }) async {
+    final log = Zone.current[localAiConsoleLogZoneKey] as AiConsoleLog?;
+    MediaItem? reject(String reason) {
+      log?.addUserLine('Skipped "${suggestion.title}": $reason');
+      return null;
+    }
+
     final titleKey = _normalizedTitle(suggestion.title);
-    if (titleKey.isEmpty) return null;
+    if (titleKey.isEmpty) return reject('no searchable title.');
 
     final titleQuery = RecommendationQuery(
       request: suggestion.title,
@@ -1770,7 +1783,9 @@ class _HomeScreenState extends State<HomeScreen> {
       excludeAdult: query.excludeAdult,
     );
     final searchResults = service is SuggestedTitleSearch
-        ? await (service as SuggestedTitleSearch).searchSuggestedTitle(titleQuery)
+        ? await (service as SuggestedTitleSearch).searchSuggestedTitle(
+            titleQuery,
+          )
         : await service.searchRecommendationCandidates(titleQuery);
     MediaItem? item;
     for (final result in searchResults) {
@@ -1779,33 +1794,43 @@ class _HomeScreenState extends State<HomeScreen> {
         break;
       }
     }
-    if (item == null) return null;
+    if (item == null) {
+      return reject('no exact title or alias match in ${service.displayName}.');
+    }
 
     final resolvedItem = item;
     if (service.displayName == 'AniList' &&
         _isDistinctivePlotRequest(query) &&
         _requestEvidenceTextOverlapScore(query, resolvedItem) < 3) {
-      return null;
+      return reject(
+        'catalog metadata does not provide enough evidence for the specific request.',
+      );
     }
     if (profile.library.any(
       (owned) =>
           owned.id == resolvedItem.id ||
           _itemTitleKeys(owned).any(_itemTitleKeys(resolvedItem).contains),
     )) {
-      return null;
+      return reject('already in your library.');
     }
 
     final requiredMediaTypes = query.effectiveMediaTypes();
     if (requiredMediaTypes.isNotEmpty &&
         !requiredMediaTypes.contains(resolvedItem.mediaType)) {
-      return null;
+      return reject('does not match the requested media type.');
     }
-    if (resolvedItem.isAdult && !query.allowsAdult) return null;
+    if (resolvedItem.isAdult && !query.allowsAdult) {
+      return reject('excluded by the adult-content filter.');
+    }
 
     final validated = _tasteEngine.rankCandidates(profile, [
       resolvedItem,
     ], query: _aiDiscoveryValidationQueryFor(service, query));
-    return validated.isEmpty ? null : resolvedItem;
+    if (validated.isEmpty) {
+      return reject('excluded by your library or requested filters.');
+    }
+    log?.addUserLine('Verified suggested title: ${resolvedItem.title}.');
+    return resolvedItem;
   }
 
   RecommendationQuery _aiDiscoveryValidationQueryFor(
@@ -1880,7 +1905,11 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         discoveredItem: item,
       );
-    } catch (_) {
+    } catch (error) {
+      final log = Zone.current[localAiConsoleLogZoneKey] as AiConsoleLog?;
+      log?.addUserLine(
+        'Could not verify "${suggestion.title}" in ${service.displayName}: $error',
+      );
       return (recommendation: null, discoveredItem: null);
     }
   }
