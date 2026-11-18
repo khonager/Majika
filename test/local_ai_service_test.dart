@@ -1280,6 +1280,7 @@ void main() {
   test(
     'AniList title discovery uses grounded web titles before broad model guesses',
     () async {
+      final searchQueries = <String>[];
       final service = FlutterGemmaLocalAiService(
         textGenerator: (prompt, maxTokens) async {
           return '{"titles":["Broad Fantasy Show"]}';
@@ -1287,6 +1288,7 @@ void main() {
         searchToolbox: AiSearchToolbox(
           httpGet: (url, {headers}) async {
             expect(url.host, contains('duckduckgo.com'));
+            searchQueries.add(url.queryParameters['q'] ?? '');
             return http.Response('''
 <html>
   <a class="result__a" href="https://anilist.co/anime/100/Right-Hand-Companion/">Right Hand Companion - AniList</a>
@@ -1316,6 +1318,10 @@ void main() {
         'Broad Fantasy Show',
       ]);
       expect(suggestions.first.reason, contains('Grounded from web search'));
+      expect(searchQueries.first, contains('main characters hand turns'));
+      expect(searchQueries.first, isNot(contains('right hand')));
+      expect(searchQueries[1], contains('characters hand turns'));
+      expect(searchQueries[1], isNot(contains('that he can')));
     },
   );
 
@@ -1734,6 +1740,7 @@ void main() {
     expect(capturedPrompt, contains('User taste: Mystery'));
     expect(capturedPrompt, contains('Hollow Knight'));
     expect(capturedPrompt, contains('Why this one?'));
+    expect(capturedPrompt, contains('say what is unknown'));
     expect(response.message, contains('Hollow Knight'));
     expect(
       response.actions.single.type,

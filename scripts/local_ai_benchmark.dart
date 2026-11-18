@@ -24,7 +24,9 @@ class BenchmarkPrompt {
 
 Future<void> main(List<String> args) async {
   final root = Directory.current.path;
-  final bundle = '$root/build/linux/x64/debug/bundle';
+  final bundle =
+      Platform.environment['MAJIKA_BUNDLE_PATH'] ??
+      '$root/build/linux/x64/debug/bundle';
   final java = '$bundle/lib/jre/bin/java';
   final jar = '$bundle/data/litertlm-server.jar';
   final natives = '$bundle/lib/litertlm';
@@ -49,6 +51,7 @@ Future<void> main(List<String> args) async {
   final home = Platform.environment['HOME'] ?? '';
   final models = _modelsFromArgs(args, home);
   final prompts = _benchmarkPrompts();
+  var allPassed = true;
 
   for (final model in models) {
     if (!await File(model.path).exists()) {
@@ -59,16 +62,19 @@ Future<void> main(List<String> args) async {
           'status': 'missing',
         }),
       );
+      allPassed = false;
       continue;
     }
-    await _runModelBenchmark(
+    final passed = await _runModelBenchmark(
       model: model,
       prompts: prompts,
       java: java,
       jar: jar,
       natives: natives,
     );
+    if (!passed) allPassed = false;
   }
+  if (!allPassed) exitCode = 1;
 }
 
 List<BenchmarkModel> _modelsFromArgs(List<String> args, String home) {
@@ -92,7 +98,7 @@ List<BenchmarkModel> _modelsFromArgs(List<String> args, String home) {
   ];
 }
 
-Future<void> _runModelBenchmark({
+Future<bool> _runModelBenchmark({
   required BenchmarkModel model,
   required List<BenchmarkPrompt> prompts,
   required String java,
@@ -150,14 +156,19 @@ Future<void> _runModelBenchmark({
         if (init.error.isNotEmpty) 'error': init.error,
       }),
     );
-    if (!init.success) return;
+    if (!init.success) return false;
 
+    var allPromptsPassed = true;
     for (final prompt in prompts) {
-      print(jsonEncode(await _runPrompt(client, model.name, prompt)));
+      final result = await _runPrompt(client, model.name, prompt);
+      print(jsonEncode(result));
+      if (result['passed'] != true) allPromptsPassed = false;
+      if (result['error'] != null) return false;
     }
     await client
         .shutdown(ShutdownRequest())
         .timeout(const Duration(seconds: 10));
+    return allPromptsPassed;
   } catch (error) {
     print(
       jsonEncode({
@@ -168,6 +179,7 @@ Future<void> _runModelBenchmark({
         'logsTail': _tail(logs.toString()),
       }),
     );
+    return false;
   } finally {
     await channel?.shutdown();
     process.kill(ProcessSignal.sigterm);
@@ -184,17 +196,19 @@ Future<Map<String, Object?>> _runPrompt(
   String model,
   BenchmarkPrompt prompt,
 ) async {
-  final conversation = await client.createConversation(
-    CreateConversationRequest(),
-  );
   final watch = Stopwatch()..start();
   final output = StringBuffer();
   String? error;
+  String? conversationId;
 
   try {
+    final conversation = await client.createConversation(
+      CreateConversationRequest(),
+    );
+    conversationId = conversation.conversationId;
     final stream = client.chat(
       ChatRequest()
-        ..conversationId = conversation.conversationId
+        ..conversationId = conversationId
         ..text = prompt.prompt,
     );
     await for (final response in stream.timeout(const Duration(minutes: 2))) {
@@ -209,26 +223,35 @@ Future<Map<String, Object?>> _runPrompt(
     error = caught.toString();
   } finally {
     watch.stop();
-    await client.closeConversation(
-      CloseConversationRequest()..conversationId = conversation.conversationId,
-    );
+    if (conversationId != null) {
+      try {
+        await client.closeConversation(
+          CloseConversationRequest()..conversationId = conversationId,
+        );
+      } catch (caught) {
+        error ??= caught.toString();
+      }
+    }
   }
 
   final text = output.toString().trim();
   final jsonText = _extractJsonObject(text);
   var validJson = false;
   var passed = false;
+  Map<String, dynamic>? parsedJson;
   if (jsonText != null) {
     try {
       final decoded = jsonDecode(jsonText);
       if (decoded is Map<String, dynamic>) {
         validJson = true;
+        parsedJson = decoded;
         passed = prompt.passes(decoded);
       }
     } catch (_) {
       validJson = false;
     }
   }
+  if (error != null) passed = false;
 
   return {
     'model': model,
@@ -237,6 +260,7 @@ Future<Map<String, Object?>> _runPrompt(
     'chars': text.length,
     'validJson': validJson,
     'passed': passed,
+    if (parsedJson != null) 'parsedJson': parsedJson,
     if (error != null) 'error': error,
     'output': text.length > 500 ? '${text.substring(0, 500)}...' : text,
   };
@@ -250,10 +274,10 @@ List<BenchmarkPrompt> _benchmarkPrompts() {
 You turn recommendation search text into structured AniList filters.
 Return JSON only. No markdown. No explanation.
 Allowed mediaTypes: ANIME, MANGA
-Allowed formats: TV, TV_SHORT, MOVIE, SPECIAL, OVA, ONA, MUSIC, MANGA, NOVEL, ONE_SHOT
+Allowed formats: SERIES, MOVIE, MANGA, BOOK
 Allowed tags: Romance, Time Manipulation, Thriller, Mystery, Psychological, Supernatural, Comedy, Drama, Action, Adventure, Yandere
-Schema:
-{"tags":["Romance"],"formats":["MOVIE"],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"optional leftover search terms"}
+Use only allowed values. Return formats only when explicitly requested. Preserve unusual terms in searchText.
+Schema: {"tags":[],"formats":[],"mediaTypes":[],"includeAdult":false,"searchText":""}
 User request: romance movie about time travel
 Currently selected tags:
 Previously AI selected tags:
@@ -262,9 +286,9 @@ Currently selected media types:
 Adult content selected: false
 ''',
       (json) =>
-          json.toString().contains('Romance') &&
-          json.toString().contains('Time Manipulation') &&
-          json.toString().contains('MOVIE'),
+          _containsListValue(json['tags'], 'Romance') &&
+          _containsListValue(json['tags'], 'Time Manipulation') &&
+          _containsListValue(json['formats'], 'MOVIE'),
     ),
     BenchmarkPrompt(
       'search obsessed character thriller',
@@ -272,10 +296,10 @@ Adult content selected: false
 You turn recommendation search text into structured AniList filters.
 Return JSON only. No markdown. No explanation.
 Allowed mediaTypes: ANIME, MANGA
-Allowed formats: TV, MOVIE, MANGA, NOVEL, ONE_SHOT
+Allowed formats: SERIES, MOVIE, MANGA, BOOK
 Allowed tags: Romance, Time Manipulation, Thriller, Mystery, Psychological, Supernatural, Comedy, Drama, Action, Adventure, Yandere
-Schema:
-{"tags":["Thriller"],"formats":[],"mediaTypes":[],"includeAdult":false,"searchText":"optional leftover search terms"}
+Use only allowed values. Return formats only when explicitly requested. Preserve unusual terms in searchText.
+Schema: {"tags":[],"formats":[],"mediaTypes":[],"includeAdult":false,"searchText":""}
 User request: obsessed character thriller
 Currently selected tags:
 Previously AI selected tags:
@@ -284,9 +308,9 @@ Currently selected media types:
 Adult content selected: false
 ''',
       (json) =>
-          json.toString().contains('Thriller') &&
-          (json.toString().contains('Yandere') ||
-              json.toString().contains('Psychological')),
+          _containsListValue(json['tags'], 'Thriller') &&
+          (_containsListValue(json['tags'], 'Yandere') ||
+              _containsListValue(json['tags'], 'Psychological')),
     ),
     BenchmarkPrompt('top pick from candidates', '''
 Pick the single best recommendation for this user from the options.
@@ -300,8 +324,38 @@ User-selected tags: Mystery
 AI-selected tags: Psychological
 Options: [{"id":"anilist_1","title":"Bright Sports Comedy","score":62,"tags":["Comedy","Sports"],"format":"TV","signals":["popular"]},{"id":"anilist_2","title":"Shadow Puzzle","score":88,"tags":["Mystery","Psychological","Supernatural"],"format":"TV","signals":["matches Mystery","matches Psychological"]},{"id":"anilist_3","title":"Soft Romance","score":70,"tags":["Romance","Drama"],"format":"MOVIE","signals":["high score"]}]
 ''', (json) => json['id'] == 'anilist_2'),
+    BenchmarkPrompt(
+      'niche game mechanic search preserves terms',
+      '''
+You turn a Steam game request into search filters. Return JSON only.
+Allowed tags: Simulation, Management, Driving, Casual.
+Schema: {"tags":[],"formats":[],"searchText":"specific remaining terms"}
+Do not replace an unusual machine or activity with a broad genre. Preserve it in searchText.
+User request: a game about operating a tower crane
+''',
+      (json) =>
+          json['searchText'] is String &&
+          (json['searchText'] as String).toLowerCase().contains('crane'),
+    ),
+    BenchmarkPrompt(
+      'niche anime description preserves evidence',
+      '''
+You turn an AniList request into search filters. Return JSON only.
+Allowed tags: Drama, Music, Romance, Mystery.
+Schema: {"tags":[],"formats":[],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"specific remaining terms"}
+Do not guess a title. Preserve the distinctive description for catalog search.
+User request: anime about a pianist who receives letters from an old friend
+''',
+      (json) =>
+          json['searchText'] is String &&
+          (json['searchText'] as String).toLowerCase().contains('pianist') &&
+          (json['searchText'] as String).toLowerCase().contains('letter'),
+    ),
   ];
 }
+
+bool _containsListValue(Object? value, String expected) =>
+    value is List && value.contains(expected);
 
 String? _extractJsonObject(String text) {
   final start = text.indexOf('{');

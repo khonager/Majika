@@ -2334,6 +2334,7 @@ Prompt mode: ${tier.name}.
 ${_promptScopeInstruction(tier)}
 You are Majika's contextual recommendation chat.
 Answer the user's latest message about the current recommendations, taste profile, filters, and available services.
+Use the supplied profile and catalog evidence for factual claims about titles, creators, release details, and availability. If the evidence does not answer a niche or current factual question, say what is unknown and offer a search action instead of guessing.
 You may propose safe actions, but actions are suggestions for Majika to validate and execute through its own APIs. Do not claim an action already happened.
 Allowed action types: applyQuery, runSearch, discoverCandidates, explainRecommendation, backgroundPrompt.
 Use applyQuery when the user might want to inspect a refined search before running it.
@@ -4226,11 +4227,56 @@ Options: ${jsonEncode(options)}
   }
 
   List<String> _aniListWebQueries(String searchText) {
-    final normalized = searchText.toLowerCase();
+    const stopWords = {
+      'a',
+      'an',
+      'and',
+      'are',
+      'as',
+      'at',
+      'be',
+      'by',
+      'can',
+      'for',
+      'from',
+      'he',
+      'her',
+      'his',
+      'i',
+      'in',
+      'into',
+      'is',
+      'it',
+      'me',
+      'my',
+      'of',
+      'on',
+      'or',
+      'she',
+      'that',
+      'the',
+      'their',
+      'they',
+      'to',
+      'was',
+      'were',
+      'who',
+      'with',
+      'you',
+    };
+    final condensed = searchText
+        .split(RegExp(r'\s+'))
+        .where(
+          (word) => !stopWords.contains(
+            word.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), ''),
+          ),
+        )
+        .join(' ')
+        .trim();
     return [
-      if (normalized.contains('hand')) '"right hand" anime manga',
-      if (normalized.contains('arm')) '"arm" anime manga',
       '$searchText anime manga title',
+      if (condensed.isNotEmpty && condensed != searchText)
+        '$condensed anime manga',
       '$searchText site:anilist.co/anime OR site:anilist.co/manga',
       '$searchText site:myanimelist.net/anime OR site:myanimelist.net/manga',
     ];
