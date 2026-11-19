@@ -34,6 +34,9 @@ void main() {
   WidgetsBinding.instance.addPostFrameCallback((_) async {
     const id = String.fromEnvironment('MODEL_ID', defaultValue: 'qwen3_0_6b');
     const restoreOnly = bool.fromEnvironment('RESTORE_ONLY');
+    const nicheRequest = String.fromEnvironment('NICHE_REQUEST');
+    const nicheExpectedTerms = String.fromEnvironment('NICHE_EXPECT_TERMS');
+    const nicheExpectNoTags = bool.fromEnvironment('NICHE_EXPECT_NO_TAGS');
     if (restoreOnly) {
       await FlutterGemma.initialize();
       await manager.restoreInstalledModel();
@@ -53,25 +56,41 @@ void main() {
     final watch = Stopwatch()..start();
     final query = await runZoned(
       () => FlutterGemmaLocalAiService().interpretRecommendationRequest(
-        const RecommendationQuery(request: 'romance movie about time travel'),
+        const RecommendationQuery(
+          request: nicheRequest == ''
+              ? 'romance movie about time travel'
+              : nicheRequest,
+        ),
         availableTags: const [
           'Romance',
           'Time Manipulation',
           'Mystery',
           'Comedy',
+          'Drama',
+          'Music',
         ],
       ),
       zoneValues: {localAiConsoleLogZoneKey: log},
     );
     debugPrint(
-      'MODEL_SEARCH_RESULT ${jsonEncode({'ms': watch.elapsedMilliseconds, 'tags': query.aiSelectedTags.toList(), 'formats': query.formats.toList(), 'includeAdult': query.includeAdult})}',
+      'MODEL_SEARCH_RESULT ${jsonEncode({'ms': watch.elapsedMilliseconds, 'tags': query.aiSelectedTags.toList(), 'formats': query.formats.toList(), 'includeAdult': query.includeAdult, 'interpretedRequest': query.interpretedRequest})}',
     );
     debugPrint(log.value);
-    final passed =
-        query.aiSelectedTags.contains('Romance') &&
-        query.aiSelectedTags.contains('Time Manipulation') &&
-        query.formats.contains('MOVIE') &&
-        !query.includeAdult;
+    final passed = nicheRequest.isEmpty
+        ? query.aiSelectedTags.contains('Romance') &&
+              query.aiSelectedTags.contains('Time Manipulation') &&
+              query.formats.contains('MOVIE') &&
+              !query.includeAdult
+        : (!nicheExpectNoTags || query.aiSelectedTags.isEmpty) &&
+              nicheExpectedTerms.trim().isNotEmpty &&
+              nicheExpectedTerms
+                  .split('|')
+                  .where((term) => term.trim().isNotEmpty)
+                  .every(
+                    (term) => query.interpretedRequest.toLowerCase().contains(
+                      term.trim().toLowerCase(),
+                    ),
+                  );
     debugPrint('MODEL_SEARCH_CHECK ${passed ? 'passed' : 'failed'}');
     exit(passed ? 0 : 1);
   });

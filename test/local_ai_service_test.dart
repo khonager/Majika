@@ -121,6 +121,87 @@ void main() {
     },
   );
 
+  test('niche search rejects an unsupported burst of model tags', () async {
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async =>
+          '{"tags":["Romance","Time Manipulation","Mystery","Comedy","Drama"],"formats":["MANGA"],"mediaTypes":["MANGA"],"includeAdult":true,"searchText":"anime about a pianist who receives letters from an old friend"}',
+    );
+
+    final interpreted = await service.interpretRecommendationRequest(
+      const RecommendationQuery(
+        request:
+            'anime about a pianist who receives letters from an old friend',
+      ),
+      availableTags: const [
+        'Romance',
+        'Time Manipulation',
+        'Mystery',
+        'Comedy',
+        'Drama',
+        'Music',
+      ],
+    );
+
+    expect(interpreted.aiSelectedTags, isEmpty);
+    expect(interpreted.formats, isEmpty);
+    expect(interpreted.includeAdult, isFalse);
+    expect(interpreted.interpretedRequest, contains('pianist'));
+    expect(interpreted.interpretedRequest, contains('letters'));
+  });
+
+  test(
+    'niche search retains selected tags that are not a catalog echo',
+    () async {
+      final service = FlutterGemmaLocalAiService(
+        textGenerator: (prompt, maxTokens) async =>
+            '{"tags":["Music","Drama","Mystery"],"formats":[],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"pianist letters old friend"}',
+      );
+
+      final interpreted = await service.interpretRecommendationRequest(
+        const RecommendationQuery(
+          request:
+              'anime about a pianist who receives letters from an old friend',
+        ),
+        availableTags: const [
+          'Romance',
+          'Time Manipulation',
+          'Mystery',
+          'Comedy',
+          'Drama',
+          'Music',
+        ],
+      );
+
+      expect(
+        interpreted.aiSelectedTags,
+        containsAll(['Music', 'Drama', 'Mystery']),
+      );
+    },
+  );
+
+  test('catalog echo guard follows prompt tag order', () async {
+    final service = FlutterGemmaLocalAiService(
+      textGenerator: (prompt, maxTokens) async {
+        expect(prompt, contains('Time Manipulation, Romance, Mystery'));
+        return '{"tags":["Time Manipulation","Romance","Mystery"],"formats":[],"mediaTypes":["ANIME"],"includeAdult":false,"searchText":"time travel anime"}';
+      },
+    );
+
+    final interpreted = await service.interpretRecommendationRequest(
+      const RecommendationQuery(request: 'time travel anime'),
+      availableTags: const [
+        'Romance',
+        'Mystery',
+        'Time Manipulation',
+        'Comedy',
+      ],
+    );
+
+    expect(interpreted.aiSelectedTags, contains('Time Manipulation'));
+    expect(interpreted.aiSelectedTags, isNot(contains('Romance')));
+    expect(interpreted.aiSelectedTags, isNot(contains('Mystery')));
+  });
+
   test('flutter gemma service can interpret Steam game filters', () async {
     late String capturedPrompt;
     final service = FlutterGemmaLocalAiService(

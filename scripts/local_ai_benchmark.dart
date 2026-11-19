@@ -160,7 +160,8 @@ Future<bool> _runModelBenchmark({
 
     var allPromptsPassed = true;
     for (final prompt in prompts) {
-      final result = await _runPrompt(client, model.name, prompt);
+      final result = await _runPrompt(client, model, prompt);
+      if (result['error'] != null) result['logsTail'] = _tail(logs.toString());
       print(jsonEncode(result));
       if (result['passed'] != true) allPromptsPassed = false;
       if (result['error'] != null) return false;
@@ -193,13 +194,16 @@ Future<bool> _runModelBenchmark({
 
 Future<Map<String, Object?>> _runPrompt(
   LiteRtLmServiceClient client,
-  String model,
+  BenchmarkModel model,
   BenchmarkPrompt prompt,
 ) async {
   final watch = Stopwatch()..start();
   final output = StringBuffer();
   String? error;
   String? conversationId;
+  final promptText = model.path.toLowerCase().contains('qwen3')
+      ? '${prompt.prompt}\n/no_think'
+      : prompt.prompt;
 
   try {
     final conversation = await client.createConversation(
@@ -209,7 +213,7 @@ Future<Map<String, Object?>> _runPrompt(
     final stream = client.chat(
       ChatRequest()
         ..conversationId = conversationId
-        ..text = prompt.prompt,
+        ..text = promptText,
     );
     await for (final response in stream.timeout(const Duration(minutes: 2))) {
       if (response.hasError() && response.error.isNotEmpty) {
@@ -254,7 +258,7 @@ Future<Map<String, Object?>> _runPrompt(
   if (error != null) passed = false;
 
   return {
-    'model': model,
+    'model': model.name,
     'prompt': prompt.name,
     'latencyMs': watch.elapsedMilliseconds,
     'chars': text.length,
@@ -268,6 +272,11 @@ Future<Map<String, Object?>> _runPrompt(
 
 List<BenchmarkPrompt> _benchmarkPrompts() {
   return [
+    BenchmarkPrompt(
+      'basic structured response',
+      'Return only this JSON object: {"ready":true}',
+      (json) => json['ready'] == true,
+    ),
     BenchmarkPrompt(
       'search romance time travel movie',
       '''

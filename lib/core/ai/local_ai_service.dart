@@ -541,6 +541,12 @@ class FlutterGemmaLocalAiService implements LocalAiService {
         response,
         original: effectiveQuery,
         availableTags: availableTags,
+        promptTags: _promptTagList(
+          query: effectiveQuery,
+          availableTags: availableTags,
+          serviceName: serviceName,
+          limit: packed.limits.tagLimit,
+        ),
         allowedMediaTypes: allowedMediaTypes,
         allowedFormats: allowedFormats,
       );
@@ -1391,6 +1397,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     String response, {
     required RecommendationQuery original,
     required Iterable<String> availableTags,
+    required Iterable<String> promptTags,
     required Iterable<String> allowedMediaTypes,
     required Iterable<String> allowedFormats,
   }) {
@@ -1402,11 +1409,31 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     }
     if (decoded == null) return null;
 
-    final availableTagSet = _canonicalLookup(availableTags);
+    final availableTagValues = availableTags.toList();
+    final availableTagSet = _canonicalLookup(availableTagValues);
     final tags = _stringList(decoded['tags'])
         .map((tag) => availableTagSet[_canonicalKey(tag)])
         .whereType<String>()
         .toSet();
+    // Small models sometimes copy the first several allowed tags into the
+    // answer. Reject that exact pattern when the request names none of them.
+    final modelTagOrder = tags.map(_canonicalKey).toList();
+    final availableTagOrder = promptTags.map(_canonicalKey).toList();
+    final copiedTagPrefix =
+        modelTagOrder.length >= 3 &&
+        modelTagOrder.length <= availableTagOrder.length &&
+        List.generate(
+          modelTagOrder.length,
+          (index) => index,
+        ).every((index) => modelTagOrder[index] == availableTagOrder[index]);
+    final groundedTags =
+        copiedTagPrefix &&
+            !tags.any(
+              (tag) =>
+                  original.request.toLowerCase().contains(tag.toLowerCase()),
+            )
+        ? <String>{}
+        : tags;
     final allowedFormatSet = _canonicalLookup(allowedFormats);
     final allowedMediaTypeSet = _canonicalLookup(allowedMediaTypes);
     final modelFormats = _stringList(decoded['formats'])
@@ -1421,7 +1448,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       decoded['searchText']?.toString(),
       original.request,
     );
-    final ruleInterpreted = original.withInferredSelections(availableTags);
+    final ruleInterpreted = original.withInferredSelections(availableTagValues);
     final formats = {
       ...ruleInterpreted.formats,
       ..._filteredModelFormats(
@@ -1433,7 +1460,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
     final mediaTypes = {...ruleInterpreted.mediaTypes, ...modelMediaTypes};
     final limitedTags = _limitAiSelectedTags([
       ...ruleInterpreted.aiSelectedTags,
-      ...tags,
+      ...groundedTags,
     ]);
 
     return original.copyWith(
@@ -1447,7 +1474,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       includeAdult: _validatedModelIncludeAdult(
         original: original,
         ruleInterpreted: ruleInterpreted,
-        matchedTags: tags,
+        matchedTags: groundedTags,
         rawIncludeAdult: decoded['includeAdult'],
       ),
       excludeAdult: original.excludeAdult,

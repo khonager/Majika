@@ -199,6 +199,12 @@ flutter build linux --debug
 flutter pub run scripts/local_ai_benchmark.dart
 ```
 
+This script exercises the native model server directly with synthetic prompts.
+For the production prompt and fallback path, run
+`flutter run -d linux -t tool/on_device_smoke.dart --dart-define=RESTORE_ONLY=true`
+after installing a model. The smoke test checks one search; it does not establish
+reliability for niche factual questions.
+
 ## Known Limitations
 
 - AniList OAuth is not implemented yet.
