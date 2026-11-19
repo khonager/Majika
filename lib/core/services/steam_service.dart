@@ -231,6 +231,9 @@ class SteamService implements MediaService {
             .where((term) => term.trim().isNotEmpty)
             .length >=
         2;
+    // Keep a named reference even if the model rewrites the store query.
+    final reference = query.comparisonReference;
+    if (reference != null) add(reference);
     for (final term in expandedSteamStoreSearchTerms(text)) {
       add(term);
     }

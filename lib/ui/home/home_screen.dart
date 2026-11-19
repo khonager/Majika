@@ -1915,7 +1915,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   String _normalizedTitle(String value) {
-    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+    return MediaItem.titleKey(value);
   }
 
   Set<String> _itemTitleKeys(MediaItem item) {

@@ -1,0 +1,213 @@
+[
+  {
+    "model": "Qwen3-0.6B",
+    "query": {
+      "request": "rick and morty vibes but in vr",
+      "interpretedRequest": "rick and morty vibes but in vr",
+      "selectedTags": [],
+      "aiSelectedTags": [
+        "VR"
+      ],
+      "mediaTypes": [],
+      "formats": [],
+      "includeAdult": false,
+      "excludeAdult": false
+    },
+    "catalog": [
+      "Rick and Morty: Virtual Rick-ality",
+      "\"BUTTS: The VR Experience\"",
+      "Dances with Butterflies VR",
+      "Button VR",
+      "Button VR Expeditions",
+      "I AM BUTTER VR",
+      "Bartender VR Simulator",
+      "Touch Grass VR Simulator",
+      "HeliVR Simulator",
+      "Bocce VR Simulator",
+      "ISDDS - Drone VR Simulator",
+      "Bucket Truck VR Simulator",
+      "Mad Gun Range VR Simulator",
+      "Cooking Simulator VR",
+      "VRChat",
+      "Arizona Sunshine® VR 2",
+      "V Rising",
+      "VTOL VR",
+      "Arizona Sunshine® VR Remake",
+      "Walkabout Mini Golf VR",
+      "The Elder Scrolls V: Skyrim VR",
+      "SUPERHOT VR"
+    ],
+    "suggestions": [
+      "Rick and Morty: Virtual Rick-ality",
+      "SUPERHOT VR"
+    ],
+    "ranked": [
+      "Rick and Morty: Virtual Rick-ality",
+      "SUPERHOT VR",
+      "The Elder Scrolls V: Skyrim VR",
+      "Arizona Sunshine® VR 2",
+      "Dances with Butterflies VR",
+      "Button VR",
+      "Button VR Expeditions",
+      "I AM BUTTER VR",
+      "Bartender VR Simulator",
+      "Bocce VR Simulator"
+    ],
+    "missing": [
+      "Vertigo",
+      "Vertigo 2",
+      "Trover Saves the Universe"
+    ]
+  },
+  {
+    "model": "qwen3:4b",
+    "query": {
+      "request": "rick and morty vibes but in vr",
+      "interpretedRequest": "rick and morty vibes but in vr",
+      "selectedTags": [],
+      "aiSelectedTags": [
+        "VR"
+      ],
+      "mediaTypes": [],
+      "formats": [],
+      "includeAdult": false,
+      "excludeAdult": false
+    },
+    "catalog": [
+      "Rick and Morty: Virtual Rick-ality",
+      "\"BUTTS: The VR Experience\"",
+      "Dances with Butterflies VR",
+      "Button VR",
+      "Button VR Expeditions",
+      "I AM BUTTER VR",
+      "Bartender VR Simulator",
+      "Touch Grass VR Simulator",
+      "HeliVR Simulator",
+      "Bocce VR Simulator",
+      "ISDDS - Drone VR Simulator",
+      "Bucket Truck VR Simulator",
+      "Mad Gun Range VR Simulator",
+      "Cooking Simulator VR",
+      "VRChat",
+      "Arizona Sunshine® VR 2",
+      "V Rising",
+      "VTOL VR",
+      "Arizona Sunshine® VR Remake",
+      "Walkabout Mini Golf VR",
+      "The Elder Scrolls V: Skyrim VR",
+      "SUPERHOT VR"
+    ],
+    "suggestions": [
+      "Rick and Morty: Virtual Rick-ality",
+      "SUPERHOT VR",
+      "The Elder Scrolls V: Skyrim VR",
+      "Arizona Sunshine® VR 2",
+      "Dances with Butterflies VR",
+      "Button VR",
+      "Button VR Expeditions",
+      "I AM BUTTER VR"
+    ],
+    "ranked": [
+      "Rick and Morty: Virtual Rick-ality",
+      "SUPERHOT VR",
+      "The Elder Scrolls V: Skyrim VR",
+      "Arizona Sunshine® VR 2",
+      "Dances with Butterflies VR",
+      "Button VR",
+      "Button VR Expeditions",
+      "I AM BUTTER VR",
+      "Bartender VR Simulator",
+      "Bocce VR Simulator"
+    ],
+    "missing": [
+      "Vertigo",
+      "Vertigo 2",
+      "Trover Saves the Universe"
+    ]
+  },
+  {
+    "model": "gpt-oss:20b",
+    "query": {
+      "request": "rick and morty vibes but in vr",
+      "interpretedRequest": "rick and morty vibes in VR",
+      "selectedTags": [],
+      "aiSelectedTags": [
+        "VR",
+        "Action",
+        "Adventure"
+      ],
+      "mediaTypes": [],
+      "formats": [
+        "SINGLE_PLAYER"
+      ],
+      "includeAdult": false,
+      "excludeAdult": false
+    },
+    "catalog": [
+      "Rick and Morty: Virtual Rick-ality",
+      "SpaceVibes VR",
+      "Bartender VR Simulator",
+      "Touch Grass VR Simulator",
+      "HeliVR Simulator",
+      "Bocce VR Simulator",
+      "ISDDS - Drone VR Simulator",
+      "Bucket Truck VR Simulator",
+      "Mad Gun Range VR Simulator",
+      "Cooking Simulator VR",
+      "VRChat",
+      "Arizona Sunshine® VR 2",
+      "V Rising",
+      "VTOL VR",
+      "Arizona Sunshine® VR Remake",
+      "Walkabout Mini Golf VR",
+      "The Elder Scrolls V: Skyrim VR",
+      "SUPERHOT VR",
+      "Action Taimanin",
+      "Naval Action",
+      "VA-11 Hall-A: Cyberpunk Bartender Action",
+      "XENOTILT: HOSTILE PINBALL ACTION",
+      "Bolt Action",
+      "Maximum Action",
+      "Out of Action",
+      "Door Kickers: Action Squad",
+      "Melvor Idle 2: A RuneScape Adventure",
+      "Hello Kitty Island Adventure",
+      "JoJo's Bizarre Adventure: All-Star Battle R",
+      "The Adventures of Elliot: The Millennium Tales",
+      "Sonic Adventure 2",
+      "Sackboy™: A Big Adventure",
+      "TOEM: A Photo Adventure",
+      "Volvy’s Adventure: Reslimed",
+      "Single Player: Horror",
+      "The Ship: Single Player",
+      "GWENT: Rogue Mage (Single-Player Expansion)",
+      "Texas Holdem Poker: Solo King",
+      "Fishing for Idiots: Single player"
+    ],
+    "suggestions": [
+      "Rick and Morty: Virtual Reality",
+      "No Man's Sky VR",
+      "Cyberpunk 2077 VR Mode",
+      "Star Wars: Squadrons VR",
+      "Blade Runner 2049: A Virtual Reality Experience",
+      "The Walking Dead: Saints & Sinners (VR)"
+    ],
+    "ranked": [
+      "Rick and Morty: Virtual Rick-ality",
+      "SpaceVibes VR",
+      "Arizona Sunshine® VR 2",
+      "Mad Gun Range VR Simulator",
+      "Arizona Sunshine® VR Remake",
+      "SUPERHOT VR",
+      "Bocce VR Simulator",
+      "VTOL VR",
+      "HeliVR Simulator",
+      "The Elder Scrolls V: Skyrim VR"
+    ],
+    "missing": [
+      "Vertigo",
+      "Vertigo 2",
+      "Trover Saves the Universe"
+    ]
+  }
+]

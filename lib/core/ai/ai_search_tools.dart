@@ -139,6 +139,65 @@ class AiSearchToolbox {
     return _searchWikipedia(trimmed, limit: safeLimit);
   }
 
+  Future<List<Map<String, Object?>>> searchGameComparison({
+    required String request,
+    required String reference,
+    required bool vr,
+  }) async {
+    // One index can still provide evidence if the other is offline.
+    final subject = reference.replaceAll('"', '').trim();
+    final searches = [
+      _comparisonArticles('$subject ${vr ? 'virtual reality ' : ''}video game'),
+      searchWeb('Steam games like: $request', limit: 4),
+    ];
+    final groups = await Future.wait([
+      for (final search in searches)
+        search
+            .timeout(const Duration(seconds: 10))
+            .catchError((Object _) => <Map<String, Object?>>[]),
+    ]);
+    final seen = <String>{};
+    return [
+      for (final group in groups)
+        for (final hit in group)
+          if (seen.add(hit['url'].toString())) hit,
+    ];
+  }
+
+  Future<List<Map<String, Object?>>> _comparisonArticles(String query) async {
+    final uri = Uri.https('en.wikipedia.org', '/w/rest.php/v1/search/page', {
+      'q': query,
+      'limit': '15',
+    });
+    final response = await _get(
+      uri,
+      headers: const {'User-Agent': 'Majika/1.0', 'Accept': 'application/json'},
+    );
+    if (response.statusCode != 200) return const [];
+    final pages = jsonDecode(response.body)['pages'] as List;
+    final gameDescription = RegExp(
+      r'\b(?:video|VR) game\b(?:$| (?:by|developed|released)\b)',
+      caseSensitive: false,
+    );
+    return [
+      for (final page in pages.whereType<Map>())
+        if (page['title'] is String &&
+            gameDescription.hasMatch(page['description']?.toString() ?? ''))
+          {
+            'title': page['title'],
+            'snippet': _cleanHtml(page['excerpt']?.toString() ?? ''),
+            'url': Uri.https(
+              'en.wikipedia.org',
+              '/wiki/${page['key']}',
+            ).toString(),
+            'gameTitle': (page['title'] as String).replaceFirst(
+              RegExp(r' \((?:\d{4} )?video game\)$'),
+              '',
+            ),
+          },
+    ].take(5).toList();
+  }
+
   Future<List<Map<String, Object?>>> _searchWikipedia(
     String query, {
     required int limit,

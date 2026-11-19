@@ -1,0 +1,272 @@
+{
+  "request": "rick and morty vibes but in vr",
+  "method": "One live run per model, blank taste profile, Steam US catalog. rawModelTitles records the final titles JSON when present. suggestions combines retrieved article titles and model output. verifiedVrSuggestions checks exact store title and VR tag. ranked is the benchmark TasteEngine top ten, not a UI capture.",
+  "runs": [
+    {
+      "model": "Qwen3-0.6B",
+      "query": {
+        "request": "rick and morty vibes but in vr",
+        "interpretedRequest": "rick and morty vibes but in vr",
+        "selectedTags": [],
+        "aiSelectedTags": [
+          "VR"
+        ],
+        "mediaTypes": [],
+        "formats": [],
+        "includeAdult": false,
+        "excludeAdult": false
+      },
+      "catalog": [
+        "Rick and Morty: Virtual Rick-ality",
+        "\"BUTTS: The VR Experience\"",
+        "Dances with Butterflies VR",
+        "Button VR",
+        "Button VR Expeditions",
+        "I AM BUTTER VR",
+        "Bartender VR Simulator",
+        "Touch Grass VR Simulator",
+        "HeliVR Simulator",
+        "Bocce VR Simulator",
+        "ISDDS - Drone VR Simulator",
+        "Bucket Truck VR Simulator",
+        "Mad Gun Range VR Simulator",
+        "Cooking Simulator VR",
+        "VRChat",
+        "Arizona Sunshine® VR 2",
+        "V Rising",
+        "VTOL VR",
+        "Walkabout Mini Golf VR",
+        "Arizona Sunshine® VR Remake",
+        "The Elder Scrolls V: Skyrim VR",
+        "SUPERHOT VR"
+      ],
+      "suggestions": [
+        "Rick and Morty: Virtual Rick-ality",
+        "Accounting",
+        "Trover Saves the Universe",
+        "SUPERHOT VR",
+        "The Elder Scrolls V: Skyrim VR"
+      ],
+      "verifiedVrSuggestions": [
+        "Rick and Morty: Virtual Rick-ality",
+        "The Elder Scrolls V: Skyrim VR",
+        "SUPERHOT VR"
+      ],
+      "missingFromDiscovery": [
+        "Vertigo",
+        "Vertigo 2"
+      ],
+      "ranked": [
+        "Rick and Morty: Virtual Rick-ality",
+        "SUPERHOT VR",
+        "The Elder Scrolls V: Skyrim VR",
+        "Arizona Sunshine® VR 2",
+        "Dances with Butterflies VR",
+        "Button VR",
+        "Button VR Expeditions",
+        "I AM BUTTER VR",
+        "Bartender VR Simulator",
+        "Bocce VR Simulator"
+      ],
+      "missing": [
+        "Vertigo",
+        "Vertigo 2",
+        "Trover Saves the Universe"
+      ],
+      "rawModelTitles": [
+        "Rick and Morty: Virtual Rick-ality",
+        "SUPERHOT VR",
+        "The Elder Scrolls V: Skyrim VR"
+      ]
+    },
+    {
+      "model": "qwen3:4b",
+      "query": {
+        "request": "rick and morty vibes but in vr",
+        "interpretedRequest": "rick and morty vibes but in vr",
+        "selectedTags": [],
+        "aiSelectedTags": [
+          "VR"
+        ],
+        "mediaTypes": [],
+        "formats": [],
+        "includeAdult": false,
+        "excludeAdult": false
+      },
+      "catalog": [
+        "Rick and Morty: Virtual Rick-ality",
+        "\"BUTTS: The VR Experience\"",
+        "Dances with Butterflies VR",
+        "Button VR",
+        "Button VR Expeditions",
+        "I AM BUTTER VR",
+        "Bartender VR Simulator",
+        "Touch Grass VR Simulator",
+        "HeliVR Simulator",
+        "Bocce VR Simulator",
+        "ISDDS - Drone VR Simulator",
+        "Bucket Truck VR Simulator",
+        "Mad Gun Range VR Simulator",
+        "Cooking Simulator VR",
+        "VRChat",
+        "Arizona Sunshine® VR 2",
+        "V Rising",
+        "VTOL VR",
+        "Walkabout Mini Golf VR",
+        "Arizona Sunshine® VR Remake",
+        "The Elder Scrolls V: Skyrim VR",
+        "SUPERHOT VR"
+      ],
+      "suggestions": [
+        "Rick and Morty: Virtual Rick-ality",
+        "Accounting",
+        "Trover Saves the Universe",
+        "SUPERHOT VR",
+        "The Elder Scrolls V: Skyrim VR",
+        "Arizona Sunshine® VR 2",
+        "Dances with Butterflies VR",
+        "Button VR",
+        "Button VR Expeditions",
+        "I AM BUTTER VR"
+      ],
+      "verifiedVrSuggestions": [
+        "Rick and Morty: Virtual Rick-ality",
+        "Dances with Butterflies VR",
+        "Button VR",
+        "Button VR Expeditions",
+        "I AM BUTTER VR",
+        "Arizona Sunshine® VR 2",
+        "The Elder Scrolls V: Skyrim VR",
+        "SUPERHOT VR"
+      ],
+      "missingFromDiscovery": [
+        "Vertigo",
+        "Vertigo 2"
+      ],
+      "ranked": [
+        "Rick and Morty: Virtual Rick-ality",
+        "SUPERHOT VR",
+        "The Elder Scrolls V: Skyrim VR",
+        "Arizona Sunshine® VR 2",
+        "Dances with Butterflies VR",
+        "Button VR",
+        "Button VR Expeditions",
+        "I AM BUTTER VR",
+        "Bartender VR Simulator",
+        "Bocce VR Simulator"
+      ],
+      "missing": [
+        "Vertigo",
+        "Vertigo 2",
+        "Trover Saves the Universe"
+      ],
+      "rawModelTitles": [
+        "Rick and Morty: Virtual Rick-ality",
+        "SUPERHOT VR",
+        "The Elder Scrolls V: Skyrim VR",
+        "Arizona Sunshine® VR 2",
+        "Dances with Butterflies VR",
+        "Button VR",
+        "Button VR Expeditions",
+        "I AM BUTTER VR",
+        "Job Simulator",
+        "Lone Survivor"
+      ]
+    },
+    {
+      "model": "gpt-oss:20b",
+      "query": {
+        "request": "rick and morty vibes but in vr",
+        "interpretedRequest": "rick and morty vibes but in vr",
+        "selectedTags": [],
+        "aiSelectedTags": [
+          "VR",
+          "Comedy",
+          "Action"
+        ],
+        "mediaTypes": [],
+        "formats": [
+          "SINGLE_PLAYER"
+        ],
+        "includeAdult": false,
+        "excludeAdult": false
+      },
+      "catalog": [
+        "Rick and Morty: Virtual Rick-ality",
+        "\"BUTTS: The VR Experience\"",
+        "Dances with Butterflies VR",
+        "Button VR",
+        "Button VR Expeditions",
+        "I AM BUTTER VR",
+        "Bartender VR Simulator",
+        "Touch Grass VR Simulator",
+        "HeliVR Simulator",
+        "Bocce VR Simulator",
+        "ISDDS - Drone VR Simulator",
+        "Bucket Truck VR Simulator",
+        "Mad Gun Range VR Simulator",
+        "Cooking Simulator VR",
+        "VRChat",
+        "Arizona Sunshine® VR 2",
+        "V Rising",
+        "VTOL VR",
+        "Walkabout Mini Golf VR",
+        "Arizona Sunshine® VR Remake",
+        "The Elder Scrolls V: Skyrim VR",
+        "SUPERHOT VR",
+        "Comedy Night",
+        "Comedy Quest",
+        "Death Match Love Comedy!",
+        "Casina: The Forgotten Comedy",
+        "Undivine Comedy: Hank's Inferno",
+        "Punchcard: A Stand-Up Comedy Deckbuilder",
+        "Mayonez - Dark Comedy Slav Adventure RPG",
+        "Fairy Comedy: A Love Hard To Find",
+        "Action Taimanin",
+        "Naval Action",
+        "VA-11 Hall-A: Cyberpunk Bartender Action",
+        "XENOTILT: HOSTILE PINBALL ACTION",
+        "Bolt Action",
+        "Maximum Action",
+        "Out of Action",
+        "Door Kickers: Action Squad",
+        "Single Player: Horror",
+        "The Ship: Single Player",
+        "GWENT: Rogue Mage (Single-Player Expansion)",
+        "Texas Holdem Poker: Solo King",
+        "Fishing for Idiots: Single player"
+      ],
+      "suggestions": [
+        "Rick and Morty: Virtual Rick-ality",
+        "Accounting",
+        "Trover Saves the Universe"
+      ],
+      "verifiedVrSuggestions": [
+        "Rick and Morty: Virtual Rick-ality"
+      ],
+      "missingFromDiscovery": [
+        "Vertigo",
+        "Vertigo 2"
+      ],
+      "ranked": [
+        "Rick and Morty: Virtual Rick-ality",
+        "SUPERHOT VR",
+        "Arizona Sunshine® VR 2",
+        "Button VR",
+        "Bocce VR Simulator",
+        "Mad Gun Range VR Simulator",
+        "VTOL VR",
+        "Arizona Sunshine® VR Remake",
+        "The Elder Scrolls V: Skyrim VR",
+        "Dances with Butterflies VR"
+      ],
+      "missing": [
+        "Vertigo",
+        "Vertigo 2",
+        "Trover Saves the Universe"
+      ],
+      "rawModelTitles": null,
+      "modelOutputStatus": "No usable final title list. The discovery candidates came from search."
+    }
+  ]
+}

@@ -971,6 +971,75 @@ void main() {
     expect(capturedPrompt, contains('Portal 2'));
   });
 
+  test(
+    'Steam comparisons supply evidence even when web search fails',
+    () async {
+      final requests = <Uri>[];
+      var failGeneration = false;
+      final service = FlutterGemmaLocalAiService(
+        searchToolbox: AiSearchToolbox(
+          httpGet: (uri, {headers}) async {
+            requests.add(uri);
+            if (uri.host != 'en.wikipedia.org') return http.Response('', 503);
+            return http.Response(
+              jsonEncode({
+                'pages': [
+                  {
+                    'title': 'Orbit Office',
+                    'key': 'Orbit_Office',
+                    'description': '2019 video game',
+                    'excerpt': 'A VR comedy by the same writer.',
+                  },
+                  {
+                    'title': 'Office studio',
+                    'key': 'Office_studio',
+                    'description': 'Video game developer',
+                    'excerpt': 'Studio.',
+                  },
+                ],
+              }),
+              200,
+            );
+          },
+        ),
+        textGenerator: (prompt, maxTokens) async {
+          if (failGeneration) throw StateError('model unavailable');
+          expect(prompt, contains('A VR comedy by the same writer.'));
+          return '{"titles":["Orbit Office+", "Another Game"]}';
+        },
+      );
+      final results = await service.suggestRecommendationCandidates(
+        _profile(serviceName: 'Steam'),
+        const [],
+        query: const RecommendationQuery(
+          request: 'star janitor vibes but in VR',
+        ),
+      );
+      expect(results.map((item) => item.title), [
+        'Orbit Office',
+        'Orbit Office+',
+        'Another Game',
+      ]);
+      expect(requests.map((uri) => uri.host), contains('html.duckduckgo.com'));
+      final wiki = requests.singleWhere(
+        (uri) => uri.host == 'en.wikipedia.org',
+      );
+      expect(
+        wiki.queryParameters['q'],
+        'star janitor virtual reality video game',
+      );
+      failGeneration = true;
+      final fallback = await service.suggestRecommendationCandidates(
+        _profile(serviceName: 'Steam'),
+        const [],
+        query: const RecommendationQuery(
+          request: 'star janitor vibes but in VR',
+        ),
+      );
+      expect(fallback.map((item) => item.title), ['Orbit Office']);
+    },
+  );
+
   test('AI title discovery recovers titles from truncated JSON', () async {
     final service = FlutterGemmaLocalAiService(
       textGenerator: (prompt, maxTokens) async {

@@ -281,6 +281,17 @@ class RecommendationQuery {
     ]);
   }
 
+  String? get comparisonReference {
+    final text = request.trim();
+    final match =
+        RegExp(r'^(.+?)\s+vibes?\b', caseSensitive: false).firstMatch(text) ??
+        RegExp(
+          r'\b(?:similar to|games? like|reminds? me of|in the style of)\s+(.+?)(?:\s+but\s+|[?!]|$)',
+          caseSensitive: false,
+        ).firstMatch(text);
+    return match?.group(1)?.trim();
+  }
+
   String get searchRequest {
     final interpreted = interpretedRequest.trim();
     if (interpreted.isNotEmpty) return interpreted;

@@ -2190,7 +2190,7 @@ class _ServerRuntimeHelpCard extends StatelessWidget {
           _ServerCommandRow(
             title: 'FastFlowLM',
             subtitle:
-                'Endpoint $_flmLocalAiEndpoint; use flm list on supported Windows Ryzen AI devices.',
+                'Endpoint $_flmLocalAiEndpoint; choose a model marked installed by flm list on your Ryzen AI device.',
             command: flmCommand,
             secondaryCommand: flmPullCommand,
             onUse: onUseFlm,

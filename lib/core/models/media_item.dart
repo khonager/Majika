@@ -1,4 +1,7 @@
 class MediaItem {
+  static String titleKey(String value) =>
+      value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9+]+'), '');
+
   final String id;
   final String title;
   final String coverUrl;
