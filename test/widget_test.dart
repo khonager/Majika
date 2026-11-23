@@ -1868,15 +1868,17 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Automatic on-device'), findsWidgets);
-      expect(find.text('Qwen 2.5 1.5B Instruct'), findsOneWidget);
+      expect(find.text('Qwen 2.5 1.5B Instruct'), findsNothing);
+      expect(find.text('Qwen3 0.6B'), findsWidgets);
       expect(find.text('Gemma 3 1B IT'), findsNothing);
 
-      await tester.tap(find.text('Qwen 2.5 1.5B Instruct'));
+      await tester.tap(find.text('Qwen3 0.6B'));
       await tester.pumpAndSettle();
 
       expect(find.text('Gemma 3 1B IT'), findsNothing);
       expect(find.text('Gemma 3n E4B IT'), findsNothing);
-      expect(find.text('Qwen3 0.6B'), findsOneWidget);
+      expect(find.text('Qwen 2.5 1.5B Instruct'), findsNothing);
+      expect(find.text('Qwen3 0.6B'), findsWidgets);
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }

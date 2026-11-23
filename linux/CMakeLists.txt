@@ -76,6 +76,18 @@ set_target_properties(${BINARY_NAME}
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# LiteRT-LM links the Vulkan loader even for CPU inference. Resolve it before
+# installation so a missing dependency cannot leave a partially rebuilt bundle.
+find_library(MAJIKA_VULKAN_LOADER NAMES vulkan libvulkan.so.1
+  HINTS "$ENV{MAJIKA_VULKAN_LIBRARY_DIR}")
+if(NOT MAJIKA_VULKAN_LOADER)
+  message(FATAL_ERROR "Install the Vulkan loader development package (or use nix develop) to bundle on-device AI")
+endif()
+get_filename_component(MAJIKA_VULKAN_LOADER_REAL "${MAJIKA_VULKAN_LOADER}" REALPATH)
+file(READ "${MAJIKA_VULKAN_LOADER_REAL}" _elf_header LIMIT 5 HEX)
+if(NOT _elf_header STREQUAL "7f454c4602")
+  message(FATAL_ERROR "The Vulkan loader must match the 64-bit LiteRT-LM runtime")
+endif()
 
 # === Installation ===
 # By default, "installing" just makes a relocatable bundle in the build
@@ -129,5 +141,19 @@ if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
     COMPONENT Runtime)
 endif()
 
-# Bundle and validate the native on-device AI runtime as part of every build.
-install(SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/bundle_ai_runtime.cmake" COMPONENT Runtime)
+# The plugin stages these resources during the build. Install them with the
+# app's Runtime component, including when CMake installs only that component.
+set(AI_RUNTIME_DIR "${CMAKE_CURRENT_BINARY_DIR}/flutter_gemma_resources")
+install(DIRECTORY "${AI_RUNTIME_DIR}/jre" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  USE_SOURCE_PERMISSIONS COMPONENT Runtime)
+install(FILES "${AI_RUNTIME_DIR}/data/litertlm-server.jar"
+  DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
+install(FILES "${MAJIKA_VULKAN_LOADER_REAL}"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}/litertlm" RENAME libvulkan.so.1 COMPONENT Runtime)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/Vulkan-Loader/LICENSE.txt"
+  DESTINATION "${INSTALL_BUNDLE_DATA_DIR}/licenses/Vulkan-Loader" COMPONENT Runtime)
+install(CODE "
+  set(AI_RUNTIME_DIR \"${AI_RUNTIME_DIR}\")
+  set(AI_NATIVE_DIR \"${CMAKE_CURRENT_BINARY_DIR}/majika_ai_native\")
+  include(\"${CMAKE_CURRENT_SOURCE_DIR}/bundle_ai_runtime.cmake\")
+  " COMPONENT Runtime)

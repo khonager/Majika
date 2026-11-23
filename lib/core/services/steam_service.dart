@@ -257,6 +257,11 @@ class SteamService implements MediaService {
     return terms;
   }
 
+  static String? requestTopic(String text) => RegExp(
+    r'\b(?:about|after|during|over|through)\s+(?:a|an|the)\s+([^.!?,;]+)[.!?]*$',
+    caseSensitive: false,
+  ).firstMatch(text)?.group(1)?.trim();
+
   static List<String> expandedSteamStoreSearchTerms(String rawText) {
     final trimmed = rawText.trim();
     if (trimmed.isEmpty) return const [];
@@ -279,6 +284,10 @@ class SteamService implements MediaService {
     }
 
     final cleaned = _withoutNegativeReferencePhrases(trimmed);
+    // Store search matches titles. Keep the complete request first, then try
+    // the topic in phrases such as "after a storm" or "about an expedition".
+    final topic = requestTopic(cleaned);
+    if (topic != null) add(topic);
     var simplified = cleaned.toLowerCase();
     for (final prefix in const [
       'i want to pretend to be ',

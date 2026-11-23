@@ -30,7 +30,11 @@ enum _ServerRuntime {
 }
 
 final _defaultLocalAiModel = downloadableAiModels.firstWhere(
-  (model) => model.id == 'qwen25_1_5b_instruct',
+  (model) =>
+      model.id ==
+      (defaultTargetPlatform == TargetPlatform.linux
+          ? 'qwen3_0_6b'
+          : 'qwen25_1_5b_instruct'),
   orElse: () => downloadableAiModels.first,
 );
 const _flmLocalAiEndpoint = 'http://127.0.0.1:52625/v1/chat/completions';

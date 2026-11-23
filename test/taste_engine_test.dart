@@ -143,6 +143,40 @@ void main() {
     expect(recommendations.first.item.title, 'Strategy RPG Match');
   });
 
+  test(
+    'Steam ranks an owned game by its description over a title-only match',
+    () {
+      final engine = TasteEngine();
+      final owned = MediaItem(
+        id: 'steam_101',
+        tags: const [],
+        title: 'Night Train',
+        coverUrl: '',
+        sourceId: 'com.majika.service.steam',
+        mediaType: 'GAME',
+        description: 'Explore loneliness and reconnect with old friends.',
+      );
+      final titleOnly = MediaItem(
+        id: 'steam_102',
+        tags: const [],
+        title: 'Loneliness',
+        coverUrl: '',
+        sourceId: owned.sourceId,
+        mediaType: 'GAME',
+        description: 'Race against the clock.',
+      );
+      final profile = engine.buildProfile('tester', [
+        owned,
+      ], serviceName: 'Steam');
+      final picks = engine.rankCandidates(
+        profile,
+        [titleOnly, owned],
+        query: const RecommendationQuery(request: 'a game about loneliness'),
+      );
+      expect(picks.first.item.id, owned.id);
+    },
+  );
+
   test('Steam power fantasy requests survive negative reference wording', () {
     final engine = TasteEngine();
     final profile = engine.buildProfile(

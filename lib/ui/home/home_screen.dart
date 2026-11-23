@@ -517,7 +517,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ]);
             requestSeedCandidates = _dedupeCandidates([
               ...requestSeedCandidates,
-              ..._directSearchRequestSeeds(query, searchedCandidates),
+              if (workspace.service.displayName != 'Steam')
+                ..._directSearchRequestSeeds(query, searchedCandidates),
             ]);
             if (candidates.isNotEmpty) {
               _publishRecommendationSearchStage(
@@ -604,6 +605,11 @@ class _HomeScreenState extends State<HomeScreen> {
             profile,
             recommendations,
             query,
+            chooseFromVerifiedGames:
+                workspace.service.displayName == 'Steam' &&
+                (requestSeedCandidates.length >= 2 ||
+                    (requestSeedCandidates.isNotEmpty &&
+                        query.comparisonReference != null)),
           );
           if (selection.recommendations.isNotEmpty) {
             _logFinalSelection(aiLog, selection.recommendations.first);
@@ -755,6 +761,7 @@ class _HomeScreenState extends State<HomeScreen> {
               excludeAdult: chooserQuery.excludeAdult || query.excludeAdult,
             );
 
+            final discoveredGames = <MediaItem>[];
             var baseCandidates = workspace.baseCandidates;
             var candidates = query.isActive
                 ? <MediaItem>[]
@@ -774,6 +781,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 knownRecommendations: const [],
                 query: query,
               );
+              if (workspace.service.displayName == 'Steam') {
+                discoveredGames.addAll(aiDiscovered);
+              }
               if (aiDiscovered.isNotEmpty) {
                 candidates = _dedupeCandidates([
                   ...aiDiscovered,
@@ -825,6 +835,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 knownRecommendations: preliminaryRecommendations,
                 query: query,
               );
+              if (workspace.service.displayName == 'Steam') {
+                discoveredGames.addAll(aiDiscovered);
+              }
               if (aiDiscovered.isNotEmpty) {
                 candidates = _dedupeCandidates([
                   ...aiDiscovered,
@@ -836,11 +849,15 @@ class _HomeScreenState extends State<HomeScreen> {
             progressToast.update(
               'Ranking ${workspace.service.displayName} matches...',
             );
-            final recommendations = _tasteEngine.rankCandidates(
-              profile,
-              candidates,
-              query: query,
-            );
+            final recommendations = discoveredGames.isEmpty
+                ? _tasteEngine.rankCandidates(profile, candidates, query: query)
+                : _rankCandidatesForDisplay(
+                    workspace.service,
+                    profile,
+                    candidates,
+                    query: query,
+                    requestSeedCandidates: discoveredGames,
+                  );
             if (recommendations.isEmpty) continue;
 
             if (!mounted || _activeHomeSearchRunId != searchRunId) return;
@@ -1360,13 +1377,16 @@ class _HomeScreenState extends State<HomeScreen> {
     MediaService service,
     TasteProfile profile,
     List<Recommendation> recommendations,
-    RecommendationQuery query,
-  ) async {
-    final suggestion = await _aiService.suggestRecommendation(
-      profile,
-      recommendations,
-      query: query,
-    );
+    RecommendationQuery query, {
+    required bool chooseFromVerifiedGames,
+  }) async {
+    final suggestion = chooseFromVerifiedGames && recommendations.isNotEmpty
+        ? null
+        : await _aiService.suggestRecommendation(
+            profile,
+            recommendations,
+            query: query,
+          );
     if (suggestion != null) {
       final resolved = await _resolveDirectSuggestion(
         service: service,
@@ -1393,7 +1413,8 @@ class _HomeScreenState extends State<HomeScreen> {
       return (recommendations: recommendations, discoveredItem: null);
     }
 
-    if (_shouldKeepRankedTopPick(query, recommendations)) {
+    if (!chooseFromVerifiedGames &&
+        _shouldKeepRankedTopPick(query, recommendations)) {
       final top = recommendations.first;
       return (
         recommendations: [
@@ -1757,8 +1778,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!query.isActive) return false;
     if (candidates.isEmpty) return true;
     if (!preferAiDiscoveryFirst) return false;
-    return service.displayName == 'Steam' ||
-        (service.displayName == 'AniList' && candidates.length < 2);
+    return (service.displayName == 'Steam' ||
+            service.displayName == 'AniList') &&
+        candidates.length < 2;
   }
 
   Future<MediaItem?> _resolveSuggestedItem({
@@ -1806,11 +1828,12 @@ class _HomeScreenState extends State<HomeScreen> {
         'catalog metadata does not provide enough evidence for the specific request.',
       );
     }
-    if (profile.library.any(
-      (owned) =>
-          owned.id == resolvedItem.id ||
-          _itemTitleKeys(owned).any(_itemTitleKeys(resolvedItem).contains),
-    )) {
+    if (service.displayName != 'Steam' &&
+        profile.library.any(
+          (owned) =>
+              owned.id == resolvedItem.id ||
+              _itemTitleKeys(owned).any(_itemTitleKeys(resolvedItem).contains),
+        )) {
       return reject('already in your library.');
     }
 
@@ -1827,7 +1850,7 @@ class _HomeScreenState extends State<HomeScreen> {
       resolvedItem,
     ], query: _aiDiscoveryValidationQueryFor(service, query));
     if (validated.isEmpty) {
-      return reject('excluded by your library or requested filters.');
+      return reject('excluded by requested filters.');
     }
     log?.addUserLine('Verified suggested title: ${resolvedItem.title}.');
     return resolvedItem;

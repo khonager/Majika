@@ -270,6 +270,13 @@ void main() {
     },
   );
 
+  test('Steam keeps the request and searches its topic phrase', () {
+    const request = 'a game that helps you get over a breakup';
+    final terms = SteamService.expandedSteamStoreSearchTerms(request);
+    expect(terms.first, request);
+    expect(terms, contains('breakup'));
+  });
+
   test('Steam search term expansion uses generic request decomposition', () {
     final terms = SteamService.expandedSteamStoreSearchTerms(
       'i want to pretend to be a boring office worker who gets to solve tasks',

@@ -2704,6 +2704,9 @@ Recent chat messages: ${jsonEncode(history)}
       return {
         ...common,
         'steamTags': item.tags.take(tagLimit).toList(),
+        if (item.description case final String text
+            when tier == _AiPromptTier.compact)
+          'description': text.substring(0, min(text.length, 240)),
         'matchedRequestSteamTags': matchedRequestTags,
         'requestFitEvidence': requestFit,
         'playCapability': item.format,
@@ -2822,7 +2825,7 @@ Treat Steam store tags, matchedRequestSteamTags, scores, playtime, and ranker re
 First filter for the strongest match to the game request. Use the user's Steam taste profile only as secondary guidance or a tie-breaker.
 Prioritize the user's request before personal taste. A lower-score option can win when it better matches the request.
 Do not pick a broadly popular or profile-shaped game when another option better satisfies the requested mood, mechanic, theme, tag, franchise, format, or play capability.
-Write the reason around why the chosen game fits the request; mention personal taste only when it adds useful context.
+Write the reason around why the chosen game fits the request. Cite a specific story or gameplay detail; mention personal taste only when it adds useful context.
 Only the listed Steam game options are eligible for this request.
 If missingPlayCapabilities is empty, that game satisfies every required Steam play capability.
 Return JSON only. Use exactly these keys: id, reason. The id must match one option id. Keep reason to one short sentence under 25 words.
@@ -3062,8 +3065,7 @@ ${_servicePromptContext('Steam')}
 Personally recommend exactly one real Steam PC game from your own knowledge for this user.
 This is a direct recommendation, not tag selection and not option reranking. You may choose a game outside the known search-result hints. Use the request as the primary decision, then use the user's game taste as secondary guidance.
 If the request names reference titles, infer their core appeal, tone, character fantasy, structure, and tropes. Do not recommend a title that only shares a broad tag or setting.
-The title must be an exact game title that Majika can search for on Steam. Do not invent a game and do not recommend a game the user already owns.
-Titles shown in profile evidence are already owned and are taste signals only, never valid recommendations.
+The title must be an exact game title that Majika can search for on Steam. Owned games are eligible. Choose by the game's premise or what the player does. Explain that specific connection. A word in the title or generic Steam features cannot establish thematic fit.
 Respect required play capabilities when they are present.
 ${_steamToolInstruction(allowSearchTools)}
 Return JSON only. Use exactly these keys: title, reason. Keep reason to one short sentence under 25 words.
@@ -3072,7 +3074,7 @@ Game request: ${query.request}
 User-selected Steam tags: ${query.selectedTags.join(', ')}
 AI-selected Steam tags: ${query.aiSelectedTags.join(', ')}
 Required Steam play capabilities: ${query.effectiveFormats().join(', ')}
-Known owned-game titles to avoid: ${jsonEncode(ownedTitles)}
+Games in the library (eligible when relevant): ${jsonEncode(ownedTitles)}
 Known Steam search-result hints, optional and non-exhaustive: ${jsonEncode(knownHints)}
 ''';
     }
@@ -3167,8 +3169,7 @@ Personally recommend exactly one real title from your own knowledge across the u
 This is the direct Home recommendation, not tag selection and not option reranking. You may choose a title outside the known search-result hints. Use the request as the primary decision, then use the relevant personal profile as secondary guidance.
 Choose only from these services: ${availableServices.join(', ')}.
 If the request asks for a game, choose Steam. If it asks for anime or manga, choose AniList. For a broad request, choose the strongest personal fit across the available services.
-Return an exact title searchable through the chosen service. Do not invent a title and do not recommend anything already in the corresponding library.
-Titles shown in profile evidence are already owned and are taste signals only, never valid recommendations.
+Return an exact title searchable through the chosen service. Owned Steam games are eligible. For other services, library entries are taste signals only, never valid recommendations.
 Respect hard media-type and format/play-capability requirements when they apply to the chosen service.
 ${_adultRecommendationGuidance(query, supportsAdultContent: availableServices.any(_isAniListService))}
 Return JSON only. Use exactly these keys: service, title, reason. The service must exactly match one available service. Keep reason to one short sentence under 25 words.
@@ -3176,7 +3177,7 @@ $profileEvidence
 Home request: ${query.request}
 Requested media types: ${query.effectiveMediaTypes().join(', ')}
 Requested formats or play capabilities: ${query.effectiveFormats().join(', ')}
-Known library titles to avoid by service: ${jsonEncode(ownedTitles)}
+Library titles by service: ${jsonEncode(ownedTitles)}
 Known cross-service search-result hints, optional and non-exhaustive: ${jsonEncode(knownHints)}
 ''';
   }
@@ -3229,7 +3230,7 @@ If the request is a distinctive plot clue, suggest only titles whose premise mat
 For a cross-media reference, consider official adaptations, games by the same creators, and independent games with a similar tone. Include relevant sequels when they fit the requested hardware.
 Prefer a useful mix of obvious popular matches and lesser-known matches when both fit.
 Use the request as the primary decision. Use the user's profile only as a light tie-breaker.
-Return exact titles that should be searchable on ${profile.serviceName}. Do not invent titles and do not suggest titles already in the user's library.
+Return exact titles that should be searchable on ${profile.serviceName}. ${isSteam ? 'Owned games are eligible. Recommend games for their story, mechanics or player experience. Return fewer titles if evidence is weak.' : "Do not invent titles and do not suggest titles already in the user's library."}
 Respect hard $formatLabel when they are present.
 ${isSteam ? _steamToolInstruction(allowSearchTools) : ''}
 ${allowGenericWebTools ? _webToolInstruction(true) : ''}
@@ -3239,7 +3240,7 @@ User-selected tags: ${query.selectedTags.join(', ')}
 AI-selected tags: ${query.aiSelectedTags.join(', ')}
 Requested media types: ${query.effectiveMediaTypes().join(', ')}
 Requested formats or play capabilities: ${query.effectiveFormats().join(', ')}
-Known library titles to avoid: ${jsonEncode(ownedTitles)}
+${isSteam ? 'Games in the library (eligible when relevant)' : 'Known library titles to avoid'}: ${jsonEncode(ownedTitles)}
 Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
 Known API result hints, optional and non-exhaustive: ${jsonEncode(knownResultHints)}
 ''';
@@ -3677,9 +3678,39 @@ Known API result hints, optional and non-exhaustive: ${jsonEncode(knownResultHin
     required _PromptBudget budget,
     required bool allowSearchTools,
   }) async {
-    final hits = allowSearchTools
+    var hits = allowSearchTools
         ? const <Map<String, Object?>>[]
         : await _steamComparisonHits(profile, query);
+    final thematicSearch =
+        _isSteamService(profile.serviceName) &&
+        settings.usesOnDeviceModel &&
+        query.comparisonReference == null &&
+        query.request.trim().split(RegExp(r'\s+')).length >= 3;
+    if (thematicSearch) {
+      try {
+        final concepts = await _generateText(
+          'What story themes, activities or feelings would satisfy this game request? '
+          'Give 2 to 4 related descriptive keywords for searching game summaries. '
+          'Use synonyms, no game titles. Return JSON only: {"terms":["..."]}.\n'
+          'Request: ${jsonEncode(query.request)}',
+          maxTokens: 128,
+          settings: settings,
+        );
+        for (final object in _jsonObjects(concepts)) {
+          final terms = _stringList(object['terms']).take(4).join(' ');
+          if (terms.isEmpty) continue;
+          hits = await searchToolbox.searchGameThemes(query.request, terms);
+          _currentConsoleLog?.addDetail(
+            'Game theme search for "$terms" returned ${hits.length} excerpts.',
+          );
+          break;
+        }
+      } catch (error) {
+        _currentConsoleLog?.addDetail(
+          'Game theme evidence unavailable: $error',
+        );
+      }
+    }
     final packed = _packPrompt(
       budget: budget,
       initialLimits: _promptLimits(budget.tier),
@@ -3694,13 +3725,32 @@ Known API result hints, optional and non-exhaustive: ${jsonEncode(knownResultHin
         allowSearchTools: allowSearchTools,
       ),
     );
+    // A comparison article can name an owned game more accurately than
+    // a small model transcribes it. Keep its catalog spelling for lookup.
+    String words(String value) => value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\p{L}\p{N}+]+', unicode: true), ' ')
+        .trim();
+    final excerpts = hits
+        .map((h) => ' ${words("${h['title']} ${h['snippet'] ?? ''}")} ')
+        .toList();
     final articleSuggestions = [
+      if (query.comparisonReference != null && excerpts.isNotEmpty)
+        for (final game in profile.library)
+          if (words(game.title).length >= 3 &&
+              words(game.title) != words(query.comparisonReference!) &&
+              excerpts.any((text) => text.contains(' ${words(game.title)} ')))
+            AiRecommendationSuggestion(
+              title: game.title,
+              serviceName: profile.serviceName,
+              reason: 'Named in search excerpts for this comparison.',
+            ),
       for (final hit in hits)
         if (hit['gameTitle'] case final String title)
           AiRecommendationSuggestion(
             title: title,
             serviceName: profile.serviceName,
-            reason: 'Game identified in comparison search: ${hit['url']}',
+            reason: 'Game identified in search evidence: ${hit['url']}',
           ),
     ];
     final String response;
@@ -3733,10 +3783,25 @@ Known API result hints, optional and non-exhaustive: ${jsonEncode(knownResultHin
           : 'Read ${suggestions.length} AI candidate titles: ${suggestions.map((item) => item.title).join(', ')}.',
     );
     if (articleSuggestions.isEmpty) return suggestions;
+    if (thematicSearch) {
+      final titles = articleSuggestions
+          .map((s) => MediaItem.titleKey(s.title))
+          .toSet();
+      return _mergeSuggestions([
+        ...suggestions.where(
+          (s) => titles.contains(MediaItem.titleKey(s.title)),
+        ),
+        ...articleSuggestions,
+      ], limit: limit);
+    }
     // Candidate titles still go through the service's exact-title lookup.
     return _mergeSuggestions([
       ...articleSuggestions,
-      ...suggestions,
+      ...suggestions.where(
+        (s) =>
+            !settings.usesOnDeviceModel ||
+            excerpts.any((line) => line.contains(' ${words(s.title)} ')),
+      ),
     ], limit: limit);
   }
 
@@ -3836,9 +3901,15 @@ Known API result hints, optional and non-exhaustive: ${jsonEncode(knownResultHin
   }) async {
     if (recommendations.isEmpty) return null;
     final baseSettings = await _runtimeSettings();
+    // The local Steam discovery model may select among verified catalog IDs.
+    // Free-form selection for other services keeps its own capability check.
+    final task =
+        baseSettings.usesOnDeviceModel && _isSteamService(profile.serviceName)
+        ? 'steam_discovery'
+        : 'recommendation_selection';
     final settings = _effectiveSettingsForTask(
       baseSettings,
-      task: 'recommendation_selection',
+      task: task,
       minimumTier: AiModelTrustTier.constrained,
     );
     final requestedFormats = query.effectiveFormats();
@@ -3857,7 +3928,7 @@ Known API result hints, optional and non-exhaustive: ${jsonEncode(knownResultHin
     }
     if (textGenerator == null &&
         !_meetsTrustTier(
-          _trustTierForTask(settings, 'recommendation_selection'),
+          _trustTierForTask(settings, task),
           AiModelTrustTier.constrained,
         )) {
       return fallback.chooseTopRecommendation(
@@ -3899,7 +3970,7 @@ Known API result hints, optional and non-exhaustive: ${jsonEncode(knownResultHin
                 ),
               )
               .toList();
-          return _serviceTopRecommendationPrompt(
+          final prompt = _serviceTopRecommendationPrompt(
             profile: profile,
             tier: budget.tier,
             limits: limits,
@@ -3909,6 +3980,14 @@ Known API result hints, optional and non-exhaustive: ${jsonEncode(knownResultHin
             inferredTags: query.inferredTags(optionTags),
             options: options,
           );
+          if (settings.usesOnDeviceModel &&
+              _isSteamService(profile.serviceName) &&
+              options.any((o) => o['description'] != null)) {
+            return '$prompt\nFor the reason, copy the specific phrase from the chosen Steam '
+                'description that best connects its story or gameplay to the request. '
+                'Profile preferences describe the player, not the game.';
+          }
+          return prompt;
         },
       );
     } catch (_) {
@@ -3947,6 +4026,18 @@ Known API result hints, optional and non-exhaustive: ${jsonEncode(knownResultHin
         }
       }
       if (chosen == null) return selectableRecommendations.first;
+      final description = chosen.item.description?.trim() ?? '';
+      if (settings.usesOnDeviceModel &&
+          _isSteamService(profile.serviceName) &&
+          description.isNotEmpty) {
+        final quote = reason?.trim() ?? '';
+        // A small model can transfer profile traits to the game. Show only
+        // evidence actually present in the selected game's store description.
+        final excerpt = quote.length >= 12 && description.contains(quote)
+            ? quote
+            : description.split(RegExp(r'(?<=[.!?…])\s+')).first;
+        reason = 'Steam describes it this way: “$excerpt”';
+      }
       return chosen.copyWith(
         reason: reason == null || reason.isEmpty ? chosen.reason : reason,
         isAiPick: true,

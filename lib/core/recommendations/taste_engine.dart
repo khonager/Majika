@@ -103,7 +103,9 @@ class TasteEngine {
     final includeAdult = query.allowsAdult;
 
     for (final candidate in candidates) {
-      if (libraryIds.contains(candidate.id)) continue;
+      if (profile.serviceName != 'Steam' && libraryIds.contains(candidate.id)) {
+        continue;
+      }
       if (candidate.isAdult && !includeAdult) continue;
       if (requestedMediaTypes.isNotEmpty &&
           !requestedMediaTypes.contains(candidate.mediaType)) {
@@ -419,11 +421,18 @@ class TasteEngine {
     final tagTokens = _textTokens(candidate.tags.join(' '));
     var score = 0.0;
 
+    final steam = candidate.serviceLabel == 'Steam';
+    if (steam &&
+        MediaItem.titleKey(request) == MediaItem.titleKey(candidate.title)) {
+      return 5;
+    }
     for (final term in terms) {
-      if (_matchesRequestTerm(title, titleTokens, term)) score += 1.6;
+      if (_matchesRequestTerm(title, titleTokens, term)) {
+        score += steam ? 0.6 : 1.6;
+      }
       if (_matchesRequestTerm(tags, tagTokens, term)) score += 1.1;
       if (_matchesRequestTerm(description, descriptionTokens, term)) {
-        score += 0.5;
+        score += steam ? 1.8 : 0.5;
       }
     }
 

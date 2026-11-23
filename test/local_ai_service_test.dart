@@ -1015,11 +1015,9 @@ void main() {
           request: 'star janitor vibes but in VR',
         ),
       );
-      expect(results.map((item) => item.title), [
-        'Orbit Office',
-        'Orbit Office+',
-        'Another Game',
-      ]);
+      // The compact local model invented a variant and an unrelated title.
+      // Only the game named by the retrieved article goes to Steam lookup.
+      expect(results.map((item) => item.title), ['Orbit Office']);
       expect(requests.map((uri) => uri.host), contains('html.duckduckgo.com'));
       final wiki = requests.singleWhere(
         (uri) => uri.host == 'en.wikipedia.org',
@@ -1113,6 +1111,108 @@ void main() {
         capturedPrompt,
         contains('taste signals only, never valid recommendations'),
       );
+    },
+  );
+
+  test(
+    'Steam theme discovery supplies plot evidence before asking for titles',
+    () async {
+      final service = FlutterGemmaLocalAiService(
+        settingsLoader: () async => const LocalAiRuntimeSettings(
+          useLocalAi: true,
+          useAiForSearch: true,
+          mode: localAiModeOnDevice,
+          provider: 'Qwen',
+          deviceModelName: 'Qwen3 0.6B',
+          contextItems: 12,
+          endpoint: '',
+          serverModel: '',
+        ),
+        textGenerator: (prompt, _) async {
+          if (prompt.contains('descriptive keywords')) {
+            return '{"terms":["loss","healing"]}';
+          }
+          expect(prompt, contains('A traveler rebuilds her life.'));
+          expect(prompt, contains('Owned games are eligible'));
+          return '{"titles":["Night Train"]}';
+        },
+        searchToolbox: AiSearchToolbox(
+          httpGet: (uri, {headers}) async {
+            expect(uri.queryParameters['q'], contains('loss healing'));
+            return http.Response(
+              jsonEncode({
+                'pages': [
+                  {
+                    'key': 'Night_Train',
+                    'title': 'Night Train',
+                    'excerpt': 'A traveler rebuilds her life.',
+                  },
+                ],
+              }),
+              200,
+            );
+          },
+        ),
+      );
+      final picks = await service.suggestRecommendationCandidates(
+        _profile(serviceName: 'Steam'),
+        [],
+        query: const RecommendationQuery(
+          request: 'a game to help get over a breakup',
+        ),
+      );
+      expect(picks.map((p) => p.title), ['Night Train']);
+    },
+  );
+
+  test(
+    'on-device Steam picker anchors the reason to the chosen description',
+    () async {
+      final service = FlutterGemmaLocalAiService(
+        settingsLoader: () async => const LocalAiRuntimeSettings(
+          useLocalAi: true,
+          useAiForSearch: true,
+          mode: localAiModeOnDevice,
+          provider: 'Qwen',
+          deviceModelName: 'Qwen3 0.6B',
+          contextItems: 12,
+          endpoint: '',
+          serverModel: '',
+        ),
+        textGenerator: (prompt, _) async {
+          expect(
+            prompt,
+            contains('Two friends reconnect after a long absence.'),
+          );
+          return '{"id":"steam_42","reason":"Explore an open world in VR."}';
+        },
+      );
+      final pick = await service.chooseTopRecommendation(
+        _profile(serviceName: 'Steam'),
+        [
+          Recommendation(
+            item: MediaItem(
+              id: 'steam_42',
+              title: 'Night Train',
+              coverUrl: '',
+              tags: const ['Adventure'],
+              sourceId: 'com.majika.service.steam',
+              description:
+                  'Two friends reconnect after a long absence. Walk home together.',
+            ),
+            matchScore: 80,
+            reason: 'Profile match',
+            signals: const [],
+          ),
+        ],
+        query: const RecommendationQuery(request: 'a game about reconnecting'),
+      );
+      expect(pick?.isAiPick, isTrue);
+      expect(
+        pick?.reason,
+        contains('Two friends reconnect after a long absence.'),
+      );
+      expect(pick?.reason, isNot(contains('VR')));
     },
   );
 

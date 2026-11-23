@@ -83,8 +83,9 @@ class ModelDownloadManager extends ChangeNotifier {
     }
     model = matches.isEmpty ? null : matches.first;
     phase = ModelDownloadPhase.failed;
-    error =
-        'Your downloaded AI could not be restored. Open Settings to download it again.';
+    error = matches.isEmpty
+        ? 'This model is no longer supported on this device. Open Settings to choose the suggested model.'
+        : 'Your downloaded AI could not be restored. Open Settings to download it again.';
     notifyListeners();
   }
 
@@ -315,11 +316,22 @@ class ModelDownloadManager extends ChangeNotifier {
       final response = await chat.generateChatResponse().timeout(
         const Duration(minutes: 2),
       );
-      if (response is! TextResponse || response.token.trim().isEmpty) {
-        throw StateError('The model did not return text. Try another model.');
+      if (response is! TextResponse ||
+          !passesModelReadinessCheck(response.token)) {
+        throw StateError(
+          'The model loaded but did not follow the test instruction. Try another model.',
+        );
       }
     } finally {
       await model.close();
     }
   }
+}
+
+@visibleForTesting
+bool passesModelReadinessCheck(String response) {
+  final answer = response
+      .replaceAll(RegExp(r'<think>.*?</think>', dotAll: true), '')
+      .trim();
+  return RegExp(r'^ready[.!]?$', caseSensitive: false).hasMatch(answer);
 }

@@ -98,7 +98,7 @@ The desired search flow is:
 5. If no local model is configured, Majika falls back to small deterministic hints and the local ranker so the prototype still returns useful results. These hints are not meant to replace the AI interpreter.
 
 - Settings exposes public downloads directly, alongside optional on-device, external server, cloud, manual, and rules-only modes. Download management is independent of the Settings screen. A basic generation check must pass before activation.
-- Public setup choices are Qwen 2.5 1.5B Instruct (mobile/desktop) and Qwen3 0.6B (desktop). Device suggestions use conservative RAM guidance; they are not benchmark scores. Models requiring Hugging Face license access and experimental alternatives are advanced choices.
+- Public setup choices are Qwen 2.5 1.5B Instruct (Android, iOS, macOS and Windows) and Qwen3 0.6B (desktop). Linux uses Qwen3 because the Qwen 2.5 export returned a greeting for structured search prompts with the bundled runtime. Device suggestions use conservative RAM guidance; they are not benchmark scores. Models requiring Hugging Face license access and experimental alternatives are advanced choices.
 - FunctionGemma is a tiny function-calling foundation model, not a general JSON chat model. Keep it advanced unless Majika adds real tool declarations or task-specific fine-tuning for recommendation filters.
 - Standard public models do not require a Hugging Face token. Gated models expose license and token controls only as advanced choices; custom file import remains unfinished.
 - Vision models such as FastVLM are intentionally excluded until Majika has an image-understanding workflow.

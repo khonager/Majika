@@ -164,7 +164,30 @@ class AiSearchToolbox {
     ];
   }
 
-  Future<List<Map<String, Object?>>> _comparisonArticles(String query) async {
+  Future<List<Map<String, Object?>>> searchGameThemes(
+    String request,
+    String concepts,
+  ) async {
+    final words = RegExp(r'[\p{L}\p{N}]+', unicode: true);
+    String keywords(String text, int limit) =>
+        words.allMatches(text).take(limit).map((m) => m[0]!).join(' ');
+    final terms = keywords(concepts, 2);
+    if (terms.isEmpty) return const [];
+    final topic = keywords(SteamService.requestTopic(request) ?? '', 4);
+    for (final subject in {'$terms $topic'.trim(), terms}) {
+      final hits = await _comparisonArticles(
+        'hastemplate:"Infobox video game" $subject',
+        gamePagesOnly: true,
+      );
+      if (hits.isNotEmpty) return hits;
+    }
+    return const [];
+  }
+
+  Future<List<Map<String, Object?>>> _comparisonArticles(
+    String query, {
+    bool gamePagesOnly = false,
+  }) async {
     final uri = Uri.https('en.wikipedia.org', '/w/rest.php/v1/search/page', {
       'q': query,
       'limit': '15',
@@ -182,7 +205,10 @@ class AiSearchToolbox {
     return [
       for (final page in pages.whereType<Map>())
         if (page['title'] is String &&
-            gameDescription.hasMatch(page['description']?.toString() ?? ''))
+            (gamePagesOnly ||
+                gameDescription.hasMatch(
+                  page['description']?.toString() ?? '',
+                )))
           {
             'title': page['title'],
             'snippet': _cleanHtml(page['excerpt']?.toString() ?? ''),

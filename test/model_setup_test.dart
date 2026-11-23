@@ -24,6 +24,15 @@ void main() {
   );
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  test('readiness requires the requested answer after any thinking block', () {
+    expect(passesModelReadinessCheck('<think>Testing</think> Ready.'), isTrue);
+    expect(
+      passesModelReadinessCheck('Hello! How can I assist you today?'),
+      isFalse,
+    );
+    expect(passesModelReadinessCheck('<think>Ready</think> Hello!'), isFalse);
+  });
+
   test('Qwen3 uses its documented short-response protocol', () {
     expect(
       onDevicePrompt('Qwen3-0.6B', 'Return JSON'),
@@ -42,6 +51,13 @@ void main() {
       ramMb: 4000,
     );
     expect(modestDesktop.recommended?.id, 'qwen3_0_6b');
+    expect(
+      const DeviceCapacity(
+        platform: TargetPlatform.linux,
+        ramMb: 32000,
+      ).recommended?.id,
+      'qwen3_0_6b',
+    );
     const lowMemory = DeviceCapacity(
       platform: TargetPlatform.android,
       ramMb: 2000,

@@ -136,7 +136,13 @@ const downloadableAiModels = [
     modelType: ModelType.qwen,
     fileType: ModelFileType.task,
     isAdvanced: false,
-    supportedPlatforms: onDevicePlatforms,
+    // The Linux LiteRT-LM runtime returns a greeting even for structured
+    // requests with this export. Qwen3 passes the same on-device check.
+    supportedPlatforms: {
+      ..._mobileOnDevicePlatforms,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    },
   ),
 ];
 

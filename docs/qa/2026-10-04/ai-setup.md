@@ -4,7 +4,7 @@
 
 Majika now offers a public model download directly in Settings → Local AI, including when the app is in rules-only mode. FLM, Ollama, cloud API keys and Hugging Face accounts are optional. Models requiring license access are behind Advanced model choice.
 
-The default public choice is Qwen 2.5 1.5B Instruct (about 1.6 GB). Desktop users can also choose Qwen3 0.6B (about 586 MiB). Majika selects a suggestion using platform and detected RAM, and checks free storage on Android/iOS. It reports unknown capacity honestly. The guidance uses conservative RAM thresholds, not measured speed or recommendation-quality scores. Android uses the MediaPipe `.task` artifact for Qwen 2.5; desktop uses `.litertlm`. Artifact availability and platform formats were checked against the [model repository](https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct) and [installed runtime documentation](https://pub.dev/packages/flutter_gemma/versions/0.12.6).
+Linux uses Qwen3 0.6B. Other supported platforms offer Qwen 2.5 1.5B Instruct (about 1.6 GB). Desktop users can also choose Qwen3 0.6B (about 586 MiB). Majika selects a suggestion using platform and detected RAM, and checks free storage on Android/iOS. It reports unknown capacity honestly. The guidance uses conservative RAM thresholds, not measured speed or recommendation-quality scores. Android uses the MediaPipe `.task` artifact for Qwen 2.5; desktop uses `.litertlm`. Artifact availability and platform formats were checked against the [model repository](https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct) and [installed runtime documentation](https://pub.dev/packages/flutter_gemma/versions/0.12.6).
 
 A download belongs to the application, so leaving Settings does not abandon its progress or activation. After transfer, Majika loads the model on CPU and requires a text response before marking it ready. Download and check failures keep the previous AI settings; retry is available. Canceling cannot activate a late transfer. On restart, installed files are registered with the runtime again; interrupted installation intent is recovered. A missing file offers Download again.
 
@@ -60,8 +60,7 @@ The smoke entrypoint downloads a real public Qwen3 model, loads it through the b
   in 11.5 seconds. Existing output validation rejected the model's incorrect
   adult-content flag. This is a smoke check, not a broad quality benchmark.
 - The larger Qwen 2.5 transfer failed after a network connection closed. The app
-  reported failure without activating it. Its real load and search quality remain
-  unverified on this machine; automated tests cover failure/retry and activation.
+  reported failure without activating it. A later Linux check loaded it successfully and reproduced the same greeting for two different Steam extraction prompts. Linux now offers Qwen3, which passed the same search.
 - Physical-device background notification tests and live Gemini account tests
   remain outstanding.
 
