@@ -282,14 +282,58 @@ class RecommendationQuery {
   }
 
   String? get comparisonReference {
-    final text = request.trim();
-    final match =
-        RegExp(r'^(.+?)\s+vibes?\b', caseSensitive: false).firstMatch(text) ??
+    final finished = RegExp(
+      r"^(?:i (?:just )?)?(?:finished|loved|enjoyed)\s+(.+?)[.!?,;]\s*(?:what (?:else|next)|any(?:thing)? (?:else|similar)|more like (?:it|that))",
+      caseSensitive: false,
+    ).firstMatch(request.trim());
+    if (finished != null) return finished[1]!.trim();
+    final cue = RegExp(
+      r"\b(?:sim{1,2}i?l(?:a|ia|e)r to|more like|(?:games?|something|anything|smth|stuff|recs|recommendations) (?:just )?like|reminds? me of|in the (?:style|vein) of|along the lines of|closer to)\s+",
+      caseSensitive: false,
+    );
+    final match = cue.allMatches(request).where((match) {
+      final before = request.substring(0, match.start);
+      return !RegExp(
+        r"\b(?:not|nothing|not looking for|don[’']t want|do not want)\s*$",
+        caseSensitive: false,
+      ).hasMatch(before);
+    }).lastOrNull;
+    if (match != null) {
+      final tail = request.substring(match.end).trim();
+      final quoted = RegExp(r'^["“](.+?)["”]').firstMatch(tail);
+      final reference =
+          quoted?.group(1) ??
+          tail
+              .split(
+                RegExp(
+                  r'[!?;\n]|[.,](?:\s|$)|\s+(?:but|except|with|please)\b',
+                  caseSensitive: false,
+                ),
+              )
+              .first;
+      return reference.trim().isEmpty ? null : reference.trim();
+    }
+    final vibe = RegExp(
+      r'^(.+?)\s+vibes?\b',
+      caseSensitive: false,
+    ).firstMatch(request.trim())?.group(1)?.trim();
+    if (vibe == null ||
         RegExp(
-          r'\b(?:similar to|games? like|reminds? me of|in the style of)\s+(.+?)(?:\s+but\s+|[?!]|$)',
+          r'\b(?:games?|something|anything) with\b',
           caseSensitive: false,
-        ).firstMatch(text);
-    return match?.group(1)?.trim();
+        ).hasMatch(vibe)) {
+      return null;
+    }
+    final subject = vibe.replaceFirst(
+      RegExp(r"^(?:i want|looking for|give me)\s+", caseSensitive: false),
+      '',
+    );
+    if (steamBrowsableTags.any(
+      (tag) => tag.toLowerCase() == subject.toLowerCase(),
+    )) {
+      return null;
+    }
+    return subject;
   }
 
   String get searchRequest {
@@ -461,10 +505,21 @@ class RecommendationQuery {
     ])) {
       formats.add('BOOK');
     }
-    if (_containsAny(text, ['single player', 'single-player', 'solo'])) {
+    if (_containsAny(text, [
+      'single player',
+      'singleplayer',
+      'solo',
+      'play by myself',
+      'play alone',
+    ])) {
       formats.add('SINGLE_PLAYER');
     }
-    if (_containsAny(text, ['multiplayer', 'pvp'])) {
+    if (_containsAny(text, [
+      'multiplayer',
+      'pvp',
+      'play with friends',
+      'play with my friends',
+    ])) {
       formats.add('MULTIPLAYER');
     }
     if (_containsAny(text, [
@@ -1010,7 +1065,12 @@ class RecommendationQuery {
     'Open World': ['open world', 'sandbox'],
     'Supernatural': ['super powers', 'superpowers'],
     'Co-op': ['co op', 'co-op', 'coop'],
-    'Multiplayer': ['multiplayer', 'pvp'],
+    'Multiplayer': [
+      'multiplayer',
+      'pvp',
+      'play with friends',
+      'play with my friends',
+    ],
     'Magic': [
       'magic',
       'magical',

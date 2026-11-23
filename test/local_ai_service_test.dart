@@ -342,7 +342,7 @@ void main() {
     );
     expect(interpreted.aiSelectedTags, contains('Souls-like'));
     expect(interpreted.aiSelectedTags, contains('Action RPG'));
-    expect(interpreted.formats, contains('SINGLE_PLAYER'));
+    expect(interpreted.formats, isEmpty);
   });
 
   test(
@@ -383,7 +383,7 @@ void main() {
       expect(capturedPrompt, contains('NSFW'));
       expect(interpreted.includeAdult, isTrue);
       expect(interpreted.aiSelectedTags, contains('Sexual Content'));
-      expect(interpreted.formats, contains('SINGLE_PLAYER'));
+      expect(interpreted.formats, isEmpty);
     },
   );
 
@@ -968,7 +968,7 @@ void main() {
     expect(capturedPrompt, contains('AI-selected tags: Comedy, Funny'));
     expect(capturedPrompt, contains('Known API result titles'));
     expect(capturedPrompt, contains('Funnel Runners'));
-    expect(capturedPrompt, contains('Portal 2'));
+    expect(capturedPrompt, isNot(contains('Portal 2')));
   });
 
   test(
@@ -1111,6 +1111,52 @@ void main() {
         capturedPrompt,
         contains('taste signals only, never valid recommendations'),
       );
+    },
+  );
+
+  test(
+    'compound activity uses the complete phrase to verify store descriptions',
+    () async {
+      final terms = <String>[];
+      final toolbox = AiSearchToolbox(
+        httpGet: (uri, {headers}) async {
+          if (uri.path.endsWith('/storesearch/')) {
+            terms.add(uri.queryParameters['term']!);
+            return http.Response(
+              jsonEncode({
+                'items': [
+                  {'id': 1},
+                  {'id': 2},
+                ],
+              }),
+              200,
+            );
+          }
+          expect(uri.path, '/api/appdetails');
+          final id = uri.queryParameters['appids']!;
+          return http.Response(
+            jsonEncode({
+              id: {
+                'success': true,
+                'data': {
+                  'type': 'game',
+                  'name': id == '1' ? 'Night Shift' : 'Radio Tower',
+                  'short_description': id == '1'
+                      ? 'Operate a freight elevator in a busy warehouse.'
+                      : 'Reach the signal tower.',
+                },
+              },
+            }),
+            200,
+          );
+        },
+      );
+      final hits = await toolbox.searchGameThemes(
+        'i wanna drive a freigth elevatr',
+        ['driving', 'freight elevator', 'warehouse'],
+      );
+      expect(terms, ['freight elevator']);
+      expect(hits.single['gameTitle'], 'Night Shift');
     },
   );
 
@@ -1665,7 +1711,7 @@ void main() {
     expect(requestUrl.toString(), defaultCloudAiEndpoint);
     expect((requestBody as Map<String, dynamic>)['model'], defaultCloudAiModel);
     expect(interpreted.aiSelectedTags, contains('Simulation'));
-    expect(interpreted.formats, contains('SINGLE_PLAYER'));
+    expect(interpreted.formats, isEmpty);
   });
 
   test('OpenRouter inference retains a zero-price ceiling', () async {

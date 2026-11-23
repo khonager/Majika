@@ -16,6 +16,7 @@ import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/taste_profile.dart';
 import 'package:majika/core/models/user_taste_signals.dart';
 import 'package:majika/core/services/media_service.dart';
+import 'package:majika/core/services/steam_service.dart';
 import 'package:majika/main.dart';
 import 'package:majika/ui/home/home_screen.dart';
 import 'package:majika/ui/settings/settings_screen.dart';
@@ -940,6 +941,42 @@ void main() {
       expect(aiService.seenFormats.length, 2);
       expect(aiService.seenFormats.first, isEmpty);
       expect(aiService.seenFormats.last, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'Steam comparison sends catalog matches including owned games to the chooser',
+    (tester) async {
+      final ai = _ComparisonChooser();
+      await _pumpApp(
+        tester,
+        MaterialApp(
+          home: HomeScreen(
+            mediaService: _CatalogComparisonService(),
+            aiService: ai,
+          ),
+        ),
+      );
+      await tester.enterText(find.byType(TextField).first, 'tester');
+      await tester.tap(find.text('Build game profile'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Search a genre, mode, game, or vibe'),
+        'anything like Widget Wroks?',
+      );
+      await tester.tap(find.byTooltip('Search recommendations'));
+      await tester.pumpAndSettle();
+      expect(
+        ai.options,
+        containsAll([
+          'Played RPG',
+          'Found Game 2',
+          'Found Game 3',
+          'Found Game 4',
+          'Found Game 5',
+        ]),
+      );
+      expect(ai.titleGuesses, 0);
     },
   );
 
@@ -2759,6 +2796,58 @@ class _FakeSteamMediaService implements MediaService {
       'Co-op',
       'Controller Support',
     ];
+  }
+}
+
+class _CatalogComparisonService extends SteamService {
+  @override
+  Future<ServiceUserProfile?> fetchUserProfile(String userName) =>
+      _FakeSteamMediaService().fetchUserProfile(userName);
+  @override
+  Future<List<MediaItem>> fetchUserLibrary(String userName) =>
+      _FakeSteamMediaService().fetchUserLibrary(userName);
+  @override
+  Future<List<MediaItem>> fetchRecommendationCandidates({
+    bool includeAdult = false,
+  }) async => [];
+  @override
+  Future<List<MediaItem>> searchRecommendationCandidates(
+    RecommendationQuery query,
+  ) async => [
+    for (var i = 1; i <= 5; i++)
+      MediaItem(
+        id: 'steam_$i',
+        title: i == 1 ? 'Played RPG' : 'Found Game $i',
+        tags: ['Strategy'],
+        coverUrl: '',
+        mediaType: 'GAME',
+        comparisonReference: query.comparisonReference,
+      ),
+  ];
+}
+
+class _ComparisonChooser extends DeterministicLocalAiService {
+  int titleGuesses = 0;
+  List<String> options = [];
+  @override
+  Future<List<AiRecommendationSuggestion>> suggestRecommendationCandidates(
+    TasteProfile profile,
+    List<Recommendation> knownRecommendations, {
+    required RecommendationQuery query,
+    int limit = 5,
+  }) async {
+    titleGuesses++;
+    return [];
+  }
+
+  @override
+  Future<Recommendation?> chooseTopRecommendation(
+    TasteProfile profile,
+    List<Recommendation> recommendations, {
+    required RecommendationQuery query,
+  }) async {
+    options = recommendations.map((r) => r.item.title).toList();
+    return recommendations.firstOrNull;
   }
 }
 

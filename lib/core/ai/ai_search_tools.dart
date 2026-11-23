@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:majika/core/services/steam_service.dart';
+import 'package:majika/core/services/search_spelling.dart';
 
 typedef AiSearchHttpGet =
     Future<http.Response> Function(Uri url, {Map<String, String>? headers});
@@ -15,13 +16,17 @@ class AiSearchToolbox {
   Future<List<Map<String, Object?>>> searchSteamGames(
     String query, {
     int limit = 5,
+    bool exactTerm = false,
   }) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return const [];
 
     final safeLimit = limit.clamp(1, 6);
     final appIds = <int>[];
-    for (final term in SteamService.expandedSteamStoreSearchTerms(trimmed)) {
+    for (final term
+        in exactTerm
+            ? [trimmed]
+            : SteamService.expandedSteamStoreSearchTerms(trimmed)) {
       final uri = Uri.parse('https://store.steampowered.com/api/storesearch/')
           .replace(
             queryParameters: {
@@ -166,20 +171,70 @@ class AiSearchToolbox {
 
   Future<List<Map<String, Object?>>> searchGameThemes(
     String request,
-    String concepts,
+    List<String> concepts,
   ) async {
     final words = RegExp(r'[\p{L}\p{N}]+', unicode: true);
     String keywords(String text, int limit) =>
         words.allMatches(text).take(limit).map((m) => m[0]!).join(' ');
-    final terms = keywords(concepts, 2);
+    final phrases = concepts
+        .map((term) => keywords(term, 4))
+        .where((s) => s.isNotEmpty);
+    // Preserve a machine, activity or other compound noun present in the
+    // request. Truncating "operate" + "tower crane" to "operate tower"
+    // sends both the encyclopedia and the model to the wrong subject.
+    final tokens = keywords(request, 80).split(' ');
+    final quotedSubject = phrases.where((phrase) {
+      final width = phrase.split(' ').length;
+      if (width < 2) return false;
+      for (var i = 0; i + width <= tokens.length; i++) {
+        final original = tokens.sublist(i, i + width).join(' ');
+        if (isCloseSearchSpelling(original, phrase)) return true;
+      }
+      return false;
+    }).firstOrNull;
+    if (quotedSubject != null) {
+      final catalog = await searchSteamGames(
+        quotedSubject,
+        limit: 4,
+        exactTerm: true,
+      ).catchError((Object _) => <Map<String, Object?>>[]);
+      final matching = [
+        for (final game in catalog)
+          if ('${game['description'] ?? ''}'.toLowerCase().contains(
+            quotedSubject.toLowerCase(),
+          ))
+            {
+              'title': game['title'],
+              'gameTitle': game['title'],
+              'url': game['url'],
+              'snippet': game['description'],
+            },
+      ];
+      if (matching.isNotEmpty) return matching;
+    }
+    final terms = phrases.take(2).join(' ');
     if (terms.isEmpty) return const [];
     final topic = keywords(SteamService.requestTopic(request) ?? '', 4);
-    for (final subject in {'$terms $topic'.trim(), terms}) {
+    for (final subject in {
+      if (topic.isNotEmpty) '${keywords(terms, 2)} $topic',
+      '$terms $topic'.trim(),
+      terms,
+    }) {
       final hits = await _comparisonArticles(
         'hastemplate:"Infobox video game" $subject',
         gamePagesOnly: true,
       );
-      if (hits.isNotEmpty) return hits;
+      if (hits.isEmpty) continue;
+      if (topic.isEmpty) return hits;
+      final supported = hits.where((hit) {
+        final snippet =
+            ' ${keywords(hit['snippet']?.toString() ?? '', 160).toLowerCase()} ';
+        return [
+          topic,
+          ...phrases,
+        ].any((phrase) => snippet.contains(' ${phrase.toLowerCase()} '));
+      }).toList();
+      return supported.isEmpty ? hits : supported;
     }
     return const [];
   }
@@ -192,12 +247,28 @@ class AiSearchToolbox {
       'q': query,
       'limit': '15',
     });
-    final response = await _get(
+    final headers = const {
+      'User-Agent': 'Majika/1.0',
+      'Accept': 'application/json',
+    };
+    var response = await _get(
       uri,
-      headers: const {'User-Agent': 'Majika/1.0', 'Accept': 'application/json'},
-    );
+      headers: headers,
+    ).timeout(const Duration(seconds: 8));
+    if (response.statusCode == 429 || response.statusCode >= 500) {
+      final alternate = Uri.https(
+        'api.wikimedia.org',
+        '/core/v1/wikipedia/en/search/page',
+        uri.queryParameters,
+      );
+      response = await _get(
+        alternate,
+        headers: headers,
+      ).timeout(const Duration(seconds: 8));
+    }
     if (response.statusCode != 200) return const [];
-    final pages = jsonDecode(response.body)['pages'] as List;
+    final pages = jsonDecode(utf8.decode(response.bodyBytes))['pages'];
+    if (pages is! List) return const [];
     final gameDescription = RegExp(
       r'\b(?:video|VR) game\b(?:$| (?:by|developed|released)\b)',
       caseSensitive: false,
@@ -283,6 +354,18 @@ class AiSearchToolbox {
 
   String _cleanHtml(String value) {
     return value
+        .replaceAllMapped(
+          RegExp(r'&#(?:x([0-9a-f]+)|(\d+));', caseSensitive: false),
+          (match) {
+            final code = int.tryParse(
+              match[1] ?? match[2]!,
+              radix: match[1] == null ? 10 : 16,
+            );
+            return code == null || code > 0x10ffff
+                ? ''
+                : String.fromCharCode(code);
+          },
+        )
         .replaceAll(RegExp(r'<[^>]+>'), ' ')
         .replaceAll('&amp;', '&')
         .replaceAll('&quot;', '"')

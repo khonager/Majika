@@ -15,7 +15,9 @@ import 'package:majika/core/models/recommendation.dart';
 import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/taste_profile.dart';
 
-final Object localAiConsoleLogZoneKey = Object();
+export 'package:majika/core/ai/ai_console_log.dart'
+    show localAiConsoleLogZoneKey;
+
 final Object manualAiRequestHandlerZoneKey = Object();
 final Object aiFailureFallbackHandlerZoneKey = Object();
 
@@ -1347,10 +1349,7 @@ class FlutterGemmaLocalAiService implements LocalAiService {
         : ModelType.gemmaIt;
   }
 
-  AiConsoleLog? get _currentConsoleLog {
-    final value = Zone.current[localAiConsoleLogZoneKey];
-    return value is AiConsoleLog ? value : null;
-  }
+  AiConsoleLog? get _currentConsoleLog => AiConsoleLog.current;
 
   ManualAiRequestHandler? get _currentManualAiRequestHandler {
     final value = Zone.current[manualAiRequestHandlerZoneKey];
@@ -1452,13 +1451,13 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       original.request,
     );
     final ruleInterpreted = original.withInferredSelections(availableTagValues);
+    final requestedFormats = original.effectiveFormats();
     final formats = {
       ...ruleInterpreted.formats,
-      ..._filteredModelFormats(
-        original: original,
-        allowedFormats: allowedFormats,
-        modelFormats: modelFormats,
-      ),
+      ...modelFormats.where(requestedFormats.contains),
+      if (modelFormats.contains('MULTIPLAYER') &&
+          requestedFormats.contains('CO_OP'))
+        'MULTIPLAYER',
     };
     final mediaTypes = {...ruleInterpreted.mediaTypes, ...modelMediaTypes};
     final limitedTags = _limitAiSelectedTags([
@@ -1571,26 +1570,6 @@ class FlutterGemmaLocalAiService implements LocalAiService {
       if (ordered.length >= _maxAiSelectedTags) break;
     }
     return ordered.toSet();
-  }
-
-  Set<String> _filteredModelFormats({
-    required RecommendationQuery original,
-    required Iterable<String> allowedFormats,
-    required Set<String> modelFormats,
-  }) {
-    final allowedSet = allowedFormats.toSet();
-    final requestedFormats = original.effectiveFormats();
-    final isSteam = allowedSet.containsAll(RecommendationQuery.steamFormats);
-    if (isSteam) {
-      return {
-        for (final format in modelFormats)
-          if ((format == 'CONTROLLER' || format == 'STEAM_DECK')
-              ? requestedFormats.contains(format)
-              : true)
-            format,
-      };
-    }
-    return modelFormats.where(requestedFormats.contains).toSet();
   }
 
   RecommendationQuery _sanitizeSearchInterpretationQuery(
@@ -3240,7 +3219,7 @@ User-selected tags: ${query.selectedTags.join(', ')}
 AI-selected tags: ${query.aiSelectedTags.join(', ')}
 Requested media types: ${query.effectiveMediaTypes().join(', ')}
 Requested formats or play capabilities: ${query.effectiveFormats().join(', ')}
-${isSteam ? 'Games in the library (eligible when relevant)' : 'Known library titles to avoid'}: ${jsonEncode(ownedTitles)}
+${isSteam ? '' : 'Known library titles to avoid: ${jsonEncode(ownedTitles)}'}
 Known API result titles, optional and non-exhaustive: ${jsonEncode(knownTitles)}
 Known API result hints, optional and non-exhaustive: ${jsonEncode(knownResultHints)}
 ''';
@@ -3697,7 +3676,7 @@ Known API result hints, optional and non-exhaustive: ${jsonEncode(knownResultHin
           settings: settings,
         );
         for (final object in _jsonObjects(concepts)) {
-          final terms = _stringList(object['terms']).take(4).join(' ');
+          final terms = _stringList(object['terms']).take(4).toList();
           if (terms.isEmpty) continue;
           hits = await searchToolbox.searchGameThemes(query.request, terms);
           _currentConsoleLog?.addDetail(

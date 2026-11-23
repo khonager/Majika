@@ -7,6 +7,8 @@ import 'package:majika/core/models/media_item.dart';
 import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/user_taste_signals.dart';
 import 'package:majika/core/services/media_service.dart';
+import 'package:majika/core/services/steam_comparison_catalog.dart';
+import 'package:majika/core/services/search_spelling.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 typedef SteamApiKeyProvider = Future<String?> Function();
@@ -21,7 +23,7 @@ abstract class SteamProtectedApi {
   Future<Map<String, dynamic>> getRecentlyPlayedGames(String steamId);
 }
 
-class SteamService implements MediaService {
+class SteamService implements MediaService, SuggestedTitleSearch {
   SteamService({
     http.Client? client,
     SteamApiKeyProvider? apiKeyProvider,
@@ -75,6 +77,11 @@ class SteamService implements MediaService {
   ];
 
   final http.Client _client;
+  late final _comparisonCatalog = SteamComparisonCatalog(
+    _client,
+    _exactTitleIds,
+    _nearbyTitleIds,
+  );
   final SteamApiKeyProvider _apiKeyProvider;
   final SteamProtectedApi? _protectedApi;
 
@@ -166,16 +173,61 @@ class SteamService implements MediaService {
   Future<List<MediaItem>> searchRecommendationCandidates(
     RecommendationQuery query,
   ) async {
-    final terms = _storeSearchTermsForQuery(query);
-    final termResults = await Future.wait([
-      for (final term in terms) _storeSearchAppIds(term),
-    ]);
-    final appIds = <int>{
-      for (final result in termResults) ...result.take(8),
-    }.toList();
-    final items = appIds.isEmpty
-        ? <MediaItem>[]
-        : (await _fetchAppDetails(appIds)).values.toList();
+    final reference = query.comparisonReference;
+    if (reference != null) {
+      final evidence = await _comparisonCatalog.search(reference, query);
+      final matches = await Future.wait([
+        for (final title in evidence.titles) _exactTitleIds(title),
+      ]);
+      final tagsById = {for (final hit in evidence.hits) hit.id: hit.tags};
+      final ids = {
+        for (final group in matches) ...group.take(1),
+        ...tagsById.keys,
+      };
+      if (ids.isEmpty) {
+        // A film, series or obscure game may have no indexed gameplay tags.
+        // Look for catalogued adaptations and numbered sequels of its title.
+        ids.addAll(await _matchingTitleIds(evidence.reference, related: true));
+      }
+      final (items, extraTags) = await (
+        _fetchAppDetails(ids),
+        _comparisonCatalog.communityTags(
+          ids.where((id) => !tagsById.containsKey(id)),
+        ),
+      ).wait;
+      final referenceKey = MediaItem.titleKey(evidence.reference);
+      final result = <MediaItem>[];
+      for (final entry in items.entries) {
+        final item = entry.value;
+        if (MediaItem.titleKey(item.title) == referenceKey) continue;
+        // Use store features for capability checks. Community tags describe
+        // the gameplay and give the lead chooser evidence about the reference.
+        final community = {...?tagsById[entry.key], ...?extraTags[entry.key]}
+          ..removeAll(_communityPlayFeatures);
+        result.add(
+          item.copyWith(
+            comparisonReference: reference,
+            tags: {
+              ...evidence.subjects.where(community.contains),
+              ...community,
+              ...item.tags,
+            }.toList(),
+          ),
+        );
+      }
+      return result;
+    }
+    var items = await _storeCandidates(query);
+    if (items.isEmpty && query.searchRequest.trim().contains(' ')) {
+      final correction = await _comparisonCatalog.correctedSpelling(
+        query.searchRequest,
+      );
+      if (correction != null) {
+        items = await _storeCandidates(
+          query.copyWith(interpretedRequest: correction),
+        );
+      }
+    }
 
     if (_shouldAppendBaselineCandidates(query, items)) {
       final baseline = await fetchRecommendationCandidates();
@@ -183,6 +235,96 @@ class SteamService implements MediaService {
     }
 
     return _dedupe(items);
+  }
+
+  Future<List<MediaItem>> _storeCandidates(RecommendationQuery query) async {
+    final results = await Future.wait([
+      for (final term in _storeSearchTermsForQuery(query))
+        _storeSearchAppIds(term),
+    ]);
+    final ids = {for (final result in results) ...result.take(8)};
+    return (await _fetchAppDetails(ids)).values.toList();
+  }
+
+  Future<List<int>> _nearbyTitleIds(String title) async {
+    final tokens = RegExp(
+      r'[\p{L}\p{N}]+',
+      unicode: true,
+    ).allMatches(title).map((m) => m[0]!);
+    final word = tokens.where((word) => word.length >= 4).firstOrNull;
+    if (word == null) return [];
+    final prefix = word.substring(0, min(5, word.length - 1));
+    final ids = await _matchingTitleIds(title, prefix: prefix);
+    return ids.length == 1 ? ids : [];
+  }
+
+  static const _communityPlayFeatures = {
+    'Singleplayer',
+    'Multiplayer',
+    'Co-op',
+    'Online Co-Op',
+    'Local Co-Op',
+    'Local Multiplayer',
+    'PvP',
+    'Online PvP',
+    'Split Screen',
+    'Controller',
+    'Steam Deck',
+    'Remote Play Together',
+  };
+
+  @override
+  Future<List<MediaItem>> searchSuggestedTitle(
+    RecommendationQuery query,
+  ) async {
+    final ids = await _exactTitleIds(query.request);
+    return (await _fetchAppDetails(ids.take(2))).values.toList();
+  }
+
+  Future<List<int>> _exactTitleIds(String title) => _matchingTitleIds(title);
+
+  Future<List<int>> _matchingTitleIds(
+    String title, {
+    bool related = false,
+    String? prefix,
+  }) async {
+    final key = MediaItem.titleKey(title);
+    if (key.isEmpty) return const [];
+    final uri = Uri.parse('$_storeApi/storesearch/').replace(
+      queryParameters: {
+        'term': prefix ?? title,
+        'l': 'en',
+        'cc': 'us',
+        'category1': '998',
+      },
+    );
+    try {
+      final decoded = await _getJson(uri);
+      final suffix = title.trim().contains(' ')
+          ? r'(?:\s+\d+\b|\s*[:–—-]\s*)'
+          : r'\s+\d+\b';
+      final family = RegExp(
+        '^${RegExp.escape(title)}$suffix',
+        caseSensitive: false,
+      );
+      bool matches(String name) {
+        if (related) return family.hasMatch(name);
+        if (prefix != null) return isCloseSearchSpelling(title, name);
+        return MediaItem.titleKey(name) == key;
+      }
+
+      return [
+        for (final item
+            in (decoded['items'] as List? ?? const []).whereType<Map>())
+          if (item['id'] is int &&
+              item['type'] != 'sub' &&
+              item['name'] is String &&
+              matches(item['name']))
+            item['id'] as int,
+      ];
+    } on Exception {
+      return const [];
+    }
   }
 
   static bool _shouldAppendBaselineCandidates(
@@ -231,9 +373,6 @@ class SteamService implements MediaService {
             .where((term) => term.trim().isNotEmpty)
             .length >=
         2;
-    // Keep a named reference even if the model rewrites the store query.
-    final reference = query.comparisonReference;
-    if (reference != null) add(reference);
     for (final term in expandedSteamStoreSearchTerms(text)) {
       add(term);
     }

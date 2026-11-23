@@ -5,8 +5,11 @@ import 'package:majika/core/models/recommendation.dart';
 import 'package:majika/core/models/recommendation_query.dart';
 import 'package:majika/core/models/taste_profile.dart';
 import 'package:majika/core/models/user_taste_signals.dart';
+import 'package:majika/core/services/search_spelling.dart';
 
 class TasteEngine {
+  static const correctedTitleSignal = 'matched title spelling';
+
   TasteProfile buildProfile(
     String userName,
     List<MediaItem> library, {
@@ -84,6 +87,9 @@ class TasteEngine {
     List<MediaItem> candidates, {
     RecommendationQuery query = const RecommendationQuery(),
   }) {
+    final reference = profile.serviceName == 'Steam'
+        ? query.comparisonReference
+        : null;
     final libraryIds = profile.library.map((item) => item.id).toSet();
     final recommendations = <_ScoredRecommendation>[];
     final availableTags = {
@@ -249,7 +255,24 @@ class TasteEngine {
         score += superpoweredOpenWorldScore * 4.0;
         score += mundanePowerScore * 4.0;
         score += requestTagEvidenceScore * 2.0;
+        final comparisonMatch =
+            reference != null && candidate.comparisonReference == reference;
+        if (comparisonMatch) {
+          score += 6;
+          signals.add('comparison match');
+        }
+        final textMatch = query.matchesText(candidate);
+        final correctedTitleMatch =
+            !textMatch &&
+            profile.serviceName == 'Steam' &&
+            _matchesTitlePhraseSpelling(query.request, candidate.title);
+        if (correctedTitleMatch) {
+          score += 3;
+          signals.add(correctedTitleSignal);
+        }
         final hasRequestEvidence =
+            correctedTitleMatch ||
+            comparisonMatch ||
             requestTextScore > 0 ||
             codingHackScore > 0 ||
             vrClimbingIntentScore > 0 ||
@@ -261,7 +284,9 @@ class TasteEngine {
             hasAdultRequestEvidence;
         // Catalog tags and description evidence can express the interpreted
         // request without repeating the user's exact words.
-        if (!query.matchesText(candidate) &&
+        if (!comparisonMatch &&
+            !textMatch &&
+            !correctedTitleMatch &&
             requestTagEvidenceScore <= 0 &&
             !hasAdultRequestEvidence) {
           continue;
@@ -407,6 +432,26 @@ class TasteEngine {
       for (final signal in signals)
         if (seen.add(signal)) signal,
     ];
+  }
+
+  // Help a spelling-corrected compound title survive the original-text
+  // check. Require two consecutive substantial words in the same order.
+  bool _matchesTitlePhraseSpelling(String request, String title) {
+    List<String> tokens(String s) => RegExp(
+      r'[\p{L}\p{N}]+',
+      unicode: true,
+    ).allMatches(s.toLowerCase()).take(48).map((m) => m[0]!).toList();
+    final words = tokens(request), names = tokens(title);
+    for (var i = 1; i < words.length; i++) {
+      if (words[i - 1].length < 4 || words[i].length < 4) continue;
+      for (var j = 1; j < names.length; j++) {
+        if (isCloseSearchSpelling(words[i - 1], names[j - 1]) &&
+            isCloseSearchSpelling(words[i], names[j])) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   double _requestTextScore(MediaItem candidate, String request) {
@@ -823,7 +868,10 @@ class TasteEngine {
     String requestedFormat, {
     required bool requireLocalCoOp,
   }) {
-    if (requestedFormat == item.format) return true;
+    if (requestedFormat == item.format &&
+        !(requestedFormat == 'CO_OP' && requireLocalCoOp)) {
+      return true;
+    }
     if (RecommendationQuery.aniListFormats.contains(requestedFormat)) {
       return RecommendationQuery.aniListReleaseFormatsFor({
         requestedFormat,

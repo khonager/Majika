@@ -1,6 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
+final Object localAiConsoleLogZoneKey = Object();
+
 class AiConsoleLog extends ChangeNotifier implements ValueListenable<String> {
+  static AiConsoleLog? get current =>
+      Zone.current[localAiConsoleLogZoneKey] as AiConsoleLog?;
+
   final _buffer = StringBuffer();
   final _summaryBuffer = StringBuffer();
 

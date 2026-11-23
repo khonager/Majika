@@ -1,11 +1,14 @@
 class MediaItem {
-  static String titleKey(String value) =>
-      value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9+]+'), '');
+  static String titleKey(String value) => value.toLowerCase().replaceAll(
+    RegExp(r'[^\p{L}\p{N}+]+', unicode: true),
+    '',
+  );
 
   final String id;
   final String title;
   final String coverUrl;
   final List<String> tags;
+  final String? comparisonReference;
   final double? rating;
   final String subtitle;
   final String extensionId;
@@ -31,6 +34,7 @@ class MediaItem {
     required this.title,
     required this.coverUrl,
     required this.tags,
+    this.comparisonReference,
     this.rating,
     this.subtitle = '',
     this.extensionId = '',
@@ -75,6 +79,7 @@ class MediaItem {
     String? title,
     String? coverUrl,
     List<String>? tags,
+    String? comparisonReference,
     double? rating,
     String? subtitle,
     String? extensionId,
@@ -100,6 +105,7 @@ class MediaItem {
       title: title ?? this.title,
       coverUrl: coverUrl ?? this.coverUrl,
       tags: tags ?? this.tags,
+      comparisonReference: comparisonReference ?? this.comparisonReference,
       rating: rating ?? this.rating,
       subtitle: subtitle ?? this.subtitle,
       extensionId: extensionId ?? this.extensionId,
@@ -129,6 +135,7 @@ class MediaItem {
       title: json['title'] as String,
       coverUrl: json['coverUrl'] as String? ?? '',
       tags: List<String>.from(json['tags'] ?? []),
+      comparisonReference: json['comparisonReference'] as String?,
       rating: json['rating'] != null
           ? (json['rating'] as num).toDouble()
           : null,
@@ -159,6 +166,8 @@ class MediaItem {
       'title': title,
       'coverUrl': coverUrl,
       'tags': tags,
+      if (comparisonReference != null)
+        'comparisonReference': comparisonReference,
       'rating': rating,
       'subtitle': subtitle,
       'extensionId': extensionId,

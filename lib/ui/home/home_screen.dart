@@ -455,8 +455,13 @@ class _HomeScreenState extends State<HomeScreen> {
           var requestSeedCandidates = <MediaItem>[];
           final needsAdultCandidates =
               query.allowsAdult && !workspace.adultCandidatesLoaded;
+          final catalogComparison =
+              workspace.service is SteamService &&
+              query.comparisonReference != null;
           final preferAiDiscoveryFirst =
-              query.isActive && _prefersAiDiscoveryFirst(workspace.service);
+              query.isActive &&
+              !catalogComparison &&
+              _prefersAiDiscoveryFirst(workspace.service);
 
           if (preferAiDiscoveryFirst) {
             progressToast.update(
@@ -517,6 +522,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ]);
             requestSeedCandidates = _dedupeCandidates([
               ...requestSeedCandidates,
+              if (catalogComparison) ...searchedCandidates,
               if (workspace.service.displayName != 'Steam')
                 ..._directSearchRequestSeeds(query, searchedCandidates),
             ]);
@@ -553,14 +559,18 @@ class _HomeScreenState extends State<HomeScreen> {
             }
           }
 
-          if (query.isActive && !preferAiDiscoveryFirst) {
+          final supplementSearch = query.isActive && !preferAiDiscoveryFirst;
+          final preliminaryRecommendations = supplementSearch
+              ? _tasteEngine.rankCandidates(profile, candidates, query: query)
+              : const <Recommendation>[];
+          if (supplementSearch &&
+              (!catalogComparison ||
+                  preliminaryRecommendations
+                          .where((r) => r.item.comparisonReference != null)
+                          .length <
+                      4)) {
             progressToast.update(
               'Asking AI for known ${workspace.service.displayName} matches...',
-            );
-            final preliminaryRecommendations = _tasteEngine.rankCandidates(
-              profile,
-              candidates,
-              query: query,
             );
             final aiDiscovered = await _discoverAiSuggestedItems(
               service: workspace.service,
@@ -607,7 +617,11 @@ class _HomeScreenState extends State<HomeScreen> {
             query,
             chooseFromVerifiedGames:
                 workspace.service.displayName == 'Steam' &&
-                (requestSeedCandidates.length >= 2 ||
+                (recommendations.any(
+                      (r) =>
+                          r.signals.contains(TasteEngine.correctedTitleSignal),
+                    ) ||
+                    requestSeedCandidates.length >= 2 ||
                     (requestSeedCandidates.isNotEmpty &&
                         query.comparisonReference != null)),
           );
@@ -768,8 +782,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 : [...baseCandidates];
             final needsAdultCandidates =
                 query.allowsAdult && !workspace.adultCandidatesLoaded;
+            final catalogComparison =
+                workspace.service is SteamService &&
+                query.comparisonReference != null;
             final preferAiDiscoveryFirst =
-                query.isActive && _prefersAiDiscoveryFirst(workspace.service);
+                query.isActive &&
+                !catalogComparison &&
+                _prefersAiDiscoveryFirst(workspace.service);
 
             if (preferAiDiscoveryFirst) {
               progressToast.update(
@@ -798,6 +817,9 @@ class _HomeScreenState extends State<HomeScreen> {
               );
               final searchedCandidates = await workspace.service
                   .searchRecommendationCandidates(query);
+              if (catalogComparison) {
+                discoveredGames.addAll(searchedCandidates);
+              }
               candidates = _dedupeCandidates([
                 ...searchedCandidates,
                 ...candidates,
@@ -820,14 +842,18 @@ class _HomeScreenState extends State<HomeScreen> {
               ]);
             }
 
-            if (query.isActive && !preferAiDiscoveryFirst) {
+            final supplementSearch = query.isActive && !preferAiDiscoveryFirst;
+            final preliminaryRecommendations = supplementSearch
+                ? _tasteEngine.rankCandidates(profile, candidates, query: query)
+                : const <Recommendation>[];
+            if (supplementSearch &&
+                (!catalogComparison ||
+                    preliminaryRecommendations
+                            .where((r) => r.item.comparisonReference != null)
+                            .length <
+                        4)) {
               progressToast.update(
                 'Asking AI for known ${workspace.service.displayName} matches...',
-              );
-              final preliminaryRecommendations = _tasteEngine.rankCandidates(
-                profile,
-                candidates,
-                query: query,
               );
               final aiDiscovered = await _discoverAiSuggestedItems(
                 service: workspace.service,
@@ -1458,6 +1484,13 @@ class _HomeScreenState extends State<HomeScreen> {
       candidates,
       query: query,
     );
+    if (service.displayName == 'Steam' &&
+        (query.comparisonReference != null ||
+            ranked.any(
+              (r) => r.signals.contains(TasteEngine.correctedTitleSignal),
+            ))) {
+      return ranked;
+    }
     final requestSeedRanked = _trustedRequestRecommendations(
       service,
       profile,
@@ -1753,8 +1786,12 @@ class _HomeScreenState extends State<HomeScreen> {
         suggestion: suggestion,
       );
       if (item == null) continue;
-      discovered.add(item);
-      if (discovered.length >= 4) break;
+      discovered.add(
+        service.displayName == 'Steam' && query.comparisonReference != null
+            ? item.copyWith(comparisonReference: query.comparisonReference)
+            : item,
+      );
+      if (service.displayName != 'Steam' && discovered.length >= 4) break;
     }
     return _dedupeCandidates(discovered);
   }
