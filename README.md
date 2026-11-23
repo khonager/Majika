@@ -134,6 +134,11 @@ The project also includes a Nix flake for a Flutter/Android-oriented development
 nix develop
 ```
 
+On a laptop with an unreachable remote Nix builder, use `nix develop --builders ''`
+to build locally for that invocation. The Linux desktop app and default test
+suite can run without a browser. For Flutter web, use an installed Chrome or
+Chromium and set `CHROME_EXECUTABLE` to its executable path if needed.
+
 Useful checks:
 
 ```bash

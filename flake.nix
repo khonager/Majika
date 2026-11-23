@@ -78,7 +78,6 @@
           ANDROID_SDK_ROOT = "${androidSdk}/libexec/android-sdk";
           JAVA_HOME = pkgs.jdk17.home;
           MAJIKA_VULKAN_LIBRARY_DIR = "${pkgs.vulkan-loader}/lib";
-          CHROME_EXECUTABLE = "${pkgs.google-chrome}/bin/google-chrome-stable";
 
           shellHook = ''
             export NPM_CONFIG_PREFIX="$PWD/.dart_tool/npm-global"
