@@ -37,12 +37,23 @@ workflows:
 
       - name: Set up code signing
         script: |
+          set -euo pipefail
+          : "${APP_STORE_CONNECT_ISSUER_ID:?Missing from app_store_credentials}"
+          : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?Missing from app_store_credentials}"
+          : "${APP_STORE_CONNECT_PRIVATE_KEY:?Missing from app_store_credentials}"
+          : "${CERTIFICATE_PRIVATE_KEY:?Missing distribution certificate private key from app_store_credentials}"
           keychain initialize
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
+            --strict-match-identifier \
             --create
           keychain add-certificates
+          if ! security find-identity -v -p codesigning | grep -Eq '"(Apple Distribution|iPhone Distribution):'; then
+            echo "No valid distribution signing identity was imported into the build keychain." >&2
+            exit 1
+          fi
           xcode-project use-profiles --project ios/Runner.xcodeproj
+          /usr/libexec/PlistBuddy -c "Print :provisioningProfiles:$BUNDLE_ID" "$HOME/export_options.plist"
 
       - name: Flutter build ipa
         script: |
@@ -50,7 +61,7 @@ workflows:
             --no-tree-shake-icons \
             --build-name=$(grep '^version:' pubspec.yaml | sed 's/version: //; s/+.*//') \
             --build-number=$(grep '^version:' pubspec.yaml | sed 's/.*+//') \
-            --export-options-plist=/Users/builder/export_options.plist
+            --export-options-plist="$HOME/export_options.plist"
 
     artifacts:
       - build/ios/ipa/*.ipa
