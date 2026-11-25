@@ -29,6 +29,7 @@
             "33.0.1"
             "34.0.0"
             "35.0.0"
+            "36.0.0"
           ];
           includeEmulator = true;
           emulatorVersion = "36.4.2";
@@ -59,7 +60,7 @@
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             flutter
-            jdk17
+            jdk21
             nodejs_20
             androidSdk
 
@@ -76,7 +77,7 @@
 
           ANDROID_HOME = "${androidSdk}/libexec/android-sdk";
           ANDROID_SDK_ROOT = "${androidSdk}/libexec/android-sdk";
-          JAVA_HOME = pkgs.jdk17.home;
+          JAVA_HOME = pkgs.jdk21.home;
           MAJIKA_VULKAN_LIBRARY_DIR = "${pkgs.vulkan-loader}/lib";
 
           shellHook = ''

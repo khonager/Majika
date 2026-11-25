@@ -47,7 +47,7 @@ dependencies:
   firebase_core: ^4.9.0
   firebase_auth: ^6.5.1
   cloud_firestore: ^6.4.1
-  cloud_functions: ^6.3.1
+  cloud_functions: ^6.3.2
 
 dev_dependencies:
   shared_preferences_platform_interface: ^2.4.2
