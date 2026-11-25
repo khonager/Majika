@@ -2,7 +2,7 @@ workflows:
   ios-testflight:
     name: iOS TestFlight Release
     max_build_duration: 120
-    instance_type: mac_mini_m1
+    instance_type: mac_mini_m2
 
     integrations:
       app_store_connect: app-store-connect
@@ -18,7 +18,7 @@ workflows:
         BUNDLE_ID: "de.khonager.majika"
 
       flutter: stable
-      xcode: latest
+      xcode: "27.1"
       cocoapods: default
 
     scripts:
@@ -75,7 +75,7 @@ workflows:
   ios-development:
     name: iOS Development Build
     max_build_duration: 120
-    instance_type: mac_mini_m1
+    instance_type: mac_mini_m2
 
     triggering:
       events:
@@ -92,7 +92,7 @@ workflows:
         BUNDLE_ID: "de.khonager.majika"
 
       flutter: stable
-      xcode: latest
+      xcode: "27.1"
       cocoapods: default
 
     scripts:
