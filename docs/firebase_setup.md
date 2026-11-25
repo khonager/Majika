@@ -72,10 +72,9 @@ This repo includes `codemagic.yaml` with two iOS workflows:
 1. `ios-testflight` builds and publishes an App Store signed IPA to App Store Connect.
 2. `ios-development` builds an unsigned iOS app on pushes to `develop`.
 
-In Codemagic, create these environment groups:
+The release workflow uses the Codemagic Apple Developer Portal integration named `app-store-connect` for publishing. In **Code signing identities**, store the distribution certificate and a matching App Store profile for `de.khonager.majika`. Codemagic installs these on the builder before the workflow applies them to Runner.
 
-1. `app_store_credentials` with `APP_STORE_CONNECT_PRIVATE_KEY`, `APP_STORE_CONNECT_KEY_IDENTIFIER`, `APP_STORE_CONNECT_ISSUER_ID`, and `CERTIFICATE_PRIVATE_KEY`.
-2. `firebase_credentials` with optional `GOOGLE_SERVICE_INFO_PLIST_BASE64` if you do not commit `ios/Runner/GoogleService-Info.plist`.
+The `firebase_credentials` group supports an optional `GOOGLE_SERVICE_INFO_PLIST_BASE64` variable.
 
 To create the Firebase plist secret:
 
@@ -85,4 +84,4 @@ base64 -i ios/Runner/GoogleService-Info.plist | pbcopy
 
 The iOS bundle id used by Codemagic is `de.khonager.majika`. The iOS deployment target is 16.0 because `flutter_gemma` depends on MediaPipe GenAI pods that require iOS 16.
 
-For the first TestFlight build, make sure Apple Developer/App Store Connect has an app identifier and app record for `de.khonager.majika`. The Codemagic workflow runs `app-store-connect fetch-signing-files --create`, so it can create/fetch the App Store provisioning profile, but the bundle id and App Store app still need to exist under your Apple team.
+For the first TestFlight upload, create an App Store Connect app record for the same bundle ID.

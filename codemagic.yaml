@@ -4,9 +4,14 @@ workflows:
     max_build_duration: 120
     instance_type: mac_mini_m1
 
+    integrations:
+      app_store_connect: app-store-connect
+
     environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: de.khonager.majika
       groups:
-        - app_store_credentials
         - firebase_credentials
 
       vars:
@@ -38,20 +43,6 @@ workflows:
       - name: Set up code signing
         script: |
           set -euo pipefail
-          : "${APP_STORE_CONNECT_ISSUER_ID:?Missing from app_store_credentials}"
-          : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?Missing from app_store_credentials}"
-          : "${APP_STORE_CONNECT_PRIVATE_KEY:?Missing from app_store_credentials}"
-          : "${CERTIFICATE_PRIVATE_KEY:?Missing distribution certificate private key from app_store_credentials}"
-          keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --strict-match-identifier \
-            --create
-          keychain add-certificates
-          if ! security find-identity -v -p codesigning | grep -Eq '"(Apple Distribution|iPhone Distribution):'; then
-            echo "No valid distribution signing identity was imported into the build keychain." >&2
-            exit 1
-          fi
           xcode-project use-profiles --project ios/Runner.xcodeproj
           /usr/libexec/PlistBuddy -c "Print :provisioningProfiles:$BUNDLE_ID" "$HOME/export_options.plist"
 
@@ -77,9 +68,7 @@ workflows:
           failure: true
 
       app_store_connect:
-        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
-        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
-        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+        auth: integration
         submit_to_testflight: false
         submit_to_app_store: false
 
