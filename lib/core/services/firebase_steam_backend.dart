@@ -73,11 +73,20 @@ class FirebaseSteamProtectedApi implements SteamProtectedApi {
       'steamApi',
       options: HttpsCallableOptions(timeout: requestTimeout),
     );
-    final result = await callable.call<Map<String, dynamic>>({
-      'action': action,
-      ...payload,
-    });
-    return _deepStringMap(result.data);
+    try {
+      final result = await callable.call<Map<String, dynamic>>({
+        'action': action,
+        ...payload,
+      });
+      return _deepStringMap(result.data);
+    } on FirebaseFunctionsException catch (error) {
+      if (error.code == 'unavailable') {
+        throw const SteamException(
+          'Steam import is temporarily unavailable. Try again later.',
+        );
+      }
+      throw SteamException(error.message ?? 'Steam import failed. Try again.');
+    }
   }
 
   Future<Map<String, dynamic>> _callRest(
